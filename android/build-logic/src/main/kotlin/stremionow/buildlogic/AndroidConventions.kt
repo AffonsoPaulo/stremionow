@@ -13,7 +13,7 @@ import org.gradle.api.artifacts.VersionCatalogsExtension
 internal val ANDROID_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
 
 /**
- * Settings shared by every Android application module: SDK levels, Java level, ABIs,
+ * Settings shared by every Android application module: SDK levels, Java level, per-ABI APKs,
  * release shrinking and release signing.
  *
  * Release signing reads the keystore from environment variables, so keys never live in the
@@ -30,7 +30,17 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             defaultConfig {
                 minSdk = libs.intVersion("minSdk")
                 targetSdk = libs.intVersion("targetSdk")
-                ndk { abiFilters += ANDROID_ABIS }
+            }
+            // One APK per ABI, so each device downloads only its own native libraries (about a
+            // third of a universal APK), plus a universal APK for sideloading anywhere. Splits
+            // also limit the ABIs, which dependencies such as JNA would otherwise widen.
+            splits {
+                abi {
+                    isEnable = true
+                    reset()
+                    include(*ANDROID_ABIS.toTypedArray())
+                    isUniversalApk = true
+                }
             }
             compileOptions {
                 sourceCompatibility = libs.javaVersion()

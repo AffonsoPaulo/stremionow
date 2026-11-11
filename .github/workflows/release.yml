@@ -32,8 +32,8 @@ jobs:
         with:
           name: unsigned-apks
           path: |
-            android/app-mobile/build/outputs/apk/release/app-mobile-release-unsigned.apk
-            android/app-tv/build/outputs/apk/release/app-tv-release-unsigned.apk
+            android/app-mobile/build/outputs/apk/release/*.apk
+            android/app-tv/build/outputs/apk/release/*.apk
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -74,8 +74,13 @@ jobs:
               --out "$2" "$1"
             "$build_tools/apksigner" verify "$2"
           }
-          sign "$(find unsigned -name 'app-mobile-release-unsigned.apk')" "dist/StremioNow-${GITHUB_REF_NAME}-phone.apk"
-          sign "$(find unsigned -name 'app-tv-release-unsigned.apk')" "dist/StremioNow-${GITHUB_REF_NAME}-tv.apk"
+          # app-mobile-arm64-v8a-release-unsigned.apk -> StremioNow-v1.0.0-phone-arm64-v8a.apk
+          for apk in $(find unsigned -name '*-release-unsigned.apk'); do
+            rest="$(basename "$apk" -release-unsigned.apk)"; rest="${rest#app-}"
+            device="${rest%%-*}"; abi="${rest#*-}"
+            [ "$device" = mobile ] && device=phone
+            sign "$apk" "dist/StremioNow-${GITHUB_REF_NAME}-${device}-${abi}.apk"
+          done
           rm -f "$keystore"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 

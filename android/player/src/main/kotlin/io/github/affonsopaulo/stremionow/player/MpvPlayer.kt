@@ -21,6 +21,11 @@ data class PlayerOptions(
     val subtitleLanguages: List<String> = emptyList(),
     /** Memory budget for buffered data ahead of the playback position, in MiB. */
     val bufferAheadMiB: Int = 64,
+    /**
+     * Detailed mpv logs. Keep it off in release builds: mpv logs the addresses it opens, and
+     * debrid addresses carry the user's API key.
+     */
+    val verboseLogs: Boolean = false,
 )
 
 /**
@@ -61,16 +66,18 @@ class MpvPlayer private constructor(
     }
 
     /**
-     * Adds an external subtitle file or URL and selects it. Subtitles added before the file has
+     * Adds an external subtitle file or URL, selecting it unless [select] is false. Subtitles added before the file has
      * loaded are applied once it has, since mpv attaches them to the current file.
      */
     fun addSubtitle(
         url: String,
         title: String? = null,
         language: String? = null,
+        select: Boolean = true,
     ) {
         if (released) return
-        val command = arrayOf("sub-add", url, "select", title.orEmpty(), language.orEmpty())
+        // "auto" adds the track without switching to it, leaving the choice to the user.
+        val command = arrayOf("sub-add", url, if (select) "select" else "auto", title.orEmpty(), language.orEmpty())
         val applyNow =
             synchronized(pendingSubtitles) {
                 if (!fileLoaded) pendingSubtitles += command
@@ -241,6 +248,7 @@ class MpvPlayer private constructor(
             with(mpv) {
                 // Ignore any user config files and default key bindings: the app owns the UI.
                 setOptionString("config", "no")
+                setOptionString("msg-level", if (options.verboseLogs) "all=v" else "all=warn")
                 setOptionString("input-default-bindings", "no")
                 setOptionString("idle", "yes")
                 setOptionString("keep-open", "yes")

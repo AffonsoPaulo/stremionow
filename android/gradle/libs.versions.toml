@@ -5,10 +5,13 @@ composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 coreKtx = "1.19.1"
 jna = "5.19.1"
+# Android SDK levels, Java bytecode level and NDK used by every module (see docs/adr/0004-android-baseline.md).
 compileSdk = "37"
-targetSdk = "36"
+compileSdkMinor = "2"
+targetSdk = "37"
 minSdk = "26"
-ndk = "27.1.12297006"
+java = "21"
+ndk = "30.0.16248370"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -18,6 +21,7 @@ compose-foundation = { module = "androidx.compose.foundation:foundation" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 android-gradle-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
 
 [plugins]

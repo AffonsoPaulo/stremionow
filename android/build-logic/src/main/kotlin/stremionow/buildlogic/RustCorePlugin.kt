@@ -23,7 +23,7 @@ class RustCorePlugin : Plugin<Project> {
                 workspaceDirectory.set(workspace)
                 sources.from(workspaceSources)
                 crateName.set(CRATE)
-                abis.set(ABIS)
+                abis.set(ANDROID_ABIS)
                 ndkDirectory.set(components.sdkComponents.ndkDirectory)
                 outputDirectory.set(project.layout.buildDirectory.dir("generated/rustCore/jniLibs"))
             }
@@ -49,8 +49,5 @@ class RustCorePlugin : Plugin<Project> {
     private companion object {
         const val CRATE = "stremionow-ffi"
         const val LIBRARY = "stremionow_ffi"
-
-        /** 64 and 32-bit ARM (phones, TV boxes and older Fire TV Sticks) and x86_64 emulators. */
-        val ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
     }
 }

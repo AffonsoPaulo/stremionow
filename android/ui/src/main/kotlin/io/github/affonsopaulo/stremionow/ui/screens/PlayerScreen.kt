@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +77,7 @@ import io.github.affonsopaulo.stremionow.core.SubtitleTrack
 import io.github.affonsopaulo.stremionow.core.TorrentPhase
 import io.github.affonsopaulo.stremionow.core.TorrentProgress
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.player.Chapters
 import io.github.affonsopaulo.stremionow.player.MpvPlayer
 import io.github.affonsopaulo.stremionow.player.PlaybackState
 import io.github.affonsopaulo.stremionow.player.PlayerOptions
@@ -107,6 +109,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/** Without a credits chapter, "Up next" shows this long before the end. */
+private const val UP_NEXT_FALLBACK_SECONDS = 30.0
+
+/** Shorter videos show "Up next" only at the end, not for most of their length. */
+private const val UP_NEXT_MIN_DURATION_SECONDS = 120.0
+
+/** Seconds the "Up next" card counts down before playing the next episode. */
+private const val UP_NEXT_COUNTDOWN = 10
 
 /** How often the torrent state is read for the loading screen. */
 private const val TORRENT_STATUS_INTERVAL_MS = 1_000L
@@ -342,6 +353,16 @@ fun PlayerScreen(
     }
 
     ImmersivePlayback()
+    PlayerMediaSession(
+        player = viewModel.player,
+        title = selection.details.item.name,
+        subtitle = selection.episode?.title,
+        positionSeconds = state.positionSeconds,
+        durationSeconds = state.durationSeconds,
+        paused = state.isPaused,
+        hasNext = selection.nextEpisode != null,
+        onNext = { selection.nextEpisode?.let(onOpenEpisode) },
+    )
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         viewModel.player.pause()
         viewModel.saveProgress()
@@ -454,13 +475,42 @@ fun PlayerScreen(
 
         if (state.error != null || prepareFailed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
-        } else if (state.isEnded && next != null) {
-            SnButton(
-                text = stringResource(R.string.player_next),
-                icon = SnIcons.Next,
-                onClick = { onOpenEpisode(next) },
-                modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(SnSpacing.space8),
-            )
+        } else if (state.isLoaded) {
+            val corner = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(SnSpacing.space8)
+            val intro =
+                remember(
+                    state.chapters,
+                    state.durationSeconds,
+                ) { Chapters.intro(state.chapters, state.durationSeconds) }
+            val upNextAt =
+                remember(state.chapters, state.durationSeconds) {
+                    val duration = state.durationSeconds ?: return@remember null
+                    // At the end credits, or the last half minute when the file does not mark them.
+                    Chapters.creditsStart(state.chapters, duration)
+                        ?: (duration - UP_NEXT_FALLBACK_SECONDS).takeIf { duration >= UP_NEXT_MIN_DURATION_SECONDS }
+                        ?: duration
+                }
+            when {
+                intro != null && state.positionSeconds in intro -> {
+                    SnButton(
+                        text = stringResource(R.string.player_skip_intro),
+                        icon = SnIcons.Skip,
+                        style = SnButtonStyle.Secondary,
+                        onClick = { viewModel.player.seekTo(intro.endSeconds) },
+                        modifier = corner,
+                    )
+                }
+
+                next != null && upNextAt != null && (state.positionSeconds >= upNextAt || state.isEnded) -> {
+                    UpNext(
+                        episode = next,
+                        // mpv pauses itself at the end of a file; only a pause by the viewer stops the count.
+                        paused = state.isPaused && !state.isEnded,
+                        onPlay = { onOpenEpisode(next) },
+                        modifier = corner,
+                    )
+                }
+            }
         }
 
         when (panel) {
@@ -821,5 +871,49 @@ private fun torrentStatusText(progress: TorrentProgress): String {
             val speed = Formatter.formatShortFileSize(context, progress.downloadSpeed.toLong())
             pluralStringResource(R.plurals.torrent_peers, peers, peers, speed)
         }
+    }
+}
+
+/**
+ * The next episode's card, counting down before it plays. Pausing stops the countdown, and the
+ * card is a regular focusable button, so a remote can start it at once.
+ */
+@Composable
+private fun UpNext(
+    episode: Episode,
+    paused: Boolean,
+    onPlay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var remaining by remember(episode.id) { mutableIntStateOf(UP_NEXT_COUNTDOWN) }
+    LaunchedEffect(episode.id, paused) {
+        while (!paused && remaining > 0) {
+            delay(1_000)
+            remaining--
+        }
+        if (remaining == 0) onPlay()
+    }
+    val number = episode.episode?.toInt()
+    val season = episode.season?.toInt()
+    val label = if (season != null && number != null) stringResource(R.string.episode_short, season, number) else null
+    Column(
+        modifier =
+            modifier
+                .widthIn(max = 360.dp)
+                .snClickable(RoundedCornerShape(SnRadius.radiusLg), onClick = onPlay)
+                .background(SnColors.surfaceRaised, RoundedCornerShape(SnRadius.radiusLg))
+                .padding(SnSpacing.space4),
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+    ) {
+        BasicText(
+            stringResource(R.string.player_up_next, remaining),
+            style = SnTypography.label.copy(color = SnColors.accentText),
+        )
+        BasicText(
+            listOfNotNull(label, episode.title.ifBlank { null }).joinToString(" · "),
+            style = SnTypography.bodyLg.copy(color = SnColors.fg),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

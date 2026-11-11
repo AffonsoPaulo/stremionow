@@ -260,6 +260,7 @@ fun StremioNowApp(isTv: Boolean) {
                         },
                         onOpenEpisode = { episode ->
                             val current = PlaybackSession.selection ?: return@PlayerScreen
+                            PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
                             PlaybackSession.select(current.copy(episode = episode))
                             navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
                         },

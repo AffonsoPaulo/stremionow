@@ -71,8 +71,10 @@ data class SourcesState(
     val addonsAsked: Int = 0,
     val addonsAnswered: Int = 0,
     val addonsWithSources: Int = 0,
+    /** Every addon has answered (or there were none to ask). */
+    val finished: Boolean = false,
 ) {
-    val searching: Boolean get() = addonsAnswered < addonsAsked
+    val searching: Boolean get() = !finished
 }
 
 class SourcesViewModel(
@@ -101,7 +103,7 @@ class SourcesViewModel(
                         )
                     }
                 }.getOrDefault(emptyList())
-            mutableState.update { it.copy(addonsAsked = addons.size) }
+            mutableState.update { it.copy(addonsAsked = addons.size, finished = addons.isEmpty()) }
             // Ask every addon at once and show each answer as it arrives, ranked with the rest.
             addons.forEach { addon ->
                 launch {
@@ -120,6 +122,7 @@ class SourcesViewModel(
                             it.copy(
                                 sources = ranked,
                                 addonsAnswered = it.addonsAnswered + 1,
+                                finished = it.addonsAnswered + 1 >= it.addonsAsked,
                                 addonsWithSources = it.addonsWithSources + if (found.isEmpty()) 0 else 1,
                             )
                         }
@@ -175,6 +178,18 @@ fun SourcesScreen(
             else -> {
                 play(source)
             }
+        }
+    }
+    // Next episode: play the source of the same group as soon as it shows up; if none does,
+    // the list stays for the user to choose.
+    LaunchedEffect(state.sources, state.finished) {
+        val group = PlaybackSession.continueWith ?: return@LaunchedEffect
+        val match = state.sources.firstOrNull { it.bingeGroup == group && it.playsInApp }
+        if (match != null) {
+            PlaybackSession.continueWith = null
+            play(match)
+        } else if (state.finished) {
+            PlaybackSession.continueWith = null
         }
     }
     confirmMobileData?.let { source ->

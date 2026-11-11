@@ -42,6 +42,12 @@ object PlaybackSession {
     /** Other sources of the same pick, to fall back to or keep the binge group across episodes. */
     @Volatile var alternatives: List<StreamSource> = emptyList()
 
+    /**
+     * When moving on to the next episode, the binge group of the source just watched: the
+     * picker plays the first source of the same group by itself, as Stremio does.
+     */
+    @Volatile var continueWith: String? = null
+
     fun select(selection: Selection) {
         this.selection = selection
         source = null

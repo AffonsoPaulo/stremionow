@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+  <!-- App name. Not translated. -->
+  <string name="app_name" translatable="false">StremioNow</string>
+
+  <!-- Main navigation tabs in the header. -->
+  <string name="nav_home">Home</string>
+  <string name="nav_series">Series</string>
+  <string name="nav_movies">Movies</string>
+  <string name="nav_my_list">My list</string>
+  <string name="nav_addons">Addons</string>
+  <!-- Accessibility label for the search button in the header. -->
+  <string name="nav_search">Search</string>
+  <!-- Accessibility label for the avatar button that opens the profile menu. -->
+  <string name="nav_profile">Profile, account and settings</string>
+
+  <!-- Primary actions on a title. -->
+  <string name="action_watch">Watch</string>
+  <string name="action_more_info">More info</string>
+  <!-- %1$s is the season and episode label, for example "S1 E5". -->
+  <string name="action_resume_episode">Resume %1$s</string>
+
+  <!-- Short season and episode label. %1$d is the season number, %2$d the episode number. -->
+  <string name="episode_short">S%1$d E%2$d</string>
+
+  <!-- Remaining time on a card. %1$s is a duration already formatted for the locale, for example "18 min". -->
+  <string name="time_left">%1$s left</string>
+
+  <!-- Count of sources found for an episode. -->
+  <plurals name="sources_found">
+    <item quantity="one">%1$d source from %2$d addons</item>
+    <item quantity="other">%1$d sources from %2$d addons</item>
+  </plurals>
+
+  <!-- Temporary text on the phase 0 placeholder screen. %1$s is the core library version. -->
+  <string name="placeholder_core_version">Core %1$s</string>
+</resources>

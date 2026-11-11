@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,6 +56,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.LocalNetwork
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
@@ -72,7 +76,11 @@ data class AddonsState(
     val installUrl: String = "",
     val installing: Boolean = false,
     val installFailed: Boolean = false,
-)
+    /** The addon is on the local network and the user declined access to it. */
+    val localNetworkDenied: Boolean = false,
+) {
+    val hasError: Boolean get() = installFailed || localNetworkDenied
+}
 
 class AddonsViewModel(
     private val core: StremioCore,
@@ -84,14 +92,19 @@ class AddonsViewModel(
         refresh()
     }
 
-    fun setInstallUrl(url: String) = mutableState.update { it.copy(installUrl = url.take(2048), installFailed = false) }
+    fun setInstallUrl(url: String) =
+        mutableState.update { it.copy(installUrl = url.take(2048), installFailed = false, localNetworkDenied = false) }
+
+    fun localNetworkDenied() = mutableState.update { it.copy(localNetworkDenied = true) }
 
     fun install() {
         val url = state.value.installUrl.trim()
         if (url.isEmpty() || state.value.installing) return
-        mutableState.update { it.copy(installing = true, installFailed = false) }
+        mutableState.update { it.copy(installing = true, installFailed = false, localNetworkDenied = false) }
         viewModelScope.launch {
-            val result = runCatching { core.installAddon(url) }
+            val result =
+                runCatching { core.installAddon(url) }
+                    .onFailure { android.util.Log.w("StremioNow", "Could not install an addon", it) }
             mutableState.update {
                 it.copy(
                     installing = false,
@@ -170,6 +183,21 @@ private fun InstallField(
     state: AddonsState,
     viewModel: AddonsViewModel,
 ) {
+    val context = LocalContext.current
+    // An addon on the user's network needs local network access first (Android 17+); ask
+    // for it at the moment it is needed, then install either way so the outcome is shown.
+    val requestLocalNetwork =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) viewModel.install() else viewModel.localNetworkDenied()
+        }
+    val install = {
+        val permission = LocalNetwork.permission
+        if (permission != null && LocalNetwork.needsPermission(context, state.installUrl)) {
+            requestLocalNetwork.launch(permission)
+        } else {
+            viewModel.install()
+        }
+    }
     val label = stringResource(R.string.addons_install_label)
     val shape = RoundedCornerShape(SnRadius.radiusMd)
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
@@ -183,7 +211,7 @@ private fun InstallField(
                     .weight(1f)
                     .height(SnSize.controlLg)
                     .background(SnColors.surfaceInput, shape)
-                    .border(1.dp, if (state.installFailed) SnColors.danger else SnColors.border, shape)
+                    .border(1.dp, if (state.hasError) SnColors.danger else SnColors.border, shape)
                     .padding(horizontal = SnSpacing.space4),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -201,17 +229,27 @@ private fun InstallField(
                     singleLine = true,
                     cursorBrush = SolidColor(SnColors.accent),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (state.installUrl.isNotBlank()) install() }),
                 )
             }
             SnButton(
-                text = stringResource(R.string.addons_install_action),
-                onClick = viewModel::install,
+                text =
+                    stringResource(
+                        if (state.installing) R.string.addons_installing else R.string.addons_install_action,
+                    ),
+                onClick = install,
                 enabled = !state.installing && state.installUrl.isNotBlank(),
             )
         }
-        if (state.installFailed) {
+        if (state.hasError) {
             BasicText(
-                stringResource(R.string.addons_install_error),
+                stringResource(
+                    if (state.localNetworkDenied) {
+                        R.string.addons_local_network_needed
+                    } else {
+                        R.string.addons_install_error
+                    },
+                ),
                 style = SnTypography.caption.copy(color = SnColors.danger),
             )
         }

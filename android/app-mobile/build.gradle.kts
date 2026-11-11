@@ -21,6 +21,7 @@ android {
 dependencies {
     implementation(project(":ui"))
     implementation(project(":core-bridge"))
+    implementation(project(":player"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
 }

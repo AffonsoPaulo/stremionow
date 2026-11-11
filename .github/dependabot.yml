@@ -32,3 +32,13 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: build(android)
+
+  - package-ecosystem: gradle
+    directory: /desktop
+    schedule:
+      interval: weekly
+    groups:
+      desktop:
+        patterns: ["*"]
+    commit-message:
+      prefix: build(desktop)

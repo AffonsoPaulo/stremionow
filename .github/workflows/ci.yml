@@ -25,6 +25,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
       android: ${{ steps.filter.outputs.android }}
+      desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,6 +46,14 @@ jobs:
               - 'l10n/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/**'
+            # The desktop app builds on the shared modules of android/ (docs/adr/0006-shared-ui.md).
+            desktop:
+              - 'desktop/**'
+              - 'android/**'
+              - 'core/**'
+              - 'design/**'
+              - 'l10n/**'
+              - '.github/workflows/ci.yml'
 
   core-lint:
     name: Core lint
@@ -127,6 +136,56 @@ jobs:
           path: android/app-*/build/outputs/apk/debug/*.apk
           retention-days: 7
           compression-level: 0
+
+  desktop:
+    name: Desktop
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The desktop builds the core for the host only, not the Android targets of rust-toolchain.toml.
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: core
+          shared-key: desktop
+      # The desktop build includes android/, whose projects need the SDK platform to configure;
+      # the NDK and cargo-ndk are not needed.
+      - name: Install Android SDK platform
+        run: |
+          catalog=android/gradle/libs.versions.toml
+          read_version() { sed -n "s/^$1 = \"\(.*\)\"/\1/p" "$catalog"; }
+          platform="platforms;android-$(read_version compileSdk).$(read_version compileSdkMinor)"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+          # `yes` is killed by SIGPIPE once sdkmanager exits; keep that from failing the step under pipefail.
+          (yes || true) | "$sdkmanager" --licenses > /dev/null
+          if ! (yes || true) | "$sdkmanager" --install "$platform" > "$RUNNER_TEMP/sdkmanager.log" 2>&1; then
+            cat "$RUNNER_TEMP/sdkmanager.log"
+            exit 1
+          fi
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Check Kotlin formatting
+        working-directory: desktop
+        run: ./gradlew spotlessCheck --console=plain
+      - name: Compile the desktop app and run the shared modules' desktop tests
+        working-directory: desktop
+        run: ./gradlew :app:compileKotlin :android:ui:desktopTest :android:player:desktopTest --console=plain
 
   license-headers:
     name: License headers

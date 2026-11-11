@@ -2,7 +2,6 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import stremionow.desktop.buildlogic.DesktopNativesPlugin
-import stremionow.desktop.buildlogic.UniffiBindgenTask
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -23,15 +22,15 @@ kotlin {
     }
 }
 
+/** Shown in the app's profile page; the same as the Android apps' version name. */
+val appVersion = "0.0.1"
+
 dependencies {
+    // The shared interface, with the player and the Rust core's bindings (android/ui and friends).
+    implementation(libs.stremionow.ui)
     implementation(compose.desktop.currentOs)
     implementation(libs.jna)
-    implementation(libs.jna.platform)
     implementation(libs.kotlinx.coroutines.swing)
-}
-
-sourceSets.main {
-    kotlin.srcDir(tasks.named<UniffiBindgenTask>("generateRustBindings").flatMap { it.outputDirectory })
 }
 
 compose.desktop {
@@ -42,14 +41,14 @@ compose.desktop {
         // at a full JDK 25 (preferably an OpenJDK build such as Temurin) when packaging.
         providers.gradleProperty("stremionow.packaging.javaHome").orNull?.let { javaHome = it }
         // JNA calls native code; JDK 25 warns (and later releases refuse) without this.
-        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED", "-Dstremionow.version=$appVersion")
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb)
             packageName = "StremioNow"
             // Installers need MAJOR > 0; the core's version is shown in the app.
             packageVersion = "1.0.0"
-            description = "StremioNow desktop player proof of concept"
+            description = "StremioNow, a Stremio client"
             vendor = "StremioNow contributors"
             licenseFile.set(rootProject.layout.projectDirectory.file("../LICENSE"))
             // Compose copies `common/` and the folder of the current OS into the app's resources

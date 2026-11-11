@@ -8,8 +8,8 @@ import org.gradle.api.tasks.Sync
 /**
  * Prepares the native parts of the desktop app:
  *
- * - `buildRustCore`: the Rust core as a release shared library for this machine;
- * - `generateRustBindings`: its UniFFI Kotlin bindings, read from a debug build;
+ * - `buildRustCore`: the Rust core as a release shared library for this machine (its Kotlin
+ *   bindings come with the shared `core-bridge` module of the Android build);
  * - `downloadLibmpv` and `extractLibmpv`: the pinned libmpv build for Windows x86_64;
  * - `downloadCaBundle`: the pinned Mozilla CA store for mpv's TLS verification;
  * - `prepareNativeResources`: all of the above laid out as a Compose resources root
@@ -37,16 +37,6 @@ class DesktopNativesPlugin : Plugin<Project> {
                 libraryName.set(LIBRARY)
                 outputDirectory.set(buildDirectory.dir("generated/rustCore/native"))
             }
-
-        tasks.register("generateRustBindings", UniffiBindgenTask::class.java) {
-            group = "build"
-            description = "Generates the Kotlin bindings of the Rust core."
-            workspaceDirectory.set(workspace)
-            sources.from(workspaceSources)
-            crateName.set(CRATE)
-            libraryName.set(LIBRARY)
-            outputDirectory.set(buildDirectory.dir("generated/rustCore/kotlin"))
-        }
 
         val downloadLibmpv =
             tasks.register("downloadLibmpv", VerifiedDownloadTask::class.java) {

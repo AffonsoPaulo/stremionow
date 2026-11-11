@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -80,6 +82,7 @@ import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
+import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -119,6 +122,7 @@ actual fun PlayerScreen(
     val preparing by viewModel.preparing.collectAsStateWithLifecycle()
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
     val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
+    val skips by viewModel.skips.collectAsStateWithLifecycle()
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf<Panel?>(null) }
@@ -153,11 +157,18 @@ actual fun PlayerScreen(
     val next = selection.nextEpisode
 
     val rootFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { rootFocus.requestFocus() } }
+    // Whenever nothing in the player has the focus (at first, or after the focused control or
+    // prompt went away), the player itself takes it, so the remote keeps working.
+    var hasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(hasFocus) { if (!hasFocus) runCatching { rootFocus.requestFocus() } }
+    var promptFocused by remember { mutableStateOf(false) }
+    val promptLift by animateDpAsState(if (controlsVisible) PromptControlsClearance else 0.dp, label = "prompt-lift")
+    val isTv = LocalIsTv.current
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onFocusChanged { hasFocus = it.hasFocus }
             .focusRequester(rootFocus)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -190,6 +201,11 @@ actual fun PlayerScreen(
                     }
 
                     else -> {
+                        if (!controlsVisible && promptFocused && event.key in activationKeys) {
+                            // OK on a skip or up-next prompt acts at once: the prompt shows what
+                            // it does, and the controls stay out of the way.
+                            return@onPreviewKeyEvent false
+                        }
                         // The first press only brings the controls back, so it never acts blindly.
                         val wasHidden = !controlsVisible
                         poke()
@@ -254,10 +270,20 @@ actual fun PlayerScreen(
         } else if (state.isLoaded) {
             PlaybackPrompts(
                 state = state,
+                skips = skips,
                 next = next,
                 onSeekTo = viewModel.player::seekTo,
                 onOpenEpisode = onOpenEpisode,
-                modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(SnSpacing.space8),
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .safeDrawingPadding()
+                        .padding(SnSpacing.space8)
+                        .padding(bottom = promptLift)
+                        .onFocusChanged { promptFocused = it.hasFocus },
+                // On TV, a prompt that appears while the controls are hidden takes the focus, so
+                // OK skips. With the controls up, the viewer is using them; it stays reachable.
+                takeFocus = isTv && !controlsVisible && panel == null,
             )
         }
 
@@ -282,6 +308,9 @@ actual fun PlayerScreen(
         }
     }
 }
+
+/** Keys that activate the focused element: a remote's OK and the keyboard's Enter. */
+private val activationKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
 
 /** Hides the system bars, keeps the screen on and turns phones sideways while playing. */
 @Composable

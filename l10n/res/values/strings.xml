@@ -195,6 +195,10 @@
   <string name="settings_cache_body">Space torrents may keep on this device, so titles you watch again start faster.</string>
   <!-- A storage size. %1$d is a whole number of gigabytes. -->
   <string name="settings_gigabytes">%1$d GB</string>
+  <!-- Settings switch in Playback. AniSkip is the name of an online service; keep it as is. -->
+  <string name="settings_aniskip">Skip segments from AniSkip</string>
+  <!-- Description under the AniSkip switch. It must say what is sent, and to whom. -->
+  <string name="settings_aniskip_body">Offers to skip anime openings, recaps and endings, using times shared by the AniSkip community. To find them, the anime and episode you play are sent to AniSkip (api.aniskip.com) and to an ID mapping service (arm.haglund.dev).</string>
 
   <!-- Torrent playback. -->
   <string name="player_preparing">Getting the source ready</string>
@@ -243,6 +247,10 @@
   <string name="profile_sign_out_body">Your addons, list and progress stay on this device, but stop syncing.</string>
 
   <string name="player_skip_intro">Skip intro</string>
+  <!-- Player button shown during a summary of earlier episodes; it jumps to its end. -->
+  <string name="player_skip_recap">Skip recap</string>
+  <!-- Player button shown during end credits that are followed by more of the episode; it jumps to what follows. -->
+  <string name="player_skip_credits">Skip credits</string>
   <!-- Countdown on the next-episode card. %1$d is the seconds left. -->
   <string name="player_up_next">Up next in %1$d s</string>
 

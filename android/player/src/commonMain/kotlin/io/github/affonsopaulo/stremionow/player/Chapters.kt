@@ -18,41 +18,54 @@ data class Segment(
 }
 
 /**
- * Finds intros and credits from chapter names. Releases of series often mark them ("Intro",
- * "Opening", "OP", "Credits", "Ending", "ED", in several languages); files without such
- * chapters simply offer no skip.
+ * Finds intros, recaps and credits from chapter names. Releases of series often mark them
+ * ("Intro", "Opening", "OP", "Recap", "Credits", "Ending", "ED", in several languages); files
+ * without such chapters simply offer no skip.
  */
 object Chapters {
-    /** Intros longer than this are probably a mislabeled chapter, not an opening. */
+    /** Intros and recaps longer than this are probably a mislabeled chapter. */
     private const val MAX_INTRO_SECONDS = 4 * 60.0
 
     private val introNames =
         setOf("intro", "introduction", "opening", "op", "opening credits", "abertura", "apertura", "générique")
+    private val recapNames =
+        setOf("recap", "previously", "previously on", "résumé", "resumo", "recapitulação", "riassunto")
     private val creditsNames =
         setOf("credits", "ending", "ed", "outro", "end credits", "closing credits", "créditos", "encerramento")
+
+    /** Where the intro, recap and end credits are, as far as the chapter names tell. */
+    fun markers(
+        chapters: List<Chapter>,
+        durationSeconds: Double?,
+    ): Markers =
+        Markers(
+            intro = intro(chapters, durationSeconds),
+            recap = recap(chapters, durationSeconds),
+            credits = credits(chapters, durationSeconds),
+        )
 
     /** The intro, if a chapter is named like one and is of a plausible length. */
     fun intro(
         chapters: List<Chapter>,
         durationSeconds: Double?,
-    ): Segment? =
-        segments(chapters, durationSeconds)
-            .firstOrNull { (chapter, segment) ->
-                chapter.title.normalized() in introNames &&
-                    segment.endSeconds - segment.startSeconds <= MAX_INTRO_SECONDS
-            }?.second
+    ): Segment? = shortNamed(chapters, durationSeconds, introNames)
 
-    /** Where the end credits start, if a chapter in the second half is named like them. */
-    fun creditsStart(
+    /** The recap of earlier episodes, if a chapter is named like one and is of a plausible length. */
+    fun recap(
         chapters: List<Chapter>,
         durationSeconds: Double?,
-    ): Double? {
+    ): Segment? = shortNamed(chapters, durationSeconds, recapNames)
+
+    /** The end credits, if a chapter in the second half is named like them. */
+    fun credits(
+        chapters: List<Chapter>,
+        durationSeconds: Double?,
+    ): Segment? {
         val duration = durationSeconds ?: return null
         return segments(chapters, duration)
             .lastOrNull { (chapter, segment) ->
                 chapter.title.normalized() in creditsNames && segment.startSeconds > duration / 2
             }?.second
-            ?.startSeconds
     }
 
     /** Parses mpv's `chapter-list` property (JSON with `title` and `time`). */
@@ -66,6 +79,16 @@ object Chapters {
                 Chapter(item.optString("title", ""), time)
             }
         }.getOrDefault(emptyList())
+
+    private fun shortNamed(
+        chapters: List<Chapter>,
+        durationSeconds: Double?,
+        names: Set<String>,
+    ): Segment? =
+        segments(chapters, durationSeconds)
+            .firstOrNull { (chapter, segment) ->
+                chapter.title.normalized() in names && segment.endSeconds - segment.startSeconds <= MAX_INTRO_SECONDS
+            }?.second
 
     /** Each chapter with the span it covers, up to the next chapter or the end. */
     private fun segments(

@@ -28,8 +28,9 @@ pub(crate) type Body = UnsyncBoxBody<Bytes, io::Error>;
 /// local client can make the server hold.
 const MAX_CONNECTIONS: usize = 64;
 
-/// Time a client gets to send request headers before its connection is closed.
-const HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Time a client gets to send request headers before its connection is closed. The player
+/// sends them at once; a short limit keeps another app from holding connections idle.
+const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Accepts connections on `listener` until `shutdown` is cancelled, answering each request
 /// with `handle`.
@@ -89,7 +90,12 @@ pub(crate) fn empty(status: StatusCode) -> Response<Body> {
 
 /// `404 Not Found`, the answer to anything not addressed with the right secret and token.
 pub(crate) fn not_found() -> Response<Body> {
-    empty(StatusCode::NOT_FOUND)
+    // Close the connection: the only clients that get here are guessing.
+    let mut response = empty(StatusCode::NOT_FOUND);
+    response
+        .headers_mut()
+        .insert(header::CONNECTION, HeaderValue::from_static("close"));
+    response
 }
 
 /// `405 Method Not Allowed` for anything but GET and HEAD.

@@ -84,6 +84,8 @@ impl AddonClient {
             .connect_timeout(timeout)
             .timeout(timeout)
             .redirect(reqwest::redirect::Policy::limited(5))
+            // Configured addons keep keys in their URLs; don't pass them on in Referer.
+            .referer(false)
             .https_only(false)
             .build()
             .map_err(|e| AddonError::Network(e.to_string()))?;

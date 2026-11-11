@@ -96,7 +96,9 @@ fn parse_tracker(source: &str) -> Option<String> {
         "https" => HTTPS_TRACKERS,
         _ => false,
     };
-    (supported && url.has_host()).then(|| url.into())
+    // Public torrents never need trackers on this device or the local network, and an addon
+    // must not be able to make the app announce into it.
+    (supported && url.has_host() && !crate::proxy::is_private_host(&url)).then(|| url.into())
 }
 
 /// A magnet link for `info_hash` announcing to `trackers`, which are URL-encoded.

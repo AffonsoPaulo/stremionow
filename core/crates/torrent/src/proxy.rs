@@ -145,14 +145,92 @@ fn http_client() -> Result<reqwest::Client, TorrentError> {
         .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
+        .redirect(redirect_policy())
+        // Debrid resolve links carry the user's key in their path and always redirect; a
+        // Referer would hand that key to the download host.
+        .referer(false)
         .build()
         .map_err(|error| TorrentError::Io(io::Error::other(error)))
+}
+
+/// Follows up to [`MAX_REDIRECTS`] redirects, refusing to downgrade from https to http or to
+/// move from a public host to a private one, so a source cannot bounce the relay into the
+/// user's network. Sources the user points at a private address directly still work.
+fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() > MAX_REDIRECTS {
+            return attempt.error("too many redirects");
+        }
+        let Some(previous) = attempt.previous().last() else {
+            return attempt.follow();
+        };
+        let next = attempt.url();
+        if previous.scheme() == "https" && next.scheme() != "https" {
+            return attempt.error("refusing a redirect from https to http");
+        }
+        if !is_private_host(previous) && is_private_host(next) {
+            return attempt.error("refusing a redirect into a private network");
+        }
+        attempt.follow()
+    })
+}
+
+/// Whether `url` points at this device or a private, link-local or unique-local network.
+pub(crate) fn is_private_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => {
+            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || (ip.segments()[0] & 0xfe00) == 0xfc00
+                || (ip.segments()[0] & 0xffc0) == 0xfe80
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| v4.is_loopback() || v4.is_private())
+        }
+        Some(url::Host::Domain(name)) => {
+            let name = name.to_ascii_lowercase();
+            name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local")
+        }
+        None => true,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_private_hosts() {
+        for private in [
+            "http://127.0.0.1/x",
+            "http://10.0.0.2/x",
+            "http://192.168.1.10/x",
+            "http://169.254.1.1/x",
+            "http://[::1]/x",
+            "http://[fd00::1]/x",
+            "http://[fe80::1]/x",
+            "http://localhost/x",
+            "http://nas.local/x",
+        ] {
+            assert!(
+                is_private_host(&url::Url::parse(private).expect("url")),
+                "{private}"
+            );
+        }
+        for public in [
+            "https://cdn.example.org/x",
+            "http://8.8.8.8/x",
+            "http://[2606:4700::1]/x",
+        ] {
+            assert!(
+                !is_private_host(&url::Url::parse(public).expect("url")),
+                "{public}"
+            );
+        }
+    }
 
     #[test]
     fn only_http_sources_are_accepted() {
@@ -186,5 +264,21 @@ mod tests {
         let sources = proxy.sources();
         assert_eq!(sources.by_token.len(), MAX_SOURCES);
         assert!(!sources.by_token.contains_key(&first));
+    }
+}
+
+#[cfg(test)]
+mod live_check {
+    #[tokio::test]
+    #[ignore = "needs the network"]
+    async fn follows_public_https_redirects() {
+        let client = super::http_client().expect("client");
+        let response = client
+            .get("https://archive.org/download/night-of-the-living-dead-mp-4-burned/NightOfTheLivingDead%20%28mp4%29-BURNED.ia.mp4")
+            .header("Range", "bytes=0-1")
+            .send()
+            .await;
+        println!("{response:?}");
+        assert!(response.is_ok());
     }
 }

@@ -205,7 +205,6 @@ pub struct Subtitle {
     pub lang: String,
 }
 
-/// Accepts a string or a number, since addons send ratings and years as either.
 /// Reads a non-negative whole number sent as a number or a numeric string; anything else
 /// (null, negative, fractional, text) becomes `None` instead of failing the whole response.
 fn lenient_number<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
@@ -219,6 +218,7 @@ where
     })
 }
 
+/// Accepts a string or a number, since addons send ratings and years as either.
 fn lenient_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,

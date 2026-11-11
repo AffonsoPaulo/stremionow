@@ -2991,6 +2991,7 @@ dependencies = [
  "stremionow-library",
  "stremionow-protocol",
  "stremionow-ranking",
+ "stremionow-sync",
  "stremionow-torrent",
  "tempfile",
  "thiserror 2.0.21",
@@ -3030,6 +3031,18 @@ version = "0.0.1"
 [[package]]
 name = "stremionow-sync"
 version = "0.0.1"
+dependencies = [
+ "log",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "stremionow-protocol",
+ "thiserror 2.0.21",
+ "tokio",
+ "webpki-roots",
+ "wiremock",
+]
 
 [[package]]
 name = "stremionow-torrent"

@@ -30,6 +30,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
+import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -86,12 +87,7 @@ fun LibraryScreen(
                         onAction = onExplore,
                     )
                 } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(150.dp),
-                        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
-                        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                        verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
-                    ) {
+                    SnPosterGrid {
                         items(items.value, key = { it.id }) { item ->
                             SnPosterCard(
                                 item.name,

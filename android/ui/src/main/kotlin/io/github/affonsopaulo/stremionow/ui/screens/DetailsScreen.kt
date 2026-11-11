@@ -57,6 +57,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
+import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
@@ -317,14 +318,7 @@ private fun RelatedTab(
     related: List<MetaItem>,
     onOpenTitle: (MetaItem) -> Unit,
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-    ) {
-        items(related, key = { it.id }) { item ->
-            SnPosterCard(item.name, item.poster, item.cardSubtitle(), onClick = { onOpenTitle(item) })
-        }
-    }
+    SnPosterRow(related, onOpenTitle, subtitle = { it.cardSubtitle() })
 }
 
 /**

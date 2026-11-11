@@ -50,6 +50,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
+import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -271,7 +272,13 @@ private fun AddonRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            SnSwitch(addon.enabled, stringResource(R.string.addons_toggle, addon.name), onToggle)
+            SnSwitch(
+                checked = addon.enabled,
+                label = stringResource(R.string.addons_toggle, addon.name),
+                onText = stringResource(R.string.state_on),
+                offText = stringResource(R.string.state_off),
+                onToggle = onToggle,
+            )
         }
         if (addon.description.isNotBlank()) {
             BasicText(
@@ -322,37 +329,6 @@ private fun AddonRow(
                 style = SnButtonStyle.Ghost,
                 icon = SnIcons.Trash,
             )
-        }
-    }
-}
-
-/** On/off switch with its state announced. */
-@Composable
-private fun SnSwitch(
-    checked: Boolean,
-    label: String,
-    onToggle: () -> Unit,
-) {
-    val pill = RoundedCornerShape(SnRadius.radiusFull)
-    val state = stringResource(if (checked) R.string.state_on else R.string.state_off)
-    // The visible track is 52 × 30, inside a 48 dp tall touch target.
-    Box(
-        Modifier
-            .height(SnSize.controlMd)
-            .semantics {
-                contentDescription = label
-                stateDescription = state
-            }.snClickable(pill, role = Role.Switch, onClick = onToggle),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(width = 52.dp, height = 30.dp)
-                .background(if (checked) SnColors.accent else SnColors.borderStrong, pill)
-                .padding(3.dp),
-            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-        ) {
-            Box(Modifier.size(24.dp).background(SnColors.inverse, pill))
         }
     }
 }

@@ -2,9 +2,9 @@
 
 A fast, native client for the Stremio addon ecosystem, built for Android phones, Android TV, Fire TV and the desktop (Windows, macOS, Linux).
 
-> Status: early development (phase 0). Nothing is installable yet.
+> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account; the desktop app is in progress.
 
-StremioNow does not host or provide any content. It plays what the addons you install point to. Only catalog and subtitle addons are installed by default.
+StremioNow does not host or provide any content. It plays what the addons you install point to. By default it installs the same addons as the official Stremio app: catalogs, metadata, subtitles and links to streaming services, but no source of copyrighted content.
 
 ## Why
 
@@ -19,9 +19,9 @@ StremioNow does not host or provide any content. It plays what the addons you in
 | Layer | Technology |
 | --- | --- |
 | Android (phone, Android TV, Fire TV) | Kotlin, Jetpack Compose, Compose for TV |
-| Desktop (Windows, macOS, Linux) | Compose Multiplatform or Qt/QML (decided in phase 0) |
+| Desktop (Windows, macOS, Linux) | Compose Multiplatform over a native mpv window ([ADR 0005](docs/adr/0005-desktop-ui.md)) |
 | Player | libmpv |
-| Core | Rust: addons, Stremio account sync, library, source ranking, torrent (librqbit), skip-intro markers |
+| Core | Rust: addons, Stremio account sync, library and progress, source ranking, torrent streaming (librqbit) behind a local HTTP server |
 | Bridge | UniFFI (Kotlin) |
 
 See [`docs/adr`](docs/adr) for the reasoning behind each decision.
@@ -31,7 +31,7 @@ See [`docs/adr`](docs/adr) for the reasoning behind each decision.
 ```
 core/          Rust workspace (shared logic)
 android/       Android apps (phone and TV), shared UI and the core bridge
-desktop/       Desktop app                                  (phase 5)
+desktop/       Desktop app (in progress)
 design/        Design tokens, the single source of colors, type and spacing
 l10n/          UI strings: English source and translations
 docs/adr/      Architecture decision records
@@ -60,7 +60,7 @@ cd android
 ./gradlew assembleDebug
 ```
 
-The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV). Release builds and signing are described in [`docs/RELEASING.md`](docs/RELEASING.md).
+The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV): one per ABI (`arm64-v8a` for most phones and TVs, `armeabi-v7a` for older or low-end devices, `x86_64` for emulators) and a universal one. Release builds and signing are described in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Languages
 
@@ -76,4 +76,4 @@ StremioNow is free software, licensed under the [GNU General Public License v3.0
 
 ---
 
-**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial.
+**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial: os apps de celular e TV já navegam, reproduzem fontes web, de debrid e torrent e sincronizam com a conta do Stremio.

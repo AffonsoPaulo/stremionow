@@ -141,7 +141,7 @@ class OnboardingViewModel(
     ) {
         val key = apiKey.trim()
         // Debrid keys are plain alphanumerics; refusing anything else keeps the address well formed.
-        if (key.length !in 8..200 || !key.all { it.isLetterOrDigit() }) {
+        if (key.length !in 8..200 || !key.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' }) {
             mutableState.update { it.copy(debridFailed = true) }
             return
         }

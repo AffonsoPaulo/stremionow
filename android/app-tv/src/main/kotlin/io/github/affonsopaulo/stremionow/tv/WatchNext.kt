@@ -49,7 +49,9 @@ object WatchNext {
         context: Context,
         item: WatchProgress,
     ): WatchNextProgram {
-        val art = item.background ?: item.poster
+        // Artwork comes from addons and sync; the launcher only gets web images, never local URIs.
+        val background = item.background?.takeIf { it.startsWith("https://") }
+        val art = background ?: item.poster?.takeIf { it.startsWith("https://") }
         val intent =
             Intent(context, MainActivity::class.java)
                 .setAction(Intent.ACTION_VIEW)
@@ -72,7 +74,7 @@ object WatchNext {
                 if (art != null) {
                     setPosterArtUri(Uri.parse(art))
                     setPosterArtAspectRatio(
-                        if (item.background != null) {
+                        if (background != null) {
                             TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9
                         } else {
                             TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3

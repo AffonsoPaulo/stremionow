@@ -4,6 +4,9 @@ description: >-
   Installs the JDK, the Rust toolchain with the Android targets, cargo-ndk and the pinned
   Android NDK and SDK platform, with caches for Cargo, the NDK and Gradle.
 
+# Actions are pinned to full commit SHAs (Dependabot keeps them current) so a moved tag cannot
+# change what runs in the build.
+
 inputs:
   gradle-cache-read-only:
     description: Restore the Gradle cache without saving it.
@@ -12,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@v6
+    - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
       with:
         distribution: temurin
         java-version: 25
@@ -28,7 +31,7 @@ runs:
 
     - name: Restore Android NDK
       id: ndk-cache
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.ANDROID_HOME }}/ndk/${{ steps.versions.outputs.ndk }}
         key: android-ndk-${{ runner.os }}-${{ steps.versions.outputs.ndk }}
@@ -47,15 +50,15 @@ runs:
       working-directory: core
       run: rustup show active-toolchain || rustup toolchain install
 
-    - uses: Swatinem/rust-cache@v2
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         workspaces: core
         shared-key: android
 
-    - uses: taiki-e/install-action@v2
+    - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
       with:
         tool: cargo-ndk
 
-    - uses: gradle/actions/setup-gradle@v6
+    - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       with:
         cache-read-only: ${{ inputs.gradle-cache-read-only }}

@@ -1,6 +1,6 @@
 # Releasing
 
-Releases are built by the [Release workflow](../.github/workflows/release.yml) when a version tag is pushed. It builds signed phone and TV APKs, writes their SHA-256 checksums and opens a draft GitHub release with generated notes.
+Releases are built by the [Release workflow](../.github/workflows/release.yml) when a version tag is pushed. One job builds unsigned phone and TV APKs without access to any secret; a second job, which runs no third-party actions, signs them with `apksigner`, writes their SHA-256 checksums and opens a draft GitHub release with generated notes.
 
 ## One-time setup: signing key
 

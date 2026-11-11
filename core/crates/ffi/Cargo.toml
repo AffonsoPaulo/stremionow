@@ -8,5 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lib]
+name = "stremionow_ffi"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+uniffi.workspace = true
+
 [lints]
 workspace = true

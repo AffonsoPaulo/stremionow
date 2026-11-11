@@ -7,6 +7,7 @@
 // The UniFFI scaffolding generates `extern "C"` entry points, which require `unsafe`.
 #![allow(unsafe_code)]
 
+mod account;
 mod core;
 mod playback;
 mod records;

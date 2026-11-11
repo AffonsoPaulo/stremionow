@@ -5,6 +5,10 @@ use crate::core::StremioCore;
 use crate::records::CoreError;
 
 const TORRENT_WIFI_ONLY: &str = "torrent_wifi_only";
+const AUDIO_LANGUAGE: &str = "audio_language";
+const SUBTITLE_LANGUAGE: &str = "subtitle_language";
+const MAX_RESOLUTION: &str = "max_resolution";
+const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
@@ -17,6 +21,14 @@ pub struct AppSettings {
     pub torrent_wifi_only: bool,
     /// Disk space torrents may keep for reuse, in MiB.
     pub torrent_cache_mb: u32,
+    /// Preferred audio language as an ISO 639-1 code; empty follows the device.
+    pub audio_language: String,
+    /// Subtitle language as an ISO 639-1 code; empty turns subtitles off by default.
+    pub subtitle_language: String,
+    /// Highest resolution to prefer, in lines (2160, 1080, 720); 0 means no limit.
+    pub max_resolution: u32,
+    /// The first-run setup has been completed.
+    pub onboarded: bool,
 }
 
 impl Default for AppSettings {
@@ -24,6 +36,10 @@ impl Default for AppSettings {
         Self {
             torrent_wifi_only: false,
             torrent_cache_mb: DEFAULT_TORRENT_CACHE_MB,
+            audio_language: String::new(),
+            subtitle_language: String::new(),
+            max_resolution: 0,
+            onboarded: false,
         }
     }
 }
@@ -42,6 +58,17 @@ impl StremioCore {
                 .setting(TORRENT_CACHE_MB)?
                 .and_then(|value| value.parse().ok())
                 .map_or(defaults.torrent_cache_mb, clamp_cache),
+            audio_language: store
+                .setting(AUDIO_LANGUAGE)?
+                .map_or(defaults.audio_language, |value| language_code(&value)),
+            subtitle_language: store
+                .setting(SUBTITLE_LANGUAGE)?
+                .map_or(defaults.subtitle_language, |value| language_code(&value)),
+            max_resolution: store
+                .setting(MAX_RESOLUTION)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.max_resolution, clamp_resolution),
+            onboarded: store.setting(ONBOARDED)?.is_some_and(|value| value == "1"),
         })
     }
 
@@ -56,12 +83,40 @@ impl StremioCore {
             TORRENT_CACHE_MB,
             &clamp_cache(settings.torrent_cache_mb).to_string(),
         )?;
+        store.set_setting(AUDIO_LANGUAGE, &language_code(&settings.audio_language))?;
+        store.set_setting(
+            SUBTITLE_LANGUAGE,
+            &language_code(&settings.subtitle_language),
+        )?;
+        store.set_setting(
+            MAX_RESOLUTION,
+            &clamp_resolution(settings.max_resolution).to_string(),
+        )?;
+        store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
         Ok(())
     }
 
     /// The cache sizes offered in Settings, in MiB.
     pub fn torrent_cache_choices(&self) -> Vec<u32> {
         TORRENT_CACHE_CHOICES_MB.to_vec()
+    }
+}
+
+/// Keeps a language code to two or three ASCII letters, lowercased; anything else is empty.
+fn language_code(value: &str) -> String {
+    let value = value.trim();
+    if (2..=3).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphabetic()) {
+        value.to_ascii_lowercase()
+    } else {
+        String::new()
+    }
+}
+
+/// Keeps a resolution limit to one the ranking understands, or no limit.
+fn clamp_resolution(lines: u32) -> u32 {
+    match lines {
+        2160 | 1080 | 720 => lines,
+        _ => 0,
     }
 }
 
@@ -84,6 +139,10 @@ mod tests {
         core.update_settings(AppSettings {
             torrent_wifi_only: true,
             torrent_cache_mb: 5,
+            audio_language: "PT".into(),
+            subtitle_language: "../etc".into(),
+            max_resolution: 1081,
+            onboarded: true,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -92,5 +151,9 @@ mod tests {
             saved.torrent_cache_mb, TORRENT_CACHE_CHOICES_MB[0],
             "too small is raised"
         );
+        assert_eq!(saved.audio_language, "pt");
+        assert_eq!(saved.subtitle_language, "", "junk is dropped");
+        assert_eq!(saved.max_resolution, 0, "unknown limits mean no limit");
+        assert!(saved.onboarded);
     }
 }

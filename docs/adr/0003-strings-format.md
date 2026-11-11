@@ -9,8 +9,8 @@ The interface must be translatable from day one, with English as the source lang
 
 ## Decision
 
-- Strings live in `l10n/` as Android string resources: `l10n/values/strings.xml` (English) and `l10n/values-<locale>/strings.xml` for each translation (for example `values-pt-rBR`).
-- Android modules add `l10n/` as a resource directory, so there is no copy step.
+- Strings live in `l10n/` as Android string resources: `l10n/res/values/strings.xml` (English) and `l10n/res/values-<locale>/strings.xml` for each translation (for example `values-pt-rBR`).
+- Android modules add `l10n/res/` as a resource directory, so there is no copy step.
 - Compose Multiplatform reads the same XML format; if the desktop goes Qt, a script converts it.
 - Plurals use `<plurals>`; placeholders use positional arguments (`%1$s`) with a translator comment on every string.
 

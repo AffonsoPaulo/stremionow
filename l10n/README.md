@@ -4,8 +4,8 @@ All interface text lives here as Android string resources (see [ADR 0003](../doc
 
 | Folder | Language |
 | --- | --- |
-| `values/` | English, the source language |
-| `values-pt-rBR/` | Portuguese (Brazil) |
+| `res/values/` | English, the source language |
+| `res/values-pt-rBR/` | Portuguese (Brazil) |
 
 ## Rules for strings
 
@@ -17,4 +17,4 @@ All interface text lives here as Android string resources (see [ADR 0003](../doc
 
 ## Adding a language
 
-Translations will be managed on Weblate once the project is public. Until then, copy `values/strings.xml` into a new `values-<locale>/` folder and open a pull request. A language ships once it is at least 90% translated.
+Translations will be managed on Weblate once the project is public. Until then, copy `res/values/strings.xml` into a new `res/values-<locale>/` folder and open a pull request. A language ships once it is at least 90% translated.

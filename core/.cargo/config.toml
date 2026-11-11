@@ -1,5 +1,6 @@
 # Android devices with 16 KB memory pages (and Google Play) require shared libraries whose
-# segments are aligned to 16 KB. NDK 27 still defaults to 4 KB, so ask the linker for it.
+# segments are aligned to 16 KB. NDK 28 and later already link that way; the flag keeps the
+# guarantee explicit, independent of the NDK in use.
 [target.aarch64-linux-android]
 rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
 

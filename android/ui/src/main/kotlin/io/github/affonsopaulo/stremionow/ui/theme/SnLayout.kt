@@ -20,7 +20,11 @@ object SnLayout {
         get() =
             when {
                 LocalIsTv.current -> FormFactor.Tv
-                LocalConfiguration.current.screenWidthDp >= 840 -> FormFactor.Large
+
+                // The smallest width does not change with rotation, so a phone stays a phone
+                // in landscape (about 900 dp wide) instead of switching layouts mid-video.
+                LocalConfiguration.current.smallestScreenWidthDp >= 600 -> FormFactor.Large
+
                 else -> FormFactor.Phone
             }
 

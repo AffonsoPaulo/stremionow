@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.affonsopaulo.stremionow.ui.R
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -157,6 +159,12 @@ fun SnPhoneHeader(
                         style = SnTypography.headingLg.copy(color = SnColors.fg),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        // Long titles (and long translations) shrink before they get cut.
+                        autoSize =
+                            TextAutoSize.StepBased(
+                                minFontSize = 20.sp,
+                                maxFontSize = SnTypography.headingLg.fontSize,
+                            ),
                     )
                 }
             }

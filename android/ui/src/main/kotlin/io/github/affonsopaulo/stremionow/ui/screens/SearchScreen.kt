@@ -120,7 +120,8 @@ fun SearchScreen(
     // Raise the keyboard when the user came to type, and again each time Search is chosen
     // while already open. A search opened for a person's name only shows the results.
     LaunchedEffect(focusRequests) {
-        if (initialQuery.isEmpty() || focusRequests > 0) {
+        // Coming back to earlier results (from a title, for example) leaves the keyboard down.
+        if (focusRequests > 0 || viewModel.query.value.isEmpty()) {
             runCatching { focus.requestFocus() }
             keyboard?.show()
         }

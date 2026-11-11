@@ -39,7 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -47,6 +49,7 @@ import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.R
 import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
@@ -85,6 +88,15 @@ class DetailsViewModel(
     val inLibrary = mutableInLibrary.asStateFlow()
     private val mutableRelated = MutableStateFlow<List<MetaItem>>(emptyList())
     val related = mutableRelated.asStateFlow()
+    private val mutableProgress = MutableStateFlow<WatchProgress?>(null)
+
+    /** Where the user stopped in this title, for the Resume button. */
+    val progress = mutableProgress.asStateFlow()
+
+    /** Reloads the saved position, which changes after watching. */
+    fun refreshProgress() {
+        viewModelScope.launch { mutableProgress.value = runCatching { io { core.progress(id) } }.getOrNull() }
+    }
 
     init {
         load()
@@ -131,13 +143,15 @@ fun DetailsScreen(
     onOpenTitle: (MetaItem) -> Unit,
     onOpenGenre: (kind: String, genre: String) -> Unit,
     onSearchPerson: (name: String) -> Unit,
-    onPlay: ((MetaDetails, Episode?) -> Unit)?,
+    onPlay: (MetaDetails, Episode?) -> Unit,
 ) {
     val context = LocalContext.current
     val viewModel = viewModel(key = "details-$kind-$id") { DetailsViewModel(AppGraph.core(context), kind, id) }
     val state by viewModel.details.collectAsStateWithLifecycle()
     val inLibrary by viewModel.inLibrary.collectAsStateWithLifecycle()
     val related by viewModel.related.collectAsStateWithLifecycle()
+    val progress by viewModel.progress.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshProgress() }
 
     when (val details = state) {
         Loadable.Loading -> {
@@ -153,6 +167,7 @@ fun DetailsScreen(
                 details = details.value,
                 inLibrary = inLibrary,
                 related = related,
+                progress = progress,
                 onToggleLibrary = { viewModel.toggleLibrary(details.value.item) },
                 onOpenTitle = onOpenTitle,
                 onOpenGenre = { onOpenGenre(details.value.item.kind, it) },
@@ -172,7 +187,8 @@ private fun DetailsContent(
     onOpenTitle: (MetaItem) -> Unit,
     onOpenGenre: (String) -> Unit,
     onSearchPerson: (String) -> Unit,
-    onPlay: ((MetaDetails, Episode?) -> Unit)?,
+    onPlay: (MetaDetails, Episode?) -> Unit,
+    progress: WatchProgress?,
 ) {
     val item = details.item
     val isSeries = details.episodes.isNotEmpty()
@@ -220,13 +236,7 @@ private fun DetailsContent(
                     TitleLogo(item)
                     MetaLine(item, details.runtime, onOpenGenre)
                     Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-                        if (onPlay != null) {
-                            SnButton(
-                                text = stringResource(R.string.action_watch),
-                                icon = SnIcons.Play,
-                                onClick = { onPlay(details, details.episodes.firstOrNull { (it.season ?: 0u) > 0u }) },
-                            )
-                        }
+                        WatchButton(details, progress, onPlay)
                         SnButton(
                             text =
                                 stringResource(
@@ -247,7 +257,7 @@ private fun DetailsContent(
         item(key = "tab-content") {
             Box(Modifier.padding(top = SnSpacing.space6)) {
                 when (tabs.getOrNull(tab)) {
-                    stringResource(R.string.details_tab_episodes) -> EpisodesTab(details, onPlay)
+                    stringResource(R.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
                     stringResource(R.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
                     else -> InfoTab(details, onOpenGenre, onSearchPerson)
                 }
@@ -256,10 +266,56 @@ private fun DetailsContent(
     }
 }
 
+/**
+ * Watch, or Resume with the episode where the user stopped. A new series starts at its first
+ * regular episode, skipping specials.
+ */
+@Composable
+private fun WatchButton(
+    details: MetaDetails,
+    progress: WatchProgress?,
+    onPlay: (MetaDetails, Episode?) -> Unit,
+) {
+    val resumeEpisode = progress?.let { saved -> details.episodes.firstOrNull { it.id == saved.videoId } }
+    val text =
+        when {
+            progress == null -> {
+                stringResource(R.string.action_watch)
+            }
+
+            resumeEpisode?.season != null && resumeEpisode.episode != null -> {
+                stringResource(
+                    R.string.action_resume_episode,
+                    stringResource(
+                        R.string.episode_short,
+                        resumeEpisode.season!!.toInt(),
+                        resumeEpisode.episode!!.toInt(),
+                    ),
+                )
+            }
+
+            else -> {
+                stringResource(R.string.action_resume)
+            }
+        }
+    SnButton(
+        text = text,
+        icon = SnIcons.Play,
+        onClick = {
+            val episode =
+                resumeEpisode
+                    ?: details.episodes.firstOrNull { (it.season ?: 0u) > 0u }
+                    ?: details.episodes.firstOrNull()
+            onPlay(details, episode)
+        },
+    )
+}
+
 @Composable
 private fun EpisodesTab(
     details: MetaDetails,
-    onPlay: ((MetaDetails, Episode?) -> Unit)?,
+    progress: WatchProgress?,
+    onPlay: (MetaDetails, Episode?) -> Unit,
 ) {
     // Regular seasons first, specials (season 0) last.
     val seasons =
@@ -306,7 +362,11 @@ private fun EpisodesTab(
                     thumbnail = episode.thumbnail,
                     meta = episode.released?.take(10),
                     overview = episode.overview,
-                    onClick = { onPlay?.invoke(details, episode) },
+                    onClick = { onPlay(details, episode) },
+                    progress =
+                        progress
+                            ?.takeIf { it.videoId == episode.id && it.durationMs > 0u }
+                            ?.let { it.positionMs.toFloat() / it.durationMs.toFloat() },
                 )
             }
         }

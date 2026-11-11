@@ -64,6 +64,9 @@
   <string name="details_genres">Gêneros</string>
   <string name="details_runtime">Duração</string>
   <string name="details_no_episodes">Nenhum episódio listado ainda.</string>
+  <string name="details_show_more">Mais</string>
+  <string name="details_show_less">Menos</string>
+  <string name="details_open_genre">Ver títulos de %1$s</string>
 
   <string name="library_empty_title">Sua lista está vazia</string>
   <string name="library_empty_body">Use “Minha lista” em qualquer filme ou série para guardar aqui.</string>

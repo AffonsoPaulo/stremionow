@@ -5,16 +5,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -42,12 +51,14 @@ import io.github.affonsopaulo.stremionow.ui.R
 import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
+import io.github.affonsopaulo.stremionow.ui.components.SnChip
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
+import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -55,6 +66,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
+import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -116,6 +128,8 @@ fun DetailsScreen(
     kind: String,
     id: String,
     onOpenTitle: (MetaItem) -> Unit,
+    onOpenGenre: (kind: String, genre: String) -> Unit,
+    onSearchPerson: (name: String) -> Unit,
     onPlay: ((MetaDetails, Episode?) -> Unit)?,
 ) {
     val context = LocalContext.current
@@ -140,6 +154,8 @@ fun DetailsScreen(
                 related = related,
                 onToggleLibrary = { viewModel.toggleLibrary(details.value.item) },
                 onOpenTitle = onOpenTitle,
+                onOpenGenre = { onOpenGenre(details.value.item.kind, it) },
+                onSearchPerson = onSearchPerson,
                 onPlay = onPlay,
             )
         }
@@ -153,6 +169,8 @@ private fun DetailsContent(
     related: List<MetaItem>,
     onToggleLibrary: () -> Unit,
     onOpenTitle: (MetaItem) -> Unit,
+    onOpenGenre: (String) -> Unit,
+    onSearchPerson: (String) -> Unit,
     onPlay: ((MetaDetails, Episode?) -> Unit)?,
 ) {
     val item = details.item
@@ -168,10 +186,14 @@ private fun DetailsContent(
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = SnSpacing.space16)) {
         item(key = "hero") {
             val height = if (SnLayout.formFactor == FormFactor.Phone) 420.dp else 560.dp
-            Box(Modifier.fillMaxWidth().height(height)) {
-                SnArtwork(url = item.background ?: item.poster, fallbackTitle = "", modifier = Modifier.fillMaxSize())
+            Box(Modifier.fillMaxWidth().heightIn(min = height)) {
+                SnArtwork(
+                    url = item.background ?: item.poster,
+                    fallbackTitle = "",
+                    modifier = Modifier.matchParentSize(),
+                )
                 Box(
-                    Modifier.fillMaxSize().background(
+                    Modifier.matchParentSize().background(
                         Brush.horizontalGradient(
                             0f to SnColors.bg.copy(alpha = 0.95f),
                             0.36f to SnColors.bg.copy(alpha = 0.7f),
@@ -180,7 +202,7 @@ private fun DetailsContent(
                     ),
                 )
                 Box(
-                    Modifier.fillMaxSize().background(
+                    Modifier.matchParentSize().background(
                         Brush.verticalGradient(
                             0.55f to SnColors.bg.copy(alpha = 0f),
                             1f to SnColors.bg,
@@ -195,10 +217,7 @@ private fun DetailsContent(
                     verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
                 ) {
                     TitleLogo(item)
-                    BasicText(
-                        item.metaLine(details.runtime),
-                        style = SnTypography.label.copy(color = SnColors.fgSecondary),
-                    )
+                    MetaLine(item, details.runtime, onOpenGenre)
                     Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
                         if (onPlay != null) {
                             SnButton(
@@ -217,14 +236,7 @@ private fun DetailsContent(
                             onClick = onToggleLibrary,
                         )
                     }
-                    item.description?.let {
-                        BasicText(
-                            it,
-                            style = SnTypography.bodyLg.copy(color = SnColors.fg),
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    item.description?.let { ExpandableDescription(item.id, it) }
                 }
             }
         }
@@ -236,7 +248,7 @@ private fun DetailsContent(
                 when (tabs.getOrNull(tab)) {
                     stringResource(R.string.details_tab_episodes) -> EpisodesTab(details, onPlay)
                     stringResource(R.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
-                    else -> InfoTab(details)
+                    else -> InfoTab(details, onOpenGenre, onSearchPerson)
                 }
             }
         }
@@ -315,34 +327,157 @@ private fun RelatedTab(
     }
 }
 
+/**
+ * Year, runtime and rating, then the genres as links to their catalogs. A flow row rather
+ * than one string, so each genre is its own focusable, tappable target.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun InfoTab(details: MetaDetails) {
-    val rows =
+private fun MetaLine(
+    item: MetaItem,
+    runtime: String?,
+    onOpenGenre: (String) -> Unit,
+) {
+    val style = SnTypography.label.copy(color = SnColors.fgSecondary)
+    val facts =
         listOfNotNull(
-            details.item.description?.let { stringResource(R.string.details_overview) to it },
-            details.item.genres
-                .joinToString(", ")
-                .ifEmpty { null }
-                ?.let { stringResource(R.string.details_genres) to it },
-            details.runtime?.let { stringResource(R.string.details_runtime) to it },
-            details.cast
-                .take(12)
-                .joinToString(", ")
-                .ifEmpty { null }
-                ?.let { stringResource(R.string.details_cast) to it },
-            details.directors
-                .joinToString(", ")
-                .ifEmpty { null }
-                ?.let { stringResource(R.string.details_directors) to it },
+            item.releaseInfo,
+            runtime,
+            item.imdbRating?.let { stringResource(R.string.imdb_rating, it) },
         )
+    val genres = item.genres.take(3)
+    FlowRow(verticalArrangement = Arrangement.Center, itemVerticalAlignment = Alignment.CenterVertically) {
+        facts.forEachIndexed { index, fact ->
+            if (index > 0) BasicText(" · ", style = style)
+            BasicText(fact, style = style)
+        }
+        genres.forEachIndexed { index, genre ->
+            BasicText(
+                if (index == 0 && facts.isNotEmpty()) {
+                    " · "
+                } else if (index > 0) {
+                    ", "
+                } else {
+                    ""
+                },
+                style = style,
+            )
+            GenreLink(genre, style, onClick = { onOpenGenre(genre) })
+        }
+    }
+}
+
+@Composable
+private fun GenreLink(
+    genre: String,
+    style: TextStyle,
+    onClick: () -> Unit,
+) {
+    BasicText(
+        genre,
+        modifier =
+            Modifier
+                .snClickable(
+                    RoundedCornerShape(SnRadius.radiusSm),
+                    onClickLabel = stringResource(R.string.details_open_genre, genre),
+                    onClick = onClick,
+                ).padding(vertical = SnSpacing.space1),
+        style = style.copy(color = SnColors.fg, textDecoration = TextDecoration.Underline),
+    )
+}
+
+/**
+ * Synopsis clamped to four lines. When it is cut, a tap (or OK on a remote) shows all of it
+ * and a "More" hint says so; the same gesture folds it back.
+ */
+@Composable
+private fun ExpandableDescription(
+    id: String,
+    text: String,
+) {
+    var expanded by rememberSaveable(id) { mutableStateOf(false) }
+    var overflowing by remember(id) { mutableStateOf(false) }
+    val toggleable = expanded || overflowing
+    val hint = stringResource(if (expanded) R.string.details_show_less else R.string.details_show_more)
+    Column(
+        modifier =
+            if (toggleable) {
+                Modifier.snClickable(RoundedCornerShape(SnRadius.radiusMd), onClickLabel = hint) {
+                    expanded = !expanded
+                }
+            } else {
+                Modifier
+            },
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+    ) {
+        BasicText(
+            text,
+            style = SnTypography.bodyLg.copy(color = SnColors.fg),
+            maxLines = if (expanded) Int.MAX_VALUE else 4,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (!expanded) overflowing = it.hasVisualOverflow },
+        )
+        if (toggleable) {
+            BasicText(hint, style = SnTypography.label.copy(color = SnColors.fg, fontWeight = FontWeight.SemiBold))
+        }
+    }
+}
+
+/** Full details: synopsis, then genres, cast and direction as chips that lead further. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InfoTab(
+    details: MetaDetails,
+    onOpenGenre: (String) -> Unit,
+    onSearchPerson: (String) -> Unit,
+) {
     Column(
         Modifier.padding(horizontal = SnLayout.gutter).widthIn(max = 880.dp),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
     ) {
-        rows.forEach { (label, value) ->
-            Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
-                BasicText(label.uppercase(), style = SnTypography.overline.copy(color = SnColors.fgMuted))
-                BasicText(value, style = SnTypography.body.copy(color = SnColors.fg))
+        details.item.description?.let { InfoSection(stringResource(R.string.details_overview)) { InfoText(it) } }
+        details.runtime?.let { InfoSection(stringResource(R.string.details_runtime)) { InfoText(it) } }
+        ChipSection(stringResource(R.string.details_genres), details.item.genres, onOpenGenre)
+        ChipSection(stringResource(R.string.details_cast), details.cast.take(12), onSearchPerson)
+        ChipSection(stringResource(R.string.details_directors), details.directors, onSearchPerson)
+    }
+}
+
+@Composable
+private fun InfoSection(
+    label: String,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(
+            label.uppercase(),
+            modifier = Modifier.semantics { heading() },
+            style = SnTypography.overline.copy(color = SnColors.fgMuted),
+        )
+        content()
+    }
+}
+
+@Composable
+private fun InfoText(text: String) {
+    BasicText(text, style = SnTypography.body.copy(color = SnColors.fg))
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipSection(
+    label: String,
+    values: List<String>,
+    onClick: (String) -> Unit,
+) {
+    if (values.isEmpty()) return
+    InfoSection(label) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            values.forEach { value ->
+                SnChip(text = value, selected = false, onClick = { onClick(value) })
             }
         }
     }

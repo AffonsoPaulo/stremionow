@@ -115,9 +115,12 @@ jobs:
         with:
           # Only builds of main write the shared Gradle cache; pull requests reuse it.
           gradle-cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      - name: Build debug APKs
+      - name: Check Kotlin formatting
         working-directory: android
-        run: ./gradlew assembleDebug --console=plain
+        run: ./gradlew spotlessCheck --console=plain
+      - name: Lint and build debug APKs
+        working-directory: android
+        run: ./gradlew lintDebug assembleDebug --console=plain
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: debug-apks

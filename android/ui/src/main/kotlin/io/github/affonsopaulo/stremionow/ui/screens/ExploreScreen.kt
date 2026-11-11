@@ -61,6 +61,7 @@ data class ExploreState(
 class ExploreViewModel(
     private val core: StremioCore,
     private val kind: String,
+    private val initialGenre: String? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ExploreState())
     val state = mutableState.asStateFlow()
@@ -69,7 +70,11 @@ class ExploreViewModel(
     init {
         viewModelScope.launch {
             val catalogs = runCatching { io { core.catalogs(kind) } }.getOrDefault(emptyList())
-            mutableState.update { it.copy(catalogs = catalogs, catalog = catalogs.firstOrNull()) }
+            // Opened from a genre link: start on a catalog that can filter by it.
+            val catalog =
+                catalogs.firstOrNull { initialGenre != null && initialGenre in it.genres } ?: catalogs.firstOrNull()
+            val genre = initialGenre?.takeIf { catalog?.genres?.contains(it) == true }
+            mutableState.update { it.copy(catalogs = catalogs, catalog = catalog, genre = genre) }
             if (catalogs.isEmpty()) mutableState.update { it.copy(loading = false) } else reload()
         }
     }
@@ -117,9 +122,13 @@ class ExploreViewModel(
 fun ExploreScreen(
     kind: String,
     onOpenTitle: (MetaItem) -> Unit,
+    initialGenre: String? = null,
 ) {
     val context = LocalContext.current
-    val viewModel = viewModel(key = "explore-$kind") { ExploreViewModel(AppGraph.core(context), kind) }
+    val viewModel =
+        viewModel(key = "explore-$kind-${initialGenre.orEmpty()}") {
+            ExploreViewModel(AppGraph.core(context), kind, initialGenre)
+        }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val grid = rememberLazyGridState()
     val nearEnd by remember {
@@ -138,7 +147,9 @@ fun ExploreScreen(
             modifier = Modifier.padding(horizontal = SnLayout.gutter),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
         ) {
-            SnPageTitle(stringResource(if (kind == "series") R.string.nav_series else R.string.nav_movies))
+            SnPageTitle(
+                initialGenre ?: stringResource(if (kind == "series") R.string.nav_series else R.string.nav_movies),
+            )
             if (state.catalogs.size > 1) {
                 SnChipRow(state.catalogs, state.catalog, { it?.name.orEmpty() }, { it?.let(viewModel::selectCatalog) })
             }

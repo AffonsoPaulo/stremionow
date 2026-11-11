@@ -89,6 +89,11 @@
   <string name="details_genres">Genres</string>
   <string name="details_runtime">Runtime</string>
   <string name="details_no_episodes">No episodes listed yet.</string>
+  <!-- Shown under a clamped synopsis; a tap reveals the rest. -->
+  <string name="details_show_more">More</string>
+  <string name="details_show_less">Less</string>
+  <!-- Accessibility action on a genre link. %1$s is the genre. -->
+  <string name="details_open_genre">Browse %1$s titles</string>
 
   <!-- My list. -->
   <string name="library_empty_title">Your list is empty</string>

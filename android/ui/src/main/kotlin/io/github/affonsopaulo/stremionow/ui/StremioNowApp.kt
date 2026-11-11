@@ -52,11 +52,20 @@ private object Routes {
     const val PROFILE = "profile"
     const val ADDONS = "addons"
     const val DETAILS = "details/{kind}/{id}"
+    const val GENRE = "genre/{kind}/{genre}"
+    const val PERSON = "person/{name}"
 
     fun details(
         kind: String,
         id: String,
     ) = "details/${Uri.encode(kind)}/${Uri.encode(id)}"
+
+    fun genre(
+        kind: String,
+        genre: String,
+    ) = "genre/${Uri.encode(kind)}/${Uri.encode(genre)}"
+
+    fun person(name: String) = "person/${Uri.encode(name)}"
 }
 
 /**
@@ -104,7 +113,7 @@ fun StremioNowApp(
         ) {
             if (phone) {
                 SnPhoneHeader(
-                    title = phoneTitle(entry?.destination?.route),
+                    title = phoneTitle(entry?.destination?.route, entry?.arguments?.getString("genre")),
                     onBack = if (current == null) ({ navController.navigateUp() }) else null,
                     profileSelected = section == TopDestination.Profile,
                     onOpenProfile = { navController.openTop(TopDestination.Profile) },
@@ -123,6 +132,26 @@ fun StremioNowApp(
                 composable(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
                 composable(Routes.MOVIES) { ExploreScreen("movie", onOpenTitle = { openTitle(it.kind, it.id) }) }
                 composable(Routes.SEARCH) { SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }) }
+                composable(
+                    Routes.GENRE,
+                    arguments =
+                        listOf(
+                            navArgument("kind") { type = NavType.StringType },
+                            navArgument("genre") { type = NavType.StringType },
+                        ),
+                ) { backStack ->
+                    ExploreScreen(
+                        kind = backStack.arguments?.getString("kind").orEmpty(),
+                        initialGenre = backStack.arguments?.getString("genre"),
+                        onOpenTitle = { openTitle(it.kind, it.id) },
+                    )
+                }
+                composable(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+                    SearchScreen(
+                        initialQuery = it.arguments?.getString("name").orEmpty(),
+                        onOpenTitle = { item -> openTitle(item.kind, item.id) },
+                    )
+                }
                 composable(Routes.LIBRARY) {
                     LibraryScreen(onOpenTitle = openTitle, onExplore = { navController.openTop(TopDestination.Series) })
                 }
@@ -142,6 +171,8 @@ fun StremioNowApp(
                         kind = backStack.arguments?.getString("kind").orEmpty(),
                         id = backStack.arguments?.getString("id").orEmpty(),
                         onOpenTitle = { openTitle(it.kind, it.id) },
+                        onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
+                        onSearchPerson = { navController.navigate(Routes.person(it)) },
                         onPlay = onPlay,
                     )
                 }
@@ -158,8 +189,13 @@ fun StremioNowApp(
  * (the details page has its own title art).
  */
 @Composable
-private fun phoneTitle(route: String?): String? =
+private fun phoneTitle(
+    route: String?,
+    genre: String?,
+): String? =
     when (route) {
+        Routes.GENRE -> genre.orEmpty()
+        Routes.PERSON -> stringResource(R.string.nav_search)
         Routes.SERIES -> stringResource(R.string.nav_series)
         Routes.MOVIES -> stringResource(R.string.nav_movies)
         Routes.SEARCH -> stringResource(R.string.nav_search)

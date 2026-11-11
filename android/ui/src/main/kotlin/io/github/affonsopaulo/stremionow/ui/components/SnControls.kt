@@ -17,10 +17,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -150,7 +152,15 @@ fun <T> SnChipRow(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyRow(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+    val listState = rememberLazyListState()
+    // Keep the selection in view, for example when a screen opens already filtered.
+    val selectedIndex = options.indexOf(selected)
+    LaunchedEffect(selectedIndex) { if (selectedIndex > 0) listState.animateScrollToItem(selectedIndex) }
+    LazyRow(
+        modifier = modifier,
+        state = listState,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+    ) {
         itemsIndexed(options) { _, option ->
             SnChip(text = label(option), selected = option == selected, onClick = { onSelect(option) })
         }

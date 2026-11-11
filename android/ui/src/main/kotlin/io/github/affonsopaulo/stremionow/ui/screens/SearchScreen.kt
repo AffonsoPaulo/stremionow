@@ -69,8 +69,9 @@ import kotlinx.coroutines.launch
 
 class SearchViewModel(
     private val core: StremioCore,
+    initialQuery: String = "",
 ) : ViewModel() {
-    private val mutableQuery = MutableStateFlow("")
+    private val mutableQuery = MutableStateFlow(initialQuery.take(MAX_QUERY_LENGTH))
     val query = mutableQuery.asStateFlow()
     private val mutableResults = MutableStateFlow<Loadable<List<MetaItem>>?>(null)
 
@@ -113,13 +114,16 @@ class SearchViewModel(
 }
 
 @Composable
-fun SearchScreen(onOpenTitle: (MetaItem) -> Unit) {
+fun SearchScreen(
+    onOpenTitle: (MetaItem) -> Unit,
+    initialQuery: String = "",
+) {
     val context = LocalContext.current
-    val viewModel = viewModel { SearchViewModel(AppGraph.core(context)) }
+    val viewModel = viewModel(key = "search-$initialQuery") { SearchViewModel(AppGraph.core(context), initialQuery) }
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { if (initialQuery.isEmpty()) runCatching { focus.requestFocus() } }
 
     Column(Modifier.fillMaxSize()) {
         val label = stringResource(R.string.search_field_label)

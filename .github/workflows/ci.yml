@@ -118,9 +118,9 @@ jobs:
       - name: Check Kotlin formatting
         working-directory: android
         run: ./gradlew spotlessCheck --console=plain
-      - name: Lint and build debug APKs
+      - name: Lint, test and build debug APKs
         working-directory: android
-        run: ./gradlew lintDebug assembleDebug --console=plain
+        run: ./gradlew lintDebug testDebugUnitTest assembleDebug --console=plain
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: debug-apks

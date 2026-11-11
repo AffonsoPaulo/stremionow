@@ -17,4 +17,8 @@ dependencies {
     api(libs.kotlinx.coroutines.android)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
+
+    testImplementation(libs.junit)
+    // Android's org.json is a stub in local unit tests; use the real library there.
+    testImplementation(libs.org.json)
 }

@@ -158,7 +158,10 @@ class MpvPlayer private constructor(
     }
 
     override fun eventProperty(property: String) {
-        if (property == "track-list") refreshTracks()
+        when (property) {
+            "track-list" -> refreshTracks()
+            "chapter-list" -> refreshChapters()
+        }
     }
 
     override fun eventProperty(
@@ -222,6 +225,12 @@ class MpvPlayer private constructor(
                 if (!fileLoaded) mutableState.update { it.copy(error = PlayerError.LoadFailed) }
             }
         }
+    }
+
+    private fun refreshChapters() {
+        if (released) return
+        val json = mpv.getPropertyString("chapter-list") ?: return
+        mutableState.update { it.copy(chapters = Chapters.parse(json)) }
     }
 
     private fun refreshTracks() {
@@ -290,6 +299,7 @@ class MpvPlayer private constructor(
             mpv.observeProperty("eof-reached", MpvFormat.MPV_FORMAT_FLAG)
             mpv.observeProperty("hwdec-current", MpvFormat.MPV_FORMAT_STRING)
             mpv.observeProperty("track-list", MpvFormat.MPV_FORMAT_NONE)
+            mpv.observeProperty("chapter-list", MpvFormat.MPV_FORMAT_NONE)
             return player
         }
 

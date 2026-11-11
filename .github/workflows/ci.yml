@@ -22,7 +22,7 @@ jobs:
       run:
         working-directory: core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -35,11 +35,39 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install Rust
+        working-directory: core
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build debug APKs
+        working-directory: android
+        run: ./gradlew assembleDebug --console=plain
+      - uses: actions/upload-artifact@v7
+        with:
+          name: debug-apks
+          path: android/app-*/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
   license-headers:
     name: License headers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Every source file declares its license
         run: |
           missing=$(git ls-files '*.rs' '*.kt' '*.kts' | xargs -r grep -L 'SPDX-License-Identifier: GPL-3.0-or-later' || true)

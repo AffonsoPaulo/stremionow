@@ -47,6 +47,11 @@
   <!-- Content types. -->
   <string name="type_movie">Movie</string>
   <string name="type_series">Series</string>
+  <!-- Plural content types, used for search sections and filters. -->
+  <string name="kind_movies">Movies</string>
+  <string name="kind_series">Series</string>
+  <string name="kind_channels">Channels</string>
+  <string name="kind_tv">TV channels</string>
   <!-- IMDb rating badge. %1$s is the rating, already formatted. -->
   <string name="imdb_rating">IMDb %1$s</string>
 
@@ -74,6 +79,10 @@
   <!-- %1$s is what the user typed. -->
   <string name="search_empty_title">Nothing found for “%1$s”</string>
   <string name="search_empty_body">Check the spelling or try the original title.</string>
+  <!-- Opens every result of one section. -->
+  <string name="search_see_all">See all</string>
+  <!-- Accessibility label. %1$s is the section name, for example "Movies". -->
+  <string name="search_see_all_label">See all %1$s</string>
 
   <!-- Details screen. -->
   <string name="details_tab_episodes">Episodes</string>

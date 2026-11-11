@@ -1,63 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.affonsopaulo.stremionow.core.CatalogRow
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.R
-import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
+import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
+import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
+import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
+import io.github.affonsopaulo.stremionow.ui.components.SnSearchField
+import io.github.affonsopaulo.stremionow.ui.components.SnSeeAll
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
-import io.github.affonsopaulo.stremionow.ui.theme.SnColors
-import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
-import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
-import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,10 +53,14 @@ class SearchViewModel(
 ) : ViewModel() {
     private val mutableQuery = MutableStateFlow(initialQuery.take(MAX_QUERY_LENGTH))
     val query = mutableQuery.asStateFlow()
-    private val mutableResults = MutableStateFlow<Loadable<List<MetaItem>>?>(null)
+    private val mutableResults = MutableStateFlow<Loadable<List<CatalogRow>>?>(null)
 
-    /** Null until the user types something. */
+    /** One row per search catalog; null until the user types something. */
     val results = mutableResults.asStateFlow()
+    private val mutableKind = MutableStateFlow<String?>(null)
+
+    /** Content type the results are narrowed to, or null for every type. */
+    val kind = mutableKind.asStateFlow()
 
     init {
         @OptIn(FlowPreview::class)
@@ -91,7 +75,9 @@ class SearchViewModel(
                     } else {
                         mutableResults.value = Loadable.Loading
                         mutableResults.value =
-                            runCatching { core.search(text) }.fold({ Loadable.Ready(it) }, { Loadable.Failed(it) })
+                            runCatching { core.search(text) }
+                                .onFailure { android.util.Log.w("StremioNow", "Search failed", it) }
+                                .fold({ Loadable.Ready(it) }, { Loadable.Failed(it) })
                     }
                 }
         }
@@ -100,6 +86,10 @@ class SearchViewModel(
     fun setQuery(text: String) {
         // Cap the length so a pasted wall of text cannot flood every addon.
         mutableQuery.value = text.take(MAX_QUERY_LENGTH)
+    }
+
+    fun setKind(kind: String?) {
+        mutableKind.value = kind
     }
 
     fun retry() {
@@ -122,51 +112,20 @@ fun SearchScreen(
     val viewModel = viewModel(key = "search-$initialQuery") { SearchViewModel(AppGraph.core(context), initialQuery) }
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
+    val kind by viewModel.kind.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
+    // Only raise the keyboard when the user came to type.
     LaunchedEffect(Unit) { if (initialQuery.isEmpty()) runCatching { focus.requestFocus() } }
 
     Column(Modifier.fillMaxSize()) {
-        val label = stringResource(R.string.search_field_label)
-        val shape = RoundedCornerShape(SnRadius.radiusLg)
-        Row(
-            modifier =
-                Modifier
-                    .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space2)
-                    .widthIn(max = 880.dp)
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .background(SnColors.surfaceInput, shape)
-                    .border(2.dp, SnColors.accent, shape)
-                    .padding(start = SnSpacing.space6, end = SnSpacing.space2),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-        ) {
-            Image(SnIcons.Search, null, Modifier.size(24.dp), colorFilter = ColorFilter.tint(SnColors.fgSecondary))
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                if (query.isEmpty()) {
-                    BasicText(
-                        stringResource(R.string.search_hint),
-                        style = SnTypography.sectionTitle.copy(color = SnColors.fgMuted),
-                    )
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = viewModel::setQuery,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focus)
-                            .semantics { contentDescription = label },
-                    textStyle = SnTypography.sectionTitle.copy(color = SnColors.fg),
-                    singleLine = true,
-                    cursorBrush = SolidColor(SnColors.accent),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                )
-            }
-            if (query.isNotEmpty()) {
-                SnIconButton(SnIcons.Close, stringResource(R.string.search_clear), onClick = { viewModel.setQuery("") })
-            }
-        }
+        SnSearchField(
+            query = query,
+            onQueryChange = viewModel::setQuery,
+            label = stringResource(R.string.search_field_label),
+            hint = stringResource(R.string.search_hint),
+            clearLabel = stringResource(R.string.search_clear),
+            focusRequester = focus,
+        )
 
         when (val state = results) {
             null -> {
@@ -188,24 +147,105 @@ fun SearchScreen(
                         body = stringResource(R.string.search_empty_body),
                     )
                 } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(150.dp),
-                        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
-                        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                        verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
-                    ) {
-                        items(state.value, key = { "${it.kind}/${it.id}" }) { item ->
-                            SnPosterCard(
-                                item.name,
-                                item.poster,
-                                item.cardSubtitle(),
-                                onClick = { onOpenTitle(item) },
-                                width = null,
-                            )
-                        }
-                    }
+                    SearchResults(state.value, kind, viewModel::setKind, onOpenTitle)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Results grouped the way the addons group them: one row per catalog under a type heading,
+ * like the official app. The chips narrow everything to one type, shown as a full grid;
+ * "See all" on a row does the same for that row's type.
+ */
+@Composable
+private fun SearchResults(
+    rows: List<CatalogRow>,
+    kind: String?,
+    onKindChange: (String?) -> Unit,
+    onOpenTitle: (MetaItem) -> Unit,
+) {
+    val kinds = remember(rows) { rows.map { it.catalog.kind }.distinct() }
+    // A filter left over from an earlier search may match nothing now.
+    val activeKind = kind?.takeIf { it in kinds }
+    Column(Modifier.fillMaxSize()) {
+        if (kinds.size > 1) {
+            val all = stringResource(R.string.explore_genre_all)
+            val labels = kinds.associateWith { kindLabel(it) }
+            SnChipRow(
+                options = listOf<String?>(null) + kinds,
+                selected = activeKind,
+                label = { option -> option?.let { labels.getValue(it) } ?: all },
+                onSelect = onKindChange,
+                modifier = Modifier.padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
+            )
+        }
+        if (activeKind == null) {
+            ResultRows(rows, canNarrow = kinds.size > 1, onSeeAll = onKindChange, onOpenTitle = onOpenTitle)
+        } else {
+            val items =
+                remember(rows, activeKind) {
+                    rows
+                        .filter { it.catalog.kind == activeKind }
+                        .flatMap { it.items }
+                        .distinctBy { it.id }
+                }
+            SnPosterGrid {
+                items(items, key = { "${it.kind}/${it.id}" }) { item ->
+                    SnPosterCard(
+                        item.name,
+                        item.poster,
+                        item.releaseInfo,
+                        onClick = { onOpenTitle(item) },
+                        width = null,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultRows(
+    rows: List<CatalogRow>,
+    canNarrow: Boolean,
+    onSeeAll: (String) -> Unit,
+    onOpenTitle: (MetaItem) -> Unit,
+) {
+    // Name a row by its type alone unless several catalogs share that type.
+    val sharedKinds =
+        remember(rows) {
+            rows
+                .groupingBy { it.catalog.kind }
+                .eachCount()
+                .filterValues { it > 1 }
+                .keys
+        }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = SnSpacing.space4),
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+    ) {
+        items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
+            val type = kindLabel(row.catalog.kind)
+            SnPosterSection(
+                title = if (row.catalog.kind in sharedKinds) "$type · ${row.catalog.name}" else type,
+                items = row.items,
+                onOpen = onOpenTitle,
+                action =
+                    if (canNarrow) {
+                        {
+                            SnSeeAll(
+                                text = stringResource(R.string.search_see_all),
+                                label = stringResource(R.string.search_see_all_label, type),
+                                onClick = { onSeeAll(row.catalog.kind) },
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            )
         }
     }
 }

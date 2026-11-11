@@ -6,14 +6,22 @@
   <string name="nav_movies">Filmes</string>
   <string name="nav_my_list">Minha lista</string>
   <string name="nav_addons">Addons</string>
+  <string name="nav_back">Voltar</string>
   <string name="nav_search">Buscar</string>
   <string name="nav_profile">Perfil, conta e configurações</string>
 
   <string name="action_watch">Assistir</string>
   <string name="action_more_info">Mais informações</string>
   <string name="action_resume_episode">Retomar %1$s</string>
+  <string name="action_add_to_list">Minha lista</string>
+  <string name="action_in_list">Na minha lista</string>
+  <string name="action_retry">Tentar de novo</string>
+  <string name="action_cancel">Cancelar</string>
+  <string name="action_open_addons">Abrir Addons</string>
+  <string name="action_explore_series">Explorar séries</string>
 
   <string name="episode_short">T%1$d E%2$d</string>
+  <string name="episode_numbered">%1$d. %2$s</string>
 
   <string name="time_left">faltam %1$s</string>
 
@@ -22,5 +30,71 @@
     <item quantity="other">%1$d fontes de %2$d addons</item>
   </plurals>
 
-  <string name="placeholder_core_version">Núcleo %1$s</string>
+  <string name="type_movie">Filme</string>
+  <string name="type_series">Série</string>
+  <string name="imdb_rating">IMDb %1$s</string>
+
+  <string name="state_loading">Carregando</string>
+  <string name="state_on">Ativado</string>
+  <string name="state_off">Desativado</string>
+  <string name="error_load_title">Não foi possível carregar</string>
+  <string name="error_load_body">Verifique sua conexão. O que já foi carregado continua disponível.</string>
+  <string name="home_empty_title">Nenhum catálogo ainda</string>
+  <string name="home_empty_body">Instale um addon com catálogos para preencher a tela inicial.</string>
+
+  <string name="explore_genre_all">Todos</string>
+  <string name="explore_loading_more">Carregando mais…</string>
+  <string name="explore_empty_body">Este catálogo não tem nada para este filtro.</string>
+
+  <string name="search_field_label">Buscar filmes e séries</string>
+  <string name="search_hint">Filmes e séries</string>
+  <string name="search_clear">Limpar busca</string>
+  <string name="search_idle">A busca usa todos os addons de catálogo que você instalou.</string>
+  <string name="search_empty_title">Nada encontrado para “%1$s”</string>
+  <string name="search_empty_body">Confira a ortografia ou tente o título original.</string>
+
+  <string name="details_tab_episodes">Episódios</string>
+  <string name="details_tab_related">Você também pode gostar</string>
+  <string name="details_tab_details">Detalhes</string>
+  <string name="details_season">Temporada %1$d</string>
+  <string name="details_specials">Especiais</string>
+  <string name="details_overview">Sinopse</string>
+  <string name="details_cast">Elenco</string>
+  <string name="details_directors">Direção</string>
+  <string name="details_genres">Gêneros</string>
+  <string name="details_runtime">Duração</string>
+  <string name="details_no_episodes">Nenhum episódio listado ainda.</string>
+
+  <string name="library_empty_title">Sua lista está vazia</string>
+  <string name="library_empty_body">Use “Minha lista” em qualquer filme ou série para guardar aqui.</string>
+
+  <string name="addons_intro">Addons trazem catálogos, informações, fontes e legendas. A ordem define a prioridade.</string>
+  <string name="addons_install_label">Instalar por link</string>
+  <string name="addons_install_hint">https://…/manifest.json</string>
+  <string name="addons_install_action">Instalar</string>
+  <string name="addons_install_error">Não foi possível instalar. Confira se o link termina em /manifest.json e tente de novo.</string>
+  <string name="addons_version">v%1$s</string>
+  <string name="addons_kind_catalogs">Catálogos</string>
+  <string name="addons_kind_metadata">Informações</string>
+  <string name="addons_kind_streams">Fontes</string>
+  <string name="addons_kind_subtitles">Legendas</string>
+  <string name="addons_toggle">Ativar %1$s</string>
+  <string name="addons_move_up">Mover %1$s para cima</string>
+  <string name="addons_move_down">Mover %1$s para baixo</string>
+  <string name="addons_remove">Remover %1$s</string>
+  <string name="addons_remove_action">Remover</string>
+  <string name="addons_remove_title">Remover %1$s?</string>
+  <string name="addons_remove_body">Os catálogos, fontes e legendas dele deixam de aparecer. Você pode instalá-lo de novo pelo link.</string>
+
+  <!-- Profile screen, opened from the avatar. -->
+  <string name="profile_title">Perfil</string>
+  <string name="profile_local_name">Este aparelho</string>
+  <string name="profile_local_body">Seus addons e sua lista ficam salvos só neste aparelho.</string>
+  <plurals name="profile_addons_count">
+    <item quantity="one">%1$d instalado</item>
+    <item quantity="many">%1$d instalados</item>
+    <item quantity="other">%1$d instalados</item>
+  </plurals>
+  <string name="profile_version">StremioNow %1$s</string>
+
 </resources>

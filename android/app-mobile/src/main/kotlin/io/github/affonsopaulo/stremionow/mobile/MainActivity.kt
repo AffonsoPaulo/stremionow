@@ -7,8 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import io.github.affonsopaulo.stremionow.core.coreVersion
-import io.github.affonsopaulo.stremionow.ui.placeholder.PlaceholderScreen
+import io.github.affonsopaulo.stremionow.ui.StremioNowApp
 
 /** Entry point of the phone app. */
 class MainActivity : ComponentActivity() {
@@ -19,9 +18,6 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val version = coreVersion()
-        setContent {
-            PlaceholderScreen(coreVersion = version)
-        }
+        setContent { StremioNowApp(isTv = false) }
     }
 }

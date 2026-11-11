@@ -40,6 +40,8 @@ pub struct StreamSource {
     pub subtitles: Vec<SubtitleTrack>,
     /// Sources of the same group can replace each other from one episode to the next.
     pub binge_group: Option<String>,
+    /// Trackers and DHT hints for torrents, as the addon sent them.
+    pub trackers: Vec<String>,
 }
 
 /// An external subtitle file.
@@ -255,6 +257,11 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
             .filter_map(|subtitle| subtitle_track(&addon.manifest.name, subtitle))
             .collect(),
         binge_group: stream.behavior_hints.binge_group,
+        trackers: stream
+            .sources
+            .into_iter()
+            .filter(|tracker| tracker.len() <= 512)
+            .collect(),
     };
     source.badges = badges(&parse(&source_text(&source)));
     Some(source)
@@ -407,6 +414,7 @@ mod tests {
             badges: Vec::new(),
             subtitles: Vec::new(),
             binge_group: None,
+            trackers: Vec::new(),
         }
     }
 

@@ -20,6 +20,9 @@ pub enum CoreError {
     /// The local database failed.
     #[error("storage error: {reason}")]
     Storage { reason: String },
+    /// A source could not be prepared for playback (no peers, no video file, engine error).
+    #[error("playback error: {reason}")]
+    Playback { reason: String },
 }
 
 impl From<AddonError> for CoreError {

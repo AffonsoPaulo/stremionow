@@ -11,6 +11,7 @@ mod core;
 mod playback;
 mod records;
 mod settings;
+mod streaming;
 
 pub use crate::core::StremioCore;
 pub use crate::records::*;

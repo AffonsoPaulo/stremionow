@@ -22,6 +22,10 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # On pull requests, paths-filter lists the changed files through the API.
+      pull-requests: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
       android: ${{ steps.filter.outputs.android }}

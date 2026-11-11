@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -107,6 +108,7 @@ class SearchViewModel(
 fun SearchScreen(
     onOpenTitle: (MetaItem) -> Unit,
     initialQuery: String = "",
+    focusRequests: Int = 0,
 ) {
     val context = LocalContext.current
     val viewModel = viewModel(key = "search-$initialQuery") { SearchViewModel(AppGraph.core(context), initialQuery) }
@@ -114,8 +116,15 @@ fun SearchScreen(
     val results by viewModel.results.collectAsStateWithLifecycle()
     val kind by viewModel.kind.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
-    // Only raise the keyboard when the user came to type.
-    LaunchedEffect(Unit) { if (initialQuery.isEmpty()) runCatching { focus.requestFocus() } }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Raise the keyboard when the user came to type, and again each time Search is chosen
+    // while already open. A search opened for a person's name only shows the results.
+    LaunchedEffect(focusRequests) {
+        if (initialQuery.isEmpty() || focusRequests > 0) {
+            runCatching { focus.requestFocus() }
+            keyboard?.show()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         SnSearchField(

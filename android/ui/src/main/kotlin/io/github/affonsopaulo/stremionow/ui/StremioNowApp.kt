@@ -14,7 +14,11 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -91,9 +95,20 @@ fun StremioNowApp(
                 else -> null
             }
         // Addons is a page of the profile, so the avatar stays highlighted there.
+        // The tab whose stack the user is in, so it stays highlighted on inner pages too.
+        val backStack by navController.currentBackStack.collectAsState()
         val section =
-            current ?: TopDestination.Profile.takeIf { entry?.destination?.route == Routes.ADDONS }
+            backStack.lastOrNull { it.destination.route in TopRoutes }?.destination?.route?.let(
+                TopRoutes::get,
+            )
         val phone = SnLayout.formFactor == FormFactor.Phone
+        // Bumped when Search is chosen while already open, to focus the field and raise the keyboard.
+        var searchFocusRequests by remember { mutableIntStateOf(0) }
+        val openTab = { destination: TopDestination ->
+            navController.openTop(destination) {
+                if (destination == TopDestination.Search) searchFocusRequests++
+            }
+        }
         // While typing, the keyboard takes the tab bar's place instead of stacking above it.
         val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
         Column(
@@ -119,7 +134,7 @@ fun StremioNowApp(
                     onOpenProfile = { navController.openTop(TopDestination.Profile) },
                 )
             } else {
-                SnHeader(current = section, onNavigate = { navController.openTop(it) })
+                SnHeader(current = section, onNavigate = openTab)
             }
             NavHost(navController = navController, startDestination = Routes.HOME, modifier = Modifier.weight(1f)) {
                 val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
@@ -131,7 +146,9 @@ fun StremioNowApp(
                 }
                 composable(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
                 composable(Routes.MOVIES) { ExploreScreen("movie", onOpenTitle = { openTitle(it.kind, it.id) }) }
-                composable(Routes.SEARCH) { SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }) }
+                composable(Routes.SEARCH) {
+                    SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }, focusRequests = searchFocusRequests)
+                }
                 composable(
                     Routes.GENRE,
                     arguments =
@@ -178,7 +195,7 @@ fun StremioNowApp(
                 }
             }
             if (phone && !keyboardOpen) {
-                SnTabBar(current = current, onNavigate = { navController.openTop(it) })
+                SnTabBar(current = section, onNavigate = openTab)
             }
         }
     }
@@ -206,17 +223,39 @@ private fun phoneTitle(
         else -> null
     }
 
-/** Opens a top-level destination, keeping a single copy of each on the back stack. */
-private fun NavHostController.openTop(destination: TopDestination) {
-    val route =
-        when (destination) {
-            TopDestination.Search -> Routes.SEARCH
-            TopDestination.Home -> Routes.HOME
-            TopDestination.Series -> Routes.SERIES
-            TopDestination.Movies -> Routes.MOVIES
-            TopDestination.MyList -> Routes.LIBRARY
-            TopDestination.Profile -> Routes.PROFILE
-        }
+/** Routes of the top-level destinations. */
+private val TopRoutes =
+    mapOf(
+        Routes.HOME to TopDestination.Home,
+        Routes.SERIES to TopDestination.Series,
+        Routes.MOVIES to TopDestination.Movies,
+        Routes.SEARCH to TopDestination.Search,
+        Routes.LIBRARY to TopDestination.MyList,
+        Routes.PROFILE to TopDestination.Profile,
+    )
+
+/**
+ * Opens a top-level destination, keeping a single copy of each on the back stack and each
+ * tab's inner pages for when the user comes back to it. Choosing the tab the user is already
+ * in returns to its start instead, as on every Android app with tabs; restoring its saved
+ * state there would reopen the very page the user is trying to leave. [onReselect] runs then,
+ * for screens that react to a second tap, like Search focusing its field.
+ */
+private fun NavHostController.openTop(
+    destination: TopDestination,
+    onReselect: () -> Unit = {},
+) {
+    val route = TopRoutes.entries.first { it.value == destination }.key
+    val currentSection =
+        currentBackStack.value
+            .lastOrNull { it.destination.route in TopRoutes }
+            ?.destination
+            ?.route
+    if (currentSection == route) {
+        popBackStack(route, inclusive = false)
+        onReselect()
+        return
+    }
     navigate(route) {
         popUpTo(Routes.HOME) { saveState = true }
         launchSingleTop = true

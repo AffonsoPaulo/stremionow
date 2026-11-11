@@ -1,0 +1,33 @@
+# Rust
+core/target/
+**/*.rs.bk
+
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+*.keystore
+*.jks
+.externalNativeBuild/
+.cxx/
+
+# Generated native libraries copied into Android modules
+android/**/jniLibs/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets
+*.env
+.env*

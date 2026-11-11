@@ -37,6 +37,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.R
+import io.github.affonsopaulo.stremionow.ui.components.SnListRow
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -92,7 +93,7 @@ fun ProfileScreen(onOpenAddons: () -> Unit) {
                 modifier = Modifier.widthIn(max = 720.dp),
                 verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
-                ProfileRow(
+                SnListRow(
                     icon = SnIcons.Layers,
                     title = stringResource(R.string.nav_addons),
                     detail = addonCount?.let { pluralStringResource(R.plurals.profile_addons_count, it, it) },
@@ -137,34 +138,5 @@ private fun Identity() {
                 style = SnTypography.body.copy(color = SnColors.fgMuted),
             )
         }
-    }
-}
-
-/** A row that opens a settings page: icon, title, optional current value and a chevron. */
-@Composable
-private fun ProfileRow(
-    icon: ImageVector,
-    title: String,
-    detail: String?,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(SnRadius.radiusLg)
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .snClickable(shape, onClick = onClick)
-                .background(SnColors.surface, shape)
-                .padding(horizontal = SnSpacing.space4, vertical = SnSpacing.space3),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-    ) {
-        Image(icon, null, Modifier.size(22.dp), colorFilter = ColorFilter.tint(SnColors.fgSecondary))
-        BasicText(title, Modifier.weight(1f), style = SnTypography.bodyLg.copy(color = SnColors.fg))
-        if (detail != null) {
-            BasicText(detail, style = SnTypography.body.copy(color = SnColors.fgMuted))
-        }
-        Image(SnIcons.ChevronRight, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(SnColors.fgMuted))
     }
 }

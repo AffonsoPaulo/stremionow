@@ -43,6 +43,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
+import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
@@ -224,24 +225,5 @@ private fun CatalogRowSection(
     row: CatalogRow,
     onOpenTitle: (MetaItem) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-        BasicText(
-            text = row.catalog.name,
-            modifier = Modifier.padding(horizontal = SnLayout.gutter),
-            style = SnTypography.sectionTitle.copy(color = SnColors.fg),
-        )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-        ) {
-            items(row.items, key = { it.id }) { item ->
-                SnPosterCard(
-                    title = item.name,
-                    poster = item.poster,
-                    subtitle = item.cardSubtitle(),
-                    onClick = { onOpenTitle(item) },
-                )
-            }
-        }
-    }
+    SnPosterSection(row.catalog.name, row.items, onOpenTitle, subtitle = { it.cardSubtitle() })
 }

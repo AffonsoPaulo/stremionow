@@ -24,6 +24,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,10 +43,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.R
+import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.Connectivity
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -77,8 +82,15 @@ class SourcesViewModel(
     private val mutableState = MutableStateFlow(SourcesState())
     val state = mutableState.asStateFlow()
     private val merge = Mutex()
+    private val mutableWifiOnly = MutableStateFlow(false)
+
+    /** The "Only on Wi-Fi" preference for torrents. */
+    val wifiOnly = mutableWifiOnly.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            mutableWifiOnly.value = runCatching { io { core.settings().torrentWifiOnly } }.getOrDefault(false)
+        }
         viewModelScope.launch {
             val addons =
                 runCatching {
@@ -118,11 +130,11 @@ class SourcesViewModel(
     }
 }
 
-/**
- * Sources this build can use: web addresses play in the app, external links open elsewhere.
- * Torrent-only sources need the torrent engine and are left out until it is in place.
- */
-private fun StreamSource.isUsable(): Boolean = url != null || externalUrl != null || ytId != null
+/** Sources the app can use: web addresses and torrents play in the app, links open elsewhere. */
+private fun StreamSource.isUsable(): Boolean = url != null || infoHash != null || externalUrl != null || ytId != null
+
+/** Whether the app plays the source itself rather than handing it to another app. */
+private val StreamSource.playsInApp: Boolean get() = url != null || infoHash != null
 
 /**
  * "Choose a source": every addon's offers for the chosen video, best first. Sources arrive
@@ -142,14 +154,41 @@ fun SourcesScreen(
     val viewModel =
         viewModel(key = "sources-${selection.videoId}") { SourcesViewModel(AppGraph.core(context), selection) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val wifiOnly by viewModel.wifiOnly.collectAsStateWithLifecycle()
+    var confirmMobileData by remember { mutableStateOf<StreamSource?>(null) }
+    val play = { source: StreamSource ->
+        PlaybackSession.source = source
+        PlaybackSession.alternatives = state.sources
+        onPlay()
+    }
     val choose = { source: StreamSource ->
-        if (source.url != null) {
-            PlaybackSession.source = source
-            PlaybackSession.alternatives = state.sources
-            onPlay()
-        } else {
-            openOutside(context, source)
+        when {
+            !source.playsInApp -> {
+                openOutside(context, source)
+            }
+
+            // Respect "Only on Wi-Fi", but let the user decide case by case.
+            source.infoHash != null && source.url == null && wifiOnly && Connectivity.onMobileData(context) -> {
+                confirmMobileData = source
+            }
+
+            else -> {
+                play(source)
+            }
         }
+    }
+    confirmMobileData?.let { source ->
+        SnDialog(
+            title = stringResource(R.string.sources_wifi_title),
+            body = stringResource(R.string.sources_wifi_body),
+            confirmText = stringResource(R.string.sources_wifi_play_anyway),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                confirmMobileData = null
+                play(source)
+            },
+            onDismiss = { confirmMobileData = null },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -177,7 +216,7 @@ fun SourcesScreen(
                         ->
                         "$index/${source.addonName}/${source.name}"
                     }) { index, source ->
-                        SourceRow(source, best = index == 0 && source.url != null, onClick = { choose(source) })
+                        SourceRow(source, best = index == 0 && source.playsInApp, onClick = { choose(source) })
                     }
                 }
             }
@@ -266,7 +305,7 @@ private fun SourceRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (best) Badge(stringResource(R.string.sources_best), accent = true)
-            if (source.url == null) Badge(stringResource(R.string.sources_opens_outside), accent = false)
+            if (!source.playsInApp) Badge(stringResource(R.string.sources_opens_outside), accent = false)
         }
         BasicText(
             source.name

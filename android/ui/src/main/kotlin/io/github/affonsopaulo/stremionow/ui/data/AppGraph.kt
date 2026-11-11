@@ -3,13 +3,18 @@ package io.github.affonsopaulo.stremionow.ui.data
 
 import android.content.Context
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Process-wide objects shared by every screen. */
 object AppGraph {
     @Volatile private var core: StremioCore? = null
+
+    /** For work that must finish after a screen is gone, such as stopping a torrent. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** The core, opened on first use with its database in private, non-backed-up storage. */
     fun core(context: Context): StremioCore =

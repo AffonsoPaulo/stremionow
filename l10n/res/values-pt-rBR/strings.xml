@@ -149,4 +149,16 @@
   <string name="settings_cache_body">Espaço que os torrents podem ocupar neste aparelho, para que títulos assistidos de novo comecem mais rápido.</string>
   <string name="settings_gigabytes">%1$d GB</string>
 
+  <string name="player_preparing">Preparando a fonte</string>
+  <string name="torrent_finding_peers">Procurando pares…</string>
+  <string name="torrent_checking">Verificando dados baixados…</string>
+  <plurals name="torrent_peers">
+    <item quantity="one">%1$d par · %2$s/s</item>
+    <item quantity="many">%1$d pares · %2$s/s</item>
+    <item quantity="other">%1$d pares · %2$s/s</item>
+  </plurals>
+  <string name="sources_wifi_title">Torrents estão configurados para usar só Wi-Fi</string>
+  <string name="sources_wifi_body">Você está usando dados móveis. Reproduza este torrent mesmo assim ou desative \"Somente no Wi-Fi\" nas Configurações.</string>
+  <string name="sources_wifi_play_anyway">Reproduzir mesmo assim</string>
+
 </resources>

@@ -192,4 +192,7 @@
   <string name="profile_sign_out_title">Sair da conta do Stremio?</string>
   <string name="profile_sign_out_body">Seus addons, sua lista e seu progresso continuam neste aparelho, mas param de sincronizar.</string>
 
+  <string name="player_skip_intro">Pular abertura</string>
+  <string name="player_up_next">A seguir em %1$d s</string>
+
 </resources>

@@ -236,4 +236,8 @@
   <string name="profile_sign_out_title">Sign out of Stremio?</string>
   <string name="profile_sign_out_body">Your addons, list and progress stay on this device, but stop syncing.</string>
 
+  <string name="player_skip_intro">Skip intro</string>
+  <!-- Countdown on the next-episode card. %1$d is the seconds left. -->
+  <string name="player_up_next">Up next in %1$d s</string>
+
 </resources>

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -190,7 +191,10 @@ private fun InstallField(
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) viewModel.install() else viewModel.localNetworkDenied()
         }
+    val keyboard = LocalSoftwareKeyboardController.current
     val install = {
+        // The result shows in the list below, which the keyboard would cover.
+        keyboard?.hide()
         val permission = LocalNetwork.permission
         if (permission != null && LocalNetwork.needsPermission(context, state.installUrl)) {
             requestLocalNetwork.launch(permission)

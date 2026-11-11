@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -52,6 +53,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -71,6 +73,8 @@ import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.SubtitleTrack
+import io.github.affonsopaulo.stremionow.core.TorrentPhase
+import io.github.affonsopaulo.stremionow.core.TorrentProgress
 import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.player.MpvPlayer
 import io.github.affonsopaulo.stremionow.player.PlaybackState
@@ -82,6 +86,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
+import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
 import io.github.affonsopaulo.stremionow.ui.components.SnSeekBar
 import io.github.affonsopaulo.stremionow.ui.components.formatPlaybackTime
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
@@ -96,10 +101,15 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/** How often the torrent state is read for the loading screen. */
+private const val TORRENT_STATUS_INTERVAL_MS = 1_000L
 
 /** How often progress is written while playing. */
 private const val PROGRESS_INTERVAL_MS = 10_000L
@@ -129,8 +139,40 @@ class PlayerViewModel(
             ),
         )
 
+    private val mutablePreparing = MutableStateFlow(true)
+
+    /** True until the player has an address: torrents first need peers and the file list. */
+    val preparing = mutablePreparing.asStateFlow()
+    private val mutableTorrent = MutableStateFlow<TorrentProgress?>(null)
+
+    /** Live torrent state for the loading screen; null for web sources. */
+    val torrent = mutableTorrent.asStateFlow()
+    private val mutablePrepareFailed = MutableStateFlow(false)
+
+    /** The source could not be prepared (no peers, no video file, engine error). */
+    val prepareFailed = mutablePrepareFailed.asStateFlow()
+
     init {
+        source.infoHash?.let { hash ->
+            viewModelScope.launch {
+                while (isActive) {
+                    mutableTorrent.value = core.torrentStatus(hash)
+                    delay(TORRENT_STATUS_INTERVAL_MS)
+                }
+            }
+        }
         viewModelScope.launch {
+            // Every source plays through the local server, so the player never sees debrid keys.
+            val url =
+                runCatching { core.playbackUrl(source) }
+                    .onFailure { android.util.Log.w("StremioNow", "Could not prepare the source", it) }
+                    .getOrNull()
+            if (url == null) {
+                mutablePreparing.value = false
+                mutablePrepareFailed.value = true
+                return@launch
+            }
+            mutablePreparing.value = false
             val saved = runCatching { io { core.progress(selection.details.item.id) } }.getOrNull()
             val start =
                 saved
@@ -138,7 +180,7 @@ class PlayerViewModel(
                     ?.positionMs
                     ?.toDouble()
                     ?.div(1000) ?: 0.0
-            player.load(requireNotNull(source.url), start)
+            player.load(url, start)
             addSubtitles()
             selectSubtitleIfMissing()
         }
@@ -165,7 +207,9 @@ class PlayerViewModel(
                 // addon and number.
                 tracks.forEachIndexed { index, track ->
                     val title = if (tracks.size > 1) "${track.addonName} ${index + 1}" else track.addonName
-                    player.addSubtitle(track.url, title = title, language = track.lang, select = false)
+                    // Relayed like the video, so subtitle addresses stay out of the player too.
+                    val url = runCatching { core.relayUrl(track.url) }.getOrNull() ?: return@forEachIndexed
+                    player.addSubtitle(url, title = title, language = track.lang, select = false)
                 }
             }
     }
@@ -235,6 +279,8 @@ class PlayerViewModel(
             }
         }
         player.release()
+        // The screen is gone, so finish on the app's scope: stop the download and trim the cache.
+        source.infoHash?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
     }
 }
 
@@ -256,7 +302,7 @@ fun PlayerScreen(
 ) {
     val selection = PlaybackSession.selection
     val source = PlaybackSession.source
-    if (selection == null || source?.url == null) {
+    if (selection == null || (source?.url == null && source?.infoHash == null)) {
         LaunchedEffect(Unit) { onBack() }
         return
     }
@@ -266,6 +312,9 @@ fun PlayerScreen(
             PlayerViewModel(context.applicationContext, AppGraph.core(context), selection, source)
         }
     val state by viewModel.player.state.collectAsStateWithLifecycle()
+    val preparing by viewModel.preparing.collectAsStateWithLifecycle()
+    val torrent by viewModel.torrent.collectAsStateWithLifecycle()
+    val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf<Panel?>(null) }
@@ -340,8 +389,20 @@ fun PlayerScreen(
     ) {
         PlayerSurface(viewModel.player, Modifier.fillMaxSize())
 
-        if (state.isBuffering || !state.isLoaded) {
-            if (state.error == null) SnLoading(Modifier.align(Alignment.Center))
+        if (!prepareFailed && state.error == null) {
+            if (preparing || !state.isLoaded) {
+                // Until the first frame: the title's logo fills while the source gets ready.
+                SnLogoLoader(
+                    logo = selection.details.item.logo,
+                    title = selection.details.item.name,
+                    progress = null,
+                    status = torrent?.let { torrentStatusText(it) },
+                    label = stringResource(R.string.player_preparing),
+                    modifier = Modifier.align(Alignment.Center).padding(SnSpacing.space8),
+                )
+            } else if (state.isBuffering) {
+                SnLoading(Modifier.align(Alignment.Center))
+            }
         }
 
         AnimatedVisibility(controlsVisible && state.error == null, enter = fadeIn(), exit = fadeOut()) {
@@ -374,7 +435,7 @@ fun PlayerScreen(
             )
         }
 
-        if (state.error != null) {
+        if (state.error != null || prepareFailed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (state.isEnded && next != null) {
             SnButton(
@@ -717,6 +778,31 @@ private fun PanelOption(
                 modifier = Modifier.size(20.dp),
                 colorFilter = ColorFilter.tint(SnColors.accent),
             )
+        }
+    }
+}
+
+/** "Looking for peers…", "Checking downloaded data…" or "12 peers · 2.4 MB/s". */
+@Composable
+private fun torrentStatusText(progress: TorrentProgress): String {
+    val context = LocalContext.current
+    return when (progress.phase) {
+        TorrentPhase.METADATA -> {
+            stringResource(R.string.torrent_finding_peers)
+        }
+
+        TorrentPhase.CHECKING -> {
+            stringResource(R.string.torrent_checking)
+        }
+
+        TorrentPhase.FAILED -> {
+            stringResource(R.string.player_error_title)
+        }
+
+        else -> {
+            val peers = progress.peers.toInt()
+            val speed = Formatter.formatShortFileSize(context, progress.downloadSpeed.toLong())
+            pluralStringResource(R.plurals.torrent_peers, peers, peers, speed)
         }
     }
 }

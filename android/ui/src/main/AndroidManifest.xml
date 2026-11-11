@@ -6,4 +6,6 @@
     permission. It is requested only when the user installs an addon hosted on their network.
   -->
   <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+  <!-- Tells Wi-Fi from mobile data for the "Only on Wi-Fi" torrent preference. -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

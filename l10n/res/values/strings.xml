@@ -246,4 +246,57 @@
   <!-- Countdown on the next-episode card. %1$d is the seconds left. -->
   <string name="player_up_next">Up next in %1$d s</string>
 
+  <!-- Crash reports (docs/adr/0007-crash-reports.md). -->
+  <!-- Title of the dialog shown on the next launch after the app crashed. -->
+  <string name="crash_title_closed">StremioNow closed unexpectedly</string>
+  <!-- Same dialog when the app hit an error but kept running. -->
+  <string name="crash_title_error">StremioNow ran into a problem</string>
+  <!-- Body of that dialog. "Send report" is the button crash_send. -->
+  <string name="crash_body">A report of what went wrong was saved on this device. Sending it helps fix the problem. It holds technical details only: addresses, keys and personal file paths are removed, and nothing is sent unless you choose Send report.</string>
+  <!-- Shown under crash_body when the same crash happened more than once. -->
+  <plurals name="crash_occurrences">
+    <item quantity="one">It happened %1$d time.</item>
+    <item quantity="other">It happened %1$d times.</item>
+  </plurals>
+  <string name="crash_view">View report</string>
+  <string name="crash_send">Send report</string>
+  <string name="crash_dont_send">Don\'t send</string>
+  <string name="crash_copy">Copy report</string>
+  <!-- Replaces "Copy report" on the button once the report is on the clipboard. -->
+  <string name="crash_copied">Copied</string>
+  <string name="crash_share">Share</string>
+  <string name="crash_done">Done</string>
+  <!-- Title of the page that shows the full report. -->
+  <string name="crash_report_title">Crash report</string>
+  <string name="crash_report_hint">This is everything the report holds. Send report opens a pre-filled issue on GitHub, which you can review before you submit it.</string>
+  <!-- Shown on the report page after Send report, when the link could not carry the whole report. -->
+  <string name="crash_shortened">The report was too long for a link, so GitHub got a shortened copy. Copy the full report and paste it into the issue.</string>
+  <!-- Name of the clipboard entry holding a copied report. -->
+  <string name="crash_clip_label">StremioNow crash report</string>
+  <!-- Title of the panel with a QR code, shown on TVs and where no browser can open the link. -->
+  <string name="crash_qr_title">Send from your phone</string>
+  <string name="crash_qr_body">Scan this code with your phone\'s camera to open a pre-filled issue on GitHub. You can review it there before you submit it; you need a GitHub account.</string>
+  <string name="crash_qr_shortened">To fit in the code, the report is shortened.</string>
+  <!-- Accessibility description of the QR code. -->
+  <string name="crash_qr_description">QR code with a link to a new issue on GitHub</string>
+  <!-- Shown above the QR code when the phone or computer had no browser to open the link. -->
+  <string name="crash_no_browser">No browser could open the link. Scan the code with your phone instead.</string>
+  <!-- Settings section. -->
+  <string name="settings_privacy">Privacy</string>
+  <string name="settings_crash_reports">Crash reports</string>
+  <!-- "Ask me before sending" is the option settings_crash_ask. -->
+  <string name="settings_crash_reports_body">When StremioNow closes unexpectedly, it can save a report on this device. With Ask me before sending, you can review it and choose to send it the next time you open the app. Nothing is ever sent on its own.</string>
+  <string name="settings_crash_ask">Ask me before sending</string>
+  <string name="settings_crash_never">Never</string>
+
+  <!-- Hidden test-crash menu of debug builds. Not translated: users never see it. -->
+  <string name="debug_crash_title" translatable="false">Test crash reports</string>
+  <string name="debug_crash_body" translatable="false">Crash the app on purpose. The report shows on the next launch.</string>
+  <string name="debug_crash_interface" translatable="false">Exception on the interface thread</string>
+  <string name="debug_crash_background" translatable="false">Exception on a background thread</string>
+  <string name="debug_crash_panic_call" translatable="false">Core panic in a call</string>
+  <string name="debug_crash_panic_background" translatable="false">Core panic in the background (keeps running)</string>
+  <string name="debug_crash_abort" translatable="false">Native abort in the core</string>
+  <string name="debug_crash_anr" translatable="false">Freeze the interface for 20 s (not responding)</string>
+
 </resources>

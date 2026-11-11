@@ -26,6 +26,8 @@ kotlin {
             implementation(libs.coil.compose)
             implementation(libs.coil.network.okhttp)
             implementation(libs.okhttp)
+            // QR codes that carry a crash report's GitHub link from a TV to a phone (ADR 0007).
+            implementation(libs.qrcodegen)
         }
         commonTest.dependencies {
             implementation(libs.junit)

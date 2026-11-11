@@ -2,6 +2,8 @@
 
 Releases are built by the [Release workflow](../.github/workflows/release.yml) when a version tag is pushed. One job builds unsigned phone and TV APKs without access to any secret; a second job, which runs no third-party actions, signs them with `apksigner`, writes their SHA-256 checksums and opens a draft GitHub release with generated notes.
 
+Each app ships as one APK per ABI plus a universal APK, named `StremioNow-<tag>-<phone|tv>-<abi>.apk`. Most phones and TVs need `arm64-v8a`; `armeabi-v7a` covers older and low-end devices (many Fire TV sticks); the universal APK works everywhere at about three times the size.
+
 ## One-time setup: signing key
 
 1. Create a keystore and keep it, with its passwords, somewhere safe outside the repository. Losing it means existing installs cannot be updated.

@@ -15,6 +15,7 @@ use stremionow_protocol::{AddonUrl, CatalogResponse, Extra, Manifest, MetaRespon
 use crate::records::{
     AddonInfo, CatalogInfo, CatalogRow, CoreError, LibraryItem, MetaDetails, MetaItem,
 };
+use crate::streaming::Streaming;
 
 /// Addons installed by default, the same ones the official Stremio app starts with, each with
 /// the version of this list that added it. Stremio's "Local Files" needs its local streaming
@@ -53,6 +54,7 @@ const HOME_CONCURRENCY: usize = 4;
 pub struct StremioCore {
     store: Mutex<Store>,
     pub(crate) client: AddonClient,
+    pub(crate) streaming: Streaming,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -69,6 +71,7 @@ impl StremioCore {
         Ok(Arc::new(Self {
             store: Mutex::new(store),
             client: AddonClient::new(ADDON_TIMEOUT)?,
+            streaming: Streaming::new(directory.join("streams"))?,
         }))
     }
 

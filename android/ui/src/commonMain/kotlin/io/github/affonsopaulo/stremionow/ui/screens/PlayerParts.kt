@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.semantics.heading
@@ -36,10 +38,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
+import io.github.affonsopaulo.stremionow.core.SkipSegment
 import io.github.affonsopaulo.stremionow.core.TorrentPhase
 import io.github.affonsopaulo.stremionow.core.TorrentProgress
 import io.github.affonsopaulo.stremionow.player.Chapters
+import io.github.affonsopaulo.stremionow.player.Markers
+import io.github.affonsopaulo.stremionow.player.PlaybackPrompt
 import io.github.affonsopaulo.stremionow.player.PlaybackState
+import io.github.affonsopaulo.stremionow.player.Segment
+import io.github.affonsopaulo.stremionow.player.SkipKind
 import io.github.affonsopaulo.stremionow.player.Track
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
@@ -57,16 +64,11 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
 import java.util.Locale
+import io.github.affonsopaulo.stremionow.core.SkipKind as CoreSkipKind
 
 // Parts of the player screen that do not depend on the platform: the panels, the "Up next"
-// card, the skip-intro button, the error message and the torrent status line. Each platform's
+// card, the skip buttons, the error message and the torrent status line. Each platform's
 // PlayerScreen lays them out over its own video surface and controls.
-
-/** Without a credits chapter, "Up next" shows this long before the end. */
-private const val UP_NEXT_FALLBACK_SECONDS = 30.0
-
-/** Shorter videos show "Up next" only at the end, not for most of their length. */
-private const val UP_NEXT_MIN_DURATION_SECONDS = 120.0
 
 /** Seconds the "Up next" card counts down before playing the next episode. */
 private const val UP_NEXT_COUNTDOWN = 10
@@ -74,56 +76,97 @@ private const val UP_NEXT_COUNTDOWN = 10
 /** Controls hide after this long without input while playing. */
 internal const val CONTROLS_TIMEOUT_MS = 4_000L
 
+/**
+ * How far the corner prompt rises while the controls show, so it sits above the timeline and
+ * the bottom buttons instead of covering them.
+ */
+internal val PromptControlsClearance = SnSpacing.space16 + SnSpacing.space4
+
 /** Side panels of the player. */
 internal enum class Panel { Tracks, Episodes }
 
 /**
- * The prompt in the bottom corner once a file plays: "Skip intro" during a chapter named like an
- * intro, then the next episode's card from the end credits (or the last half minute) on.
+ * The prompt in the bottom corner once a file plays: "Skip intro", "Skip recap" or "Skip
+ * credits" inside those segments, and the next episode's card near the end (see
+ * [PlaybackPrompt.at] for which one shows when). Segments come from the file's chapters, then
+ * from [skips] (AniSkip) for what the chapters do not mark.
+ *
+ * With [takeFocus], each prompt takes the focus when it appears, so a remote's OK acts on it.
+ * Platforms set it only when nothing else on screen could have the focus.
  */
 @Composable
 internal fun PlaybackPrompts(
     state: PlaybackState,
+    skips: Markers,
     next: Episode?,
     onSeekTo: (Double) -> Unit,
     onOpenEpisode: (Episode) -> Unit,
     modifier: Modifier = Modifier,
+    takeFocus: Boolean = false,
 ) {
-    val intro =
-        remember(
-            state.chapters,
-            state.durationSeconds,
-        ) { Chapters.intro(state.chapters, state.durationSeconds) }
-    val upNextAt =
-        remember(state.chapters, state.durationSeconds) {
-            val duration = state.durationSeconds ?: return@remember null
-            // At the end credits, or the last half minute when the file does not mark them.
-            Chapters.creditsStart(state.chapters, duration)
-                ?: (duration - UP_NEXT_FALLBACK_SECONDS).takeIf { duration >= UP_NEXT_MIN_DURATION_SECONDS }
-                ?: duration
+    val markers =
+        remember(state.chapters, state.durationSeconds, skips) {
+            Chapters.markers(state.chapters, state.durationSeconds).orElse(skips)
         }
-    when {
-        intro != null && state.positionSeconds in intro -> {
+    val prompt =
+        PlaybackPrompt.at(
+            markers = markers,
+            positionSeconds = state.positionSeconds,
+            durationSeconds = state.durationSeconds,
+            hasNext = next != null,
+            isEnded = state.isEnded,
+        )
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(prompt, takeFocus) {
+        if (prompt != null && takeFocus) runCatching { focus.requestFocus() }
+    }
+    when (prompt) {
+        is PlaybackPrompt.Skip -> {
             SnButton(
-                text = stringResource(Res.string.player_skip_intro),
+                text =
+                    stringResource(
+                        when (prompt.kind) {
+                            SkipKind.Intro -> Res.string.player_skip_intro
+                            SkipKind.Recap -> Res.string.player_skip_recap
+                            SkipKind.Credits -> Res.string.player_skip_credits
+                        },
+                    ),
                 icon = SnIcons.Skip,
                 style = SnButtonStyle.Secondary,
-                onClick = { onSeekTo(intro.endSeconds) },
-                modifier = modifier,
+                onClick = { onSeekTo(prompt.toSeconds) },
+                modifier = modifier.focusRequester(focus),
             )
         }
 
-        next != null && upNextAt != null && (state.positionSeconds >= upNextAt || state.isEnded) -> {
-            UpNext(
-                episode = next,
-                // mpv pauses itself at the end of a file; only a pause by the viewer stops the count.
-                paused = state.isPaused && !state.isEnded,
-                onPlay = { onOpenEpisode(next) },
-                modifier = modifier,
-            )
+        PlaybackPrompt.UpNext -> {
+            if (next != null) {
+                UpNext(
+                    episode = next,
+                    // mpv pauses itself at the end of a file; only a pause by the viewer stops the count.
+                    paused = state.isPaused && !state.isEnded,
+                    onPlay = { onOpenEpisode(next) },
+                    modifier = modifier.focusRequester(focus),
+                )
+            }
         }
+
+        null -> {}
     }
 }
+
+/** AniSkip's segments as the player's markers. */
+internal fun List<SkipSegment>.toMarkers(): Markers =
+    Markers.of(
+        map { segment ->
+            val kind =
+                when (segment.kind) {
+                    CoreSkipKind.INTRO -> SkipKind.Intro
+                    CoreSkipKind.RECAP -> SkipKind.Recap
+                    CoreSkipKind.CREDITS -> SkipKind.Credits
+                }
+            kind to Segment(segment.startSeconds, segment.endSeconds)
+        },
+    )
 
 /** Shown when the source could not be prepared or played: back, or choose another source. */
 @Composable

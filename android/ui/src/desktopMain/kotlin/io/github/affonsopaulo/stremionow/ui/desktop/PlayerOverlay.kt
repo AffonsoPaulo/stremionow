@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.desktop
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -69,6 +70,7 @@ import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerViewModel
+import io.github.affonsopaulo.stremionow.ui.screens.PromptControlsClearance
 import io.github.affonsopaulo.stremionow.ui.screens.SidePanel
 import io.github.affonsopaulo.stremionow.ui.screens.TracksList
 import io.github.affonsopaulo.stremionow.ui.screens.torrentStatusText
@@ -187,6 +189,11 @@ internal fun PlayerOverlay(
     val preparing by viewModel.preparing.collectAsState()
     val torrent by viewModel.torrent.collectAsState()
     val prepareFailed by viewModel.prepareFailed.collectAsState()
+    val skips by viewModel.skips.collectAsState()
+    val promptLift by animateDpAsState(
+        if (state.areControlsVisible) PromptControlsClearance else 0.dp,
+        label = "prompt-lift",
+    )
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
 
@@ -263,10 +270,15 @@ internal fun PlayerOverlay(
         } else if (playback.isLoaded) {
             PlaybackPrompts(
                 state = playback,
+                skips = skips,
                 next = next,
                 onSeekTo = player::seekTo,
                 onOpenEpisode = onOpenEpisode,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(SnSpacing.space8),
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(SnSpacing.space8)
+                        .padding(bottom = promptLift),
             )
         }
 

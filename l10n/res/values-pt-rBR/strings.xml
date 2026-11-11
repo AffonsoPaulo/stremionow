@@ -151,6 +151,8 @@
   <string name="settings_cache">Tamanho do cache</string>
   <string name="settings_cache_body">Espaço que os torrents podem ocupar neste aparelho, para que títulos assistidos de novo comecem mais rápido.</string>
   <string name="settings_gigabytes">%1$d GB</string>
+  <string name="settings_aniskip">Trechos para pular do AniSkip</string>
+  <string name="settings_aniskip_body">Oferece pular aberturas, recapitulações e encerramentos de animes com os tempos compartilhados pela comunidade do AniSkip. Para encontrá-los, o anime e o episódio que você assiste são enviados ao AniSkip (api.aniskip.com) e a um serviço de mapeamento de IDs (arm.haglund.dev).</string>
 
   <string name="player_preparing">Preparando a fonte</string>
   <string name="torrent_finding_peers">Procurando pares…</string>
@@ -196,6 +198,8 @@
   <string name="profile_sign_out_body">Seus addons, sua lista e seu progresso continuam neste aparelho, mas param de sincronizar.</string>
 
   <string name="player_skip_intro">Pular abertura</string>
+  <string name="player_skip_recap">Pular recapitulação</string>
+  <string name="player_skip_credits">Pular créditos</string>
   <string name="player_up_next">A seguir em %1$d s</string>
 
 </resources>

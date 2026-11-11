@@ -112,32 +112,22 @@ fun SettingsScreen() {
                         onSelect = { lines -> viewModel.update { it.copy(maxResolution = lines) } },
                     )
                 }
+                SwitchRow(
+                    title = stringResource(Res.string.settings_aniskip),
+                    body = stringResource(Res.string.settings_aniskip_body),
+                    checked = current.aniskip,
+                    onToggle = { viewModel.update { it.copy(aniskip = !it.aniskip) } },
+                )
             }
         }
         item {
             Section(stringResource(Res.string.settings_torrents)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
-                        BasicText(
-                            stringResource(Res.string.settings_wifi_only),
-                            style = SnTypography.bodyLg.copy(color = SnColors.fg),
-                        )
-                        BasicText(
-                            stringResource(Res.string.settings_wifi_only_body),
-                            style = SnTypography.body.copy(color = SnColors.fgMuted),
-                        )
-                    }
-                    SnSwitch(
-                        checked = current.torrentWifiOnly,
-                        label = stringResource(Res.string.settings_wifi_only),
-                        onText = stringResource(Res.string.state_on),
-                        offText = stringResource(Res.string.state_off),
-                        onToggle = { viewModel.update { it.copy(torrentWifiOnly = !it.torrentWifiOnly) } },
-                    )
-                }
+                SwitchRow(
+                    title = stringResource(Res.string.settings_wifi_only),
+                    body = stringResource(Res.string.settings_wifi_only_body),
+                    checked = current.torrentWifiOnly,
+                    onToggle = { viewModel.update { it.copy(torrentWifiOnly = !it.torrentWifiOnly) } },
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
                     BasicText(
                         stringResource(Res.string.settings_cache),
@@ -171,6 +161,32 @@ private fun Section(
             style = SnTypography.overline.copy(color = SnColors.fgMuted),
         )
         content()
+    }
+}
+
+/** A preference that is on or off: its name and what it does, with the switch beside them. */
+@Composable
+private fun SwitchRow(
+    title: String,
+    body: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+            BasicText(title, style = SnTypography.bodyLg.copy(color = SnColors.fg))
+            BasicText(body, style = SnTypography.body.copy(color = SnColors.fgMuted))
+        }
+        SnSwitch(
+            checked = checked,
+            label = title,
+            onText = stringResource(Res.string.state_on),
+            offText = stringResource(Res.string.state_off),
+            onToggle = onToggle,
+        )
     }
 }
 

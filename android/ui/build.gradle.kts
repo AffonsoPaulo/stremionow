@@ -27,6 +27,9 @@ kotlin {
             implementation(libs.coil.network.okhttp)
             implementation(libs.okhttp)
         }
+        commonTest.dependencies {
+            implementation(libs.junit)
+        }
         androidMain.dependencies {
             // The same androidx versions as before the module became multiplatform.
             api(project.dependencies.platform(libs.compose.bom))
@@ -45,9 +48,6 @@ kotlin {
             implementation(libs.jna.platform)
             // Dispatchers.Main on the AWT event thread.
             implementation(libs.kotlinx.coroutines.swing)
-        }
-        named("desktopTest").dependencies {
-            implementation(libs.junit)
         }
     }
 }

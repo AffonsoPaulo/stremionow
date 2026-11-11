@@ -12,10 +12,12 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.affonsopaulo.stremionow.ui.StremioNowApp
+import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
+import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import java.awt.Color
 import java.awt.Dimension
 
@@ -36,7 +38,11 @@ private val BACKGROUND = Color(0x0A, 0x0B, 0x10)
  */
 fun main(args: Array<String>) {
     val verbose = "--verbose" in args
+    // First, so a failure to set up the native libraries is reported too; the core is reached
+    // only once they are (docs/adr/0007-crash-reports.md).
+    CrashReports.install(PlatformContext.INSTANCE, isTv = false, listenToCore = false)
     NativeLibraries.install()
+    CrashReports.listenToCorePanics()
 
     application {
         val windowState =

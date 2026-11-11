@@ -8,6 +8,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.ui.platform.LocalContext
+import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 
 actual typealias PlatformContext = Context
 
@@ -20,6 +21,7 @@ internal actual fun logWarning(
     error: Throwable?,
 ) {
     Log.w(TAG, message, error)
+    RecentLog.add('W', message, error)
 }
 
 internal actual fun openExternalLink(

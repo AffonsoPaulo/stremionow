@@ -52,7 +52,7 @@ const HOME_CONCURRENCY: usize = 4;
 #[derive(uniffi::Object)]
 pub struct StremioCore {
     store: Mutex<Store>,
-    client: AddonClient,
+    pub(crate) client: AddonClient,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -347,7 +347,7 @@ impl StremioCore {
         Ok(AddonInfo::new(addon, enabled))
     }
 
-    fn store(&self) -> Result<MutexGuard<'_, Store>, CoreError> {
+    pub(crate) fn store(&self) -> Result<MutexGuard<'_, Store>, CoreError> {
         self.store.lock().map_err(|_| CoreError::Storage {
             reason: "the database lock was poisoned".into(),
         })
@@ -368,7 +368,7 @@ impl StremioCore {
             .collect())
     }
 
-    fn enabled(&self) -> Result<Vec<InstalledAddon>, CoreError> {
+    pub(crate) fn enabled(&self) -> Result<Vec<InstalledAddon>, CoreError> {
         Ok(self
             .installed()?
             .into_iter()
@@ -376,7 +376,7 @@ impl StremioCore {
             .collect())
     }
 
-    fn find_addon(&self, manifest_url: &str) -> Result<InstalledAddon, CoreError> {
+    pub(crate) fn find_addon(&self, manifest_url: &str) -> Result<InstalledAddon, CoreError> {
         self.enabled()?
             .into_iter()
             .find(|addon| addon.url.manifest_url() == manifest_url)
@@ -436,7 +436,7 @@ fn dedupe(items: impl IntoIterator<Item = MetaItem>) -> Vec<MetaItem> {
         .collect()
 }
 
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(millis)

@@ -8,6 +8,7 @@
 #![allow(unsafe_code)]
 
 mod core;
+mod playback;
 mod records;
 
 pub use crate::core::StremioCore;

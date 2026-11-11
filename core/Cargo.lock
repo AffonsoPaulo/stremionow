@@ -1469,6 +1469,7 @@ dependencies = [
  "stremionow-addons",
  "stremionow-library",
  "stremionow-protocol",
+ "stremionow-ranking",
  "tempfile",
  "thiserror",
  "tokio",

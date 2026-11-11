@@ -27,7 +27,9 @@ fix(addons): time out slow addons after 5 s
 docs(adr): record desktop UI decision
 ```
 
-## Rules that CI enforces
+## Project rules
+
+CI already checks Rust formatting, lint, tests, the Android build and license headers. Checks for the remaining rules are being added during phase 0; until then, reviewers enforce them.
 
 - **No hard-coded UI text.** Every string lives in [`l10n/`](l10n) and is translatable.
 - **No colors, sizes or fonts outside the design tokens.** They come from [`design/tokens.json`](design/tokens.json); generated theme files are never edited by hand.

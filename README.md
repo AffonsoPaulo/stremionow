@@ -29,25 +29,38 @@ See [`docs/adr`](docs/adr) for the reasoning behind each decision.
 ## Repository layout
 
 ```
-core/        Rust workspace (shared logic)
-android/     Android apps: phone and TV            (coming in phase 0)
-desktop/     Desktop app                           (phase 5)
-design/      Design tokens, the single source of colors, type and spacing
-l10n/        UI strings: English source and translations
-docs/adr/    Architecture decision records
+core/          Rust workspace (shared logic)
+android/       Android apps (phone and TV), shared UI and the core bridge
+desktop/       Desktop app                                  (phase 5)
+design/        Design tokens, the single source of colors, type and spacing
+l10n/          UI strings: English source and translations
+docs/adr/      Architecture decision records
+third_party/   Licenses of bundled third-party assets
 ```
 
 ## Building
 
-The toolchain is being set up in phase 0. Requirements so far:
+Requirements:
 
-- Rust (stable, via [rustup](https://rustup.rs))
-- JDK 17 or newer and the Android SDK with NDK 27 (Android Studio covers both)
+- Rust stable via [rustup](https://rustup.rs); the Android targets install automatically from `core/rust-toolchain.toml`
+- [cargo-ndk](https://github.com/bbqsrc/cargo-ndk): `cargo install cargo-ndk`
+- JDK 17 or newer and the Android SDK with NDK 27.1.12297006 (Android Studio covers both)
+
+Core tests:
 
 ```
 cd core
-cargo test
+cargo test --workspace
 ```
+
+Android apps (the Gradle build compiles the core and generates its Kotlin bindings):
+
+```
+cd android
+./gradlew assembleDebug
+```
+
+The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV).
 
 ## Languages
 

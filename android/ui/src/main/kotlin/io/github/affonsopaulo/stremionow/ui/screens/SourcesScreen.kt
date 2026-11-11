@@ -46,6 +46,7 @@ import io.github.affonsopaulo.stremionow.ui.R
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
+import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Connectivity
@@ -231,7 +232,12 @@ fun SourcesScreen(
                         ->
                         "$index/${source.addonName}/${source.name}"
                     }) { index, source ->
-                        SourceRow(source, best = index == 0 && source.playsInApp, onClick = { choose(source) })
+                        SourceRow(
+                            source,
+                            best = index == 0 && source.playsInApp,
+                            onClick = { choose(source) },
+                            modifier = if (index == 0) Modifier.initialFocus() else Modifier,
+                        )
                     }
                 }
             }
@@ -295,11 +301,12 @@ private fun SourceRow(
     source: StreamSource,
     best: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusLg)
     Column(
         modifier =
-            Modifier
+            modifier
                 .widthIn(max = 880.dp)
                 .fillMaxWidth()
                 .snClickable(shape, onClick = onClick)

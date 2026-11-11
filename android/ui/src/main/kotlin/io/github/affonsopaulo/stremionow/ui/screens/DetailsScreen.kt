@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -59,9 +60,11 @@ import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
+import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
+import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
@@ -200,66 +203,78 @@ private fun DetailsContent(
         }
     var tab by rememberSaveable(item.id) { mutableIntStateOf(0) }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = SnSpacing.space16)) {
-        item(key = "hero") {
-            val height = if (SnLayout.formFactor == FormFactor.Phone) 420.dp else 560.dp
-            Box(Modifier.fillMaxWidth().heightIn(min = height)) {
-                SnArtwork(
-                    url = item.background ?: item.poster,
-                    fallbackTitle = "",
-                    modifier = Modifier.matchParentSize(),
-                )
-                Box(
-                    Modifier.matchParentSize().background(
-                        Brush.horizontalGradient(
-                            0f to SnColors.bg.copy(alpha = 0.95f),
-                            0.36f to SnColors.bg.copy(alpha = 0.7f),
-                            0.7f to SnColors.bg.copy(alpha = 0f),
-                        ),
-                    ),
-                )
-                Box(
-                    Modifier.matchParentSize().background(
-                        Brush.verticalGradient(
-                            0.55f to SnColors.bg.copy(alpha = 0f),
-                            1f to SnColors.bg,
-                        ),
-                    ),
-                )
-                Column(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .widthIn(max = 660.dp)
-                        .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
-                    verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                ) {
-                    TitleLogo(item)
-                    MetaLine(item, details.runtime, onOpenGenre)
-                    Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-                        WatchButton(details, progress, onPlay)
-                        SnButton(
-                            text =
-                                stringResource(
-                                    if (inLibrary) R.string.action_in_list else R.string.action_add_to_list,
-                                ),
-                            icon = if (inLibrary) SnIcons.Check else SnIcons.Plus,
-                            style = SnButtonStyle.Secondary,
-                            onClick = onToggleLibrary,
-                        )
+    SnMinimalScroll {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = SnSpacing.space16)) {
+            item(key = "hero") {
+                val height =
+                    when (SnLayout.formFactor) {
+                        FormFactor.Phone -> 420.dp
+                        FormFactor.Large -> 560.dp
+                        FormFactor.Tv -> (LocalConfiguration.current.screenHeightDp * 0.8f).dp
                     }
-                    item.description?.let { ExpandableDescription(item.id, it) }
+                Box(Modifier.fillMaxWidth().heightIn(min = height)) {
+                    SnArtwork(
+                        url = item.background ?: item.poster,
+                        fallbackTitle = "",
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Box(
+                        Modifier.matchParentSize().background(
+                            Brush.horizontalGradient(
+                                0f to SnColors.bg.copy(alpha = 0.95f),
+                                0.36f to SnColors.bg.copy(alpha = 0.7f),
+                                0.7f to SnColors.bg.copy(alpha = 0f),
+                            ),
+                        ),
+                    )
+                    Box(
+                        Modifier.matchParentSize().background(
+                            Brush.verticalGradient(
+                                0.55f to SnColors.bg.copy(alpha = 0f),
+                                1f to SnColors.bg,
+                            ),
+                        ),
+                    )
+                    Column(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .widthIn(max = 660.dp)
+                            .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
+                        verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+                    ) {
+                        TitleLogo(item)
+                        MetaLine(item, details.runtime, onOpenGenre)
+                        Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+                            WatchButton(details, progress, onPlay)
+                            SnButton(
+                                text =
+                                    stringResource(
+                                        if (inLibrary) R.string.action_in_list else R.string.action_add_to_list,
+                                    ),
+                                icon = if (inLibrary) SnIcons.Check else SnIcons.Plus,
+                                style = SnButtonStyle.Secondary,
+                                onClick = onToggleLibrary,
+                            )
+                        }
+                        item.description?.let { ExpandableDescription(item.id, it) }
+                    }
                 }
             }
-        }
-        item(key = "tabs") {
-            SnTabs(tabs, tab.coerceAtMost(tabs.lastIndex), { tab = it }, Modifier.padding(horizontal = SnLayout.gutter))
-        }
-        item(key = "tab-content") {
-            Box(Modifier.padding(top = SnSpacing.space6)) {
-                when (tabs.getOrNull(tab)) {
-                    stringResource(R.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
-                    stringResource(R.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
-                    else -> InfoTab(details, onOpenGenre, onSearchPerson)
+            item(key = "tabs") {
+                SnTabs(
+                    tabs,
+                    tab.coerceAtMost(tabs.lastIndex),
+                    { tab = it },
+                    Modifier.padding(horizontal = SnLayout.gutter),
+                )
+            }
+            item(key = "tab-content") {
+                Box(Modifier.padding(top = SnSpacing.space6)) {
+                    when (tabs.getOrNull(tab)) {
+                        stringResource(R.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
+                        stringResource(R.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
+                        else -> InfoTab(details, onOpenGenre, onSearchPerson)
+                    }
                 }
             }
         }
@@ -301,6 +316,7 @@ private fun WatchButton(
     SnButton(
         text = text,
         icon = SnIcons.Play,
+        modifier = Modifier.initialFocus(),
         onClick = {
             val episode =
                 resumeEpisode

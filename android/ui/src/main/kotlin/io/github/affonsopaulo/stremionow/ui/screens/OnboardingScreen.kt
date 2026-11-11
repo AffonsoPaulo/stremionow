@@ -52,6 +52,8 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnWordmark
+import io.github.affonsopaulo.stremionow.ui.components.dpadExits
+import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -237,7 +239,11 @@ private fun Welcome(
     Title(stringResource(R.string.onboarding_welcome_title))
     Body(stringResource(R.string.onboarding_welcome_body))
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-        SnButton(stringResource(R.string.onboarding_sign_in), onSignIn, modifier = Modifier.fillMaxWidth())
+        SnButton(
+            stringResource(R.string.onboarding_sign_in),
+            onSignIn,
+            modifier = Modifier.fillMaxWidth().initialFocus(),
+        )
         SnButton(
             stringResource(R.string.onboarding_local),
             onLocal,
@@ -364,7 +370,12 @@ private fun Debrid(
         )
     }
     Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-        SnButton(stringResource(R.string.onboarding_skip), onSkip, style = SnButtonStyle.Ghost)
+        SnButton(
+            stringResource(R.string.onboarding_skip),
+            onSkip,
+            style = SnButtonStyle.Ghost,
+            modifier = Modifier.initialFocus(),
+        )
         SnButton(
             stringResource(if (state.busy) R.string.addons_installing else R.string.onboarding_connect),
             { onConnect(service, key) },
@@ -424,7 +435,7 @@ private fun Field(
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+                modifier = Modifier.fillMaxWidth().dpadExits().semantics { contentDescription = label },
                 textStyle = SnTypography.body.copy(color = SnColors.fg),
                 singleLine = true,
                 cursorBrush = SolidColor(SnColors.accent),

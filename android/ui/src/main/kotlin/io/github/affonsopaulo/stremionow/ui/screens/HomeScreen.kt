@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,9 +49,11 @@ import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
+import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
+import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -166,28 +169,30 @@ private fun HomeContent(
                 .keys
         }
     val featured = rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it.background != null } }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = SnSpacing.space16),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space10),
-    ) {
-        if (featured != null) {
-            item(key = "hero") { Hero(featured, onOpenTitle) }
-        }
-        if (continueWatching.isNotEmpty()) {
-            item(key = "continue") { ContinueWatchingRow(continueWatching, onOpenProgress) }
-        }
-        items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
-            // Cinemeta names its movie and series catalogs alike ("Popular"); add the type then.
-            val title =
-                if (row.catalog.name in
-                    sharedNames
-                ) {
-                    "${row.catalog.name} · ${kindLabel(row.catalog.kind)}"
-                } else {
-                    row.catalog.name
-                }
-            CatalogRowSection(title, row, onOpenTitle)
+    SnMinimalScroll {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = SnSpacing.space16),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space10),
+        ) {
+            if (featured != null) {
+                item(key = "hero") { Hero(featured, onOpenTitle) }
+            }
+            if (continueWatching.isNotEmpty()) {
+                item(key = "continue") { ContinueWatchingRow(continueWatching, onOpenProgress) }
+            }
+            items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
+                // Cinemeta names its movie and series catalogs alike ("Popular"); add the type then.
+                val title =
+                    if (row.catalog.name in
+                        sharedNames
+                    ) {
+                        "${row.catalog.name} · ${kindLabel(row.catalog.kind)}"
+                    } else {
+                        row.catalog.name
+                    }
+                CatalogRowSection(title, row, onOpenTitle)
+            }
         }
     }
 }
@@ -198,17 +203,24 @@ private fun Hero(
     onOpenTitle: (MetaItem) -> Unit,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusXl)
-    val height = if (SnLayout.formFactor == FormFactor.Phone) 360.dp else 470.dp
+    // On TV the whole hero must fit under the header, logo included, with the first row peeking.
+    val height =
+        when (SnLayout.formFactor) {
+            FormFactor.Phone -> 360.dp
+            FormFactor.Large -> 470.dp
+            FormFactor.Tv -> (LocalConfiguration.current.screenHeightDp * 0.62f).dp
+        }
     Box(
         Modifier
             .padding(horizontal = SnLayout.gutter)
             .fillMaxWidth()
-            .height(height)
+            // At least this tall, and taller when the logo and synopsis need it.
+            .heightIn(min = height)
             .clip(shape),
     ) {
-        SnArtwork(url = item.background, fallbackTitle = "", modifier = Modifier.fillMaxSize())
+        SnArtwork(url = item.background, fallbackTitle = "", modifier = Modifier.matchParentSize())
         Box(
-            Modifier.fillMaxSize().background(
+            Modifier.matchParentSize().background(
                 Brush.horizontalGradient(
                     0f to SnColors.bg.copy(alpha = 0.95f),
                     0.4f to SnColors.bg.copy(alpha = 0.7f),
@@ -217,7 +229,7 @@ private fun Hero(
             ),
         )
         Box(
-            Modifier.fillMaxSize().background(
+            Modifier.matchParentSize().background(
                 Brush.verticalGradient(
                     0.6f to SnColors.bg.copy(alpha = 0f),
                     1f to SnColors.bg.copy(alpha = 0.6f),
@@ -238,7 +250,7 @@ private fun Hero(
                 BasicText(
                     it,
                     style = SnTypography.bodyLg.copy(color = SnColors.fg),
-                    maxLines = 3,
+                    maxLines = if (SnLayout.formFactor == FormFactor.Tv) 2 else 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -246,6 +258,7 @@ private fun Hero(
                 text = stringResource(R.string.action_more_info),
                 onClick = { onOpenTitle(item) },
                 icon = SnIcons.Info,
+                modifier = Modifier.initialFocus(),
             )
         }
     }

@@ -55,6 +55,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
+import io.github.affonsopaulo.stremionow.ui.components.dpadExits
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.LocalNetwork
@@ -228,7 +229,7 @@ private fun InstallField(
                 BasicTextField(
                     value = state.installUrl,
                     onValueChange = viewModel::setInstallUrl,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+                    modifier = Modifier.fillMaxWidth().dpadExits().semantics { contentDescription = label },
                     textStyle = SnTypography.body.copy(color = SnColors.fg),
                     singleLine = true,
                     cursorBrush = SolidColor(SnColors.accent),

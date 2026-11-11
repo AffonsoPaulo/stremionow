@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -142,6 +143,14 @@ private fun HomeContent(
     onOpenTitle: (MetaItem) -> Unit,
     onOpenProgress: (WatchProgress) -> Unit,
 ) {
+    val sharedNames =
+        remember(rows) {
+            rows
+                .groupingBy { it.catalog.name }
+                .eachCount()
+                .filterValues { it > 1 }
+                .keys
+        }
     val featured = rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it.background != null } }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -155,7 +164,16 @@ private fun HomeContent(
             item(key = "continue") { ContinueWatchingRow(continueWatching, onOpenProgress) }
         }
         items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
-            CatalogRowSection(row, onOpenTitle)
+            // Cinemeta names its movie and series catalogs alike ("Popular"); add the type then.
+            val title =
+                if (row.catalog.name in
+                    sharedNames
+                ) {
+                    "${row.catalog.name} · ${kindLabel(row.catalog.kind)}"
+                } else {
+                    row.catalog.name
+                }
+            CatalogRowSection(title, row, onOpenTitle)
         }
     }
 }
@@ -246,10 +264,11 @@ fun TitleLogo(
 
 @Composable
 private fun CatalogRowSection(
+    title: String,
     row: CatalogRow,
     onOpenTitle: (MetaItem) -> Unit,
 ) {
-    SnPosterSection(row.catalog.name, row.items, onOpenTitle, subtitle = { it.cardSubtitle() })
+    SnPosterSection(title, row.items, onOpenTitle, subtitle = { it.cardSubtitle() })
 }
 
 /** Titles in progress, with how far along each one is and the time left. */

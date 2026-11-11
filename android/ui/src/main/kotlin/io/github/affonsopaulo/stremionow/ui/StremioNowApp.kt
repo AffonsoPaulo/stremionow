@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -96,18 +98,24 @@ fun StremioNowApp(isTv: Boolean) {
                 else -> null
             }
         // The tab whose stack the user is in, so it stays highlighted on inner pages too.
-        val backStack by navController.currentBackStack.collectAsState()
-        val section =
-            backStack.lastOrNull { it.destination.route in TopRoutes }?.destination?.route?.let(
-                TopRoutes::get,
-            )
+        // The tab whose stack the user is in, so it stays highlighted on inner pages too. Kept
+        // here rather than read from the back stack, whose API is internal to Navigation.
+        var sectionRoute by rememberSaveable { mutableStateOf(Routes.HOME) }
+        LaunchedEffect(entry?.destination?.route) {
+            entry
+                ?.destination
+                ?.route
+                ?.takeIf { it in TopRoutes }
+                ?.let { sectionRoute = it }
+        }
+        val section = TopRoutes[sectionRoute]
         val phone = SnLayout.formFactor == FormFactor.Phone
         // The player owns the whole screen: no header, no tab bar, no insets.
         val immersive = entry?.destination?.route == Routes.PLAYER
         // Bumped when Search is chosen while already open, to focus the field and raise the keyboard.
         var searchFocusRequests by remember { mutableIntStateOf(0) }
         val openTab = { destination: TopDestination ->
-            navController.openTop(destination) {
+            navController.openTop(destination, sectionRoute, { sectionRoute = it }) {
                 if (destination == TopDestination.Search) searchFocusRequests++
             }
         }
@@ -137,7 +145,7 @@ fun StremioNowApp(isTv: Boolean) {
                     title = phoneTitle(entry?.destination?.route, entry?.arguments?.getString("genre")),
                     onBack = if (current == null) ({ navController.navigateUp() }) else null,
                     profileSelected = section == TopDestination.Profile,
-                    onOpenProfile = { navController.openTop(TopDestination.Profile) },
+                    onOpenProfile = { openTab(TopDestination.Profile) },
                 )
             } else {
                 SnHeader(current = section, onNavigate = openTab)
@@ -181,7 +189,7 @@ fun StremioNowApp(isTv: Boolean) {
                     )
                 }
                 composable(Routes.LIBRARY) {
-                    LibraryScreen(onOpenTitle = openTitle, onExplore = { navController.openTop(TopDestination.Series) })
+                    LibraryScreen(onOpenTitle = openTitle, onExplore = { openTab(TopDestination.Series) })
                 }
                 composable(Routes.PROFILE) {
                     ProfileScreen(
@@ -285,19 +293,17 @@ private val TopRoutes =
  */
 private fun NavHostController.openTop(
     destination: TopDestination,
+    currentSection: String,
+    onSection: (String) -> Unit,
     onReselect: () -> Unit = {},
 ) {
     val route = TopRoutes.entries.first { it.value == destination }.key
-    val currentSection =
-        currentBackStack.value
-            .lastOrNull { it.destination.route in TopRoutes }
-            ?.destination
-            ?.route
     if (currentSection == route) {
         popBackStack(route, inclusive = false)
         onReselect()
         return
     }
+    onSection(route)
     navigate(route) {
         popUpTo(Routes.HOME) { saveState = true }
         launchSingleTop = true

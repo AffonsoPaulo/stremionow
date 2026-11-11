@@ -97,8 +97,14 @@ impl StremioCore {
         self.account.set_auth_key(Some(session.auth_key.clone()));
         self.store()?
             .set_setting(ACCOUNT_EMAIL, &session.user.email)?;
-        self.pull_addons(&session.auth_key).await?;
-        self.sync_library(&session.auth_key).await?;
+        // Signed in from here on. A first sync that fails (offline, server hiccup) must not
+        // look like a failed sign-in, or the app would drop a session that is still live;
+        // the next sync retries.
+        if let Err(error) = self.pull_addons(&session.auth_key).await {
+            log::warn!("first addon sync failed: {error}");
+        } else if let Err(error) = self.sync_library(&session.auth_key).await {
+            log::warn!("first library sync failed: {error}");
+        }
         Ok(session.auth_key)
     }
 
@@ -367,7 +373,9 @@ fn apply_remote(store: &Store, item: &RemoteLibraryItem) -> Result<(), CoreError
         store.remove_from_library(&item.id)?;
     }
     if let Some((video_id, offset, duration)) = item.progress() {
-        let unfinished = duration > 0 && offset > 0 && offset * 100 < duration * 92;
+        // u128: the numbers come from other clients and may be anything.
+        let unfinished =
+            duration > 0 && offset > 0 && u128::from(offset) * 100 < u128::from(duration) * 92;
         if unfinished && !item.removed {
             store.save_progress(&ProgressEntry {
                 id: item.id.clone(),
@@ -545,5 +553,34 @@ mod tests {
         core.sync().await.expect("syncs");
         core.sync().await.expect("syncs again");
         drop(uploads);
+    }
+
+    #[tokio::test]
+    async fn a_failed_first_sync_still_signs_in() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"authKey": "secret-key", "user": {"_id": "u1", "email": "me@example.com"}}
+            })))
+            .mount(&server)
+            .await;
+        // Everything else fails, as when the connection drops right after logging in.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+
+        let key = core
+            .sign_in("me@example.com".into(), "pw".into())
+            .await
+            .expect("signed in despite the failed sync");
+        assert_eq!(key, "secret-key");
+        assert_eq!(
+            core.account_email().expect("reads").as_deref(),
+            Some("me@example.com")
+        );
     }
 }

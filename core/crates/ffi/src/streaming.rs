@@ -65,6 +65,11 @@ impl Streaming {
                         reason: e.to_string(),
                     })?
                     .map_err(CoreError::from)
+                    .inspect(|server| {
+                        // Trim what an earlier run left over (it may have been killed mid-play).
+                        let server = server.clone();
+                        handle.spawn(async move { server.prune_cache().await });
+                    })
             })
             .await
             .cloned()

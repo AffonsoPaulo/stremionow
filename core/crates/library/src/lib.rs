@@ -32,6 +32,25 @@ pub struct LibraryEntry {
     pub added_at: i64,
 }
 
+/// Where the user stopped in a title: the video last played and the position in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgressEntry {
+    /// Title id, the same as in "My list".
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub poster: Option<String>,
+    pub background: Option<String>,
+    /// The episode or movie video that was playing.
+    pub video_id: String,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+    pub position_ms: i64,
+    pub duration_ms: i64,
+    /// Unix time in milliseconds.
+    pub updated_at: i64,
+}
+
 const MIGRATIONS: &[&str] = &[
     // 1: settings, addons, my list and response cache.
     r"
@@ -58,6 +77,29 @@ const MIGRATIONS: &[&str] = &[
         body BLOB NOT NULL,
         fetched_at INTEGER NOT NULL
     );
+    ",
+    // 2: playback progress for "Continue watching" and watched episodes.
+    r"
+    CREATE TABLE progress (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        poster TEXT,
+        background TEXT,
+        video_id TEXT NOT NULL,
+        season INTEGER,
+        episode INTEGER,
+        position_ms INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX progress_updated_at ON progress (updated_at DESC);
+    CREATE TABLE watched (
+        video_id TEXT PRIMARY KEY,
+        id TEXT NOT NULL,
+        watched_at INTEGER NOT NULL
+    );
+    CREATE INDEX watched_id ON watched (id);
     ",
 ];
 
@@ -227,6 +269,82 @@ impl Store {
             .is_some())
     }
 
+    // Playback progress
+
+    /// Records where playback is in a title, replacing what was saved for it before.
+    pub fn save_progress(&self, entry: &ProgressEntry) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO progress (id, kind, name, poster, background, video_id, season, episode,
+                                   position_ms, duration_ms, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT (id) DO UPDATE SET
+                kind = excluded.kind, name = excluded.name, poster = excluded.poster,
+                background = excluded.background, video_id = excluded.video_id,
+                season = excluded.season, episode = excluded.episode,
+                position_ms = excluded.position_ms, duration_ms = excluded.duration_ms,
+                updated_at = excluded.updated_at",
+            params![
+                entry.id,
+                entry.kind,
+                entry.name,
+                entry.poster,
+                entry.background,
+                entry.video_id,
+                entry.season,
+                entry.episode,
+                entry.position_ms,
+                entry.duration_ms,
+                entry.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn progress(&self, id: &str) -> Result<Option<ProgressEntry>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                &format!("{PROGRESS_SELECT} WHERE id = ?1"),
+                [id],
+                progress_row,
+            )
+            .optional()?)
+    }
+
+    /// Titles in progress, most recently watched first.
+    pub fn progress_list(&self, limit: usize) -> Result<Vec<ProgressEntry>, StoreError> {
+        let mut statement = self.connection.prepare(&format!(
+            "{PROGRESS_SELECT} ORDER BY updated_at DESC, id LIMIT ?1"
+        ))?;
+        let rows = statement.query_map([i64::try_from(limit).unwrap_or(i64::MAX)], progress_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn remove_progress(&self, id: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM progress WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Marks a video of title `id` as watched.
+    pub fn mark_watched(&self, id: &str, video_id: &str, at: i64) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watched (video_id, id, watched_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (video_id) DO UPDATE SET watched_at = excluded.watched_at",
+            params![video_id, id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Ids of the watched videos of title `id`.
+    pub fn watched_videos(&self, id: &str) -> Result<Vec<String>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT video_id FROM watched WHERE id = ?1 ORDER BY video_id")?;
+        let rows = statement.query_map([id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     // Response cache
 
     /// A cached body and the time it was fetched (Unix milliseconds).
@@ -256,6 +374,25 @@ impl Store {
             .connection
             .execute("DELETE FROM cache WHERE fetched_at < ?1", [older_than])?)
     }
+}
+
+const PROGRESS_SELECT: &str = "SELECT id, kind, name, poster, background, video_id, season, \
+     episode, position_ms, duration_ms, updated_at FROM progress";
+
+fn progress_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProgressEntry> {
+    Ok(ProgressEntry {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        name: row.get(2)?,
+        poster: row.get(3)?,
+        background: row.get(4)?,
+        video_id: row.get(5)?,
+        season: row.get(6)?,
+        episode: row.get(7)?,
+        position_ms: row.get(8)?,
+        duration_ms: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
 }
 
 #[cfg(test)]
@@ -353,5 +490,55 @@ mod tests {
         hostile.name = "名前 \u{0} \"quoted\"".into();
         store.add_to_library(&hostile).expect("adds");
         assert_eq!(store.library().expect("lists")[0].name, hostile.name);
+    }
+
+    fn progress(id: &str, video_id: &str, updated_at: i64) -> ProgressEntry {
+        ProgressEntry {
+            id: id.into(),
+            kind: "series".into(),
+            name: format!("Title {id}"),
+            poster: None,
+            background: None,
+            video_id: video_id.into(),
+            season: Some(1),
+            episode: Some(2),
+            position_ms: 60_000,
+            duration_ms: 3_000_000,
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn progress_keeps_one_row_per_title_and_orders_by_recency() {
+        let store = Store::open_in_memory().expect("store");
+        store
+            .save_progress(&progress("a", "a:1:1", 1))
+            .expect("saves");
+        store
+            .save_progress(&progress("b", "b:1:1", 2))
+            .expect("saves");
+        store
+            .save_progress(&progress("a", "a:1:2", 3))
+            .expect("updates");
+
+        let list = store.progress_list(10).expect("lists");
+        assert_eq!(
+            list.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(list[0].video_id, "a:1:2");
+        assert_eq!(store.progress_list(1).expect("limits").len(), 1);
+
+        store.remove_progress("a").expect("removes");
+        assert!(store.progress("a").expect("reads").is_none());
+    }
+
+    #[test]
+    fn watched_videos_are_per_title() {
+        let store = Store::open_in_memory().expect("store");
+        store.mark_watched("a", "a:1:1", 1).expect("marks");
+        store.mark_watched("a", "a:1:1", 2).expect("marks again");
+        store.mark_watched("b", "b:1:1", 3).expect("marks");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
     }
 }

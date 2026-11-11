@@ -36,17 +36,32 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.components.SnSearchField
 import io.github.affonsopaulo.stremionow.ui.components.SnSeeAll
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
-import io.github.affonsopaulo.stremionow.ui.data.Loadable
+import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** Search progress: rows found so far and how many catalogs answered or failed. */
+data class SearchProgress(
+    val rows: List<CatalogRow> = emptyList(),
+    val asked: Int = 0,
+    val answered: Int = 0,
+    val failed: Int = 0,
+) {
+    val searching: Boolean get() = answered < asked
+
+    /** Every catalog failed, which usually means there is no connection. */
+    val allFailed: Boolean get() = asked > 0 && failed == asked
+}
 
 class SearchViewModel(
     private val core: StremioCore,
@@ -54,9 +69,9 @@ class SearchViewModel(
 ) : ViewModel() {
     private val mutableQuery = MutableStateFlow(initialQuery.take(MAX_QUERY_LENGTH))
     val query = mutableQuery.asStateFlow()
-    private val mutableResults = MutableStateFlow<Loadable<List<CatalogRow>>?>(null)
+    private val mutableResults = MutableStateFlow<SearchProgress?>(null)
 
-    /** One row per search catalog; null until the user types something. */
+    /** Rows found so far, one per catalog; null until the user types something. */
     val results = mutableResults.asStateFlow()
     private val mutableKind = MutableStateFlow<String?>(null)
 
@@ -70,17 +85,32 @@ class SearchViewModel(
                 .map { it.trim() }
                 .distinctUntilChanged()
                 .debounce(400)
-                .collectLatest { text ->
-                    if (text.isEmpty()) {
-                        mutableResults.value = null
-                    } else {
-                        mutableResults.value = Loadable.Loading
-                        mutableResults.value =
-                            runCatching { core.search(text) }
-                                .onFailure { android.util.Log.w("StremioNow", "Search failed", it) }
-                                .fold({ Loadable.Ready(it) }, { Loadable.Failed(it) })
+                .collectLatest { text -> if (text.isEmpty()) mutableResults.value = null else search(text) }
+        }
+    }
+
+    /**
+     * Asks every search catalog at once and shows each answer as it arrives, keeping the
+     * addons' order, so one slow addon does not hold back the others. Cancelled by the next query.
+     */
+    private suspend fun search(text: String) {
+        val catalogs = runCatching { io { core.searchCatalogs() } }.getOrDefault(emptyList())
+        mutableResults.value = SearchProgress(asked = catalogs.size)
+        val found = arrayOfNulls<CatalogRow>(catalogs.size)
+        coroutineScope {
+            catalogs.forEachIndexed { index, catalog ->
+                launch {
+                    val result = runCatching { core.searchCatalog(catalog, text) }
+                    result.getOrNull()?.takeIf { it.isNotEmpty() }?.let { found[index] = CatalogRow(catalog, it) }
+                    mutableResults.update { current ->
+                        current?.copy(
+                            rows = found.filterNotNull(),
+                            answered = current.answered + 1,
+                            failed = current.failed + if (result.isFailure) 1 else 0,
+                        )
                     }
                 }
+            }
         }
     }
 
@@ -142,22 +172,26 @@ fun SearchScreen(
                 SnMessage(title = "", body = stringResource(R.string.search_idle))
             }
 
-            Loadable.Loading -> {
-                SnLoading()
-            }
+            else -> {
+                when {
+                    state.rows.isNotEmpty() -> {
+                        SearchResults(state.rows, kind, viewModel::setKind, onOpenTitle)
+                    }
 
-            is Loadable.Failed -> {
-                SnLoadError(onRetry = viewModel::retry)
-            }
+                    state.searching -> {
+                        SnLoading()
+                    }
 
-            is Loadable.Ready -> {
-                if (state.value.isEmpty()) {
-                    SnMessage(
-                        title = stringResource(R.string.search_empty_title, query.trim()),
-                        body = stringResource(R.string.search_empty_body),
-                    )
-                } else {
-                    SearchResults(state.value, kind, viewModel::setKind, onOpenTitle)
+                    state.allFailed -> {
+                        SnLoadError(onRetry = viewModel::retry)
+                    }
+
+                    else -> {
+                        SnMessage(
+                            title = stringResource(R.string.search_empty_title, query.trim()),
+                            body = stringResource(R.string.search_empty_body),
+                        )
+                    }
                 }
             }
         }

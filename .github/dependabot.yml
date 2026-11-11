@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Weekly update pull requests keep every dependency on its latest release. Related updates are
+# grouped so each ecosystem produces at most one pull request per week.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: /core
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: build(core)
+
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    groups:
+      android:
+        patterns: ["*"]
+    commit-message:
+      prefix: build(android)

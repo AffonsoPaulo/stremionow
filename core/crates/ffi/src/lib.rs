@@ -12,6 +12,7 @@ mod core;
 mod playback;
 mod records;
 mod settings;
+mod skips;
 mod streaming;
 
 pub use crate::core::StremioCore;

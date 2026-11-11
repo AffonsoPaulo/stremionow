@@ -10,6 +10,7 @@ const SUBTITLE_LANGUAGE: &str = "subtitle_language";
 const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
+const ANISKIP: &str = "aniskip";
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
 const DEFAULT_TORRENT_CACHE_MB: u32 = 2048;
@@ -29,6 +30,9 @@ pub struct AppSettings {
     pub max_resolution: u32,
     /// The first-run setup has been completed.
     pub onboarded: bool,
+    /// Ask AniSkip for the openings and endings of anime episodes. This sends the anime's id
+    /// and the episode number to AniSkip (and Kitsu or AniList ids to an id mapping service).
+    pub aniskip: bool,
 }
 
 impl Default for AppSettings {
@@ -40,6 +44,7 @@ impl Default for AppSettings {
             subtitle_language: String::new(),
             max_resolution: 0,
             onboarded: false,
+            aniskip: true,
         }
     }
 }
@@ -69,6 +74,9 @@ impl StremioCore {
                 .and_then(|value| value.parse().ok())
                 .map_or(defaults.max_resolution, clamp_resolution),
             onboarded: store.setting(ONBOARDED)?.is_some_and(|value| value == "1"),
+            aniskip: store
+                .setting(ANISKIP)?
+                .map_or(defaults.aniskip, |value| value == "1"),
         })
     }
 
@@ -93,6 +101,7 @@ impl StremioCore {
             &clamp_resolution(settings.max_resolution).to_string(),
         )?;
         store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
+        store.set_setting(ANISKIP, if settings.aniskip { "1" } else { "0" })?;
         Ok(())
     }
 
@@ -143,6 +152,7 @@ mod tests {
             subtitle_language: "../etc".into(),
             max_resolution: 1081,
             onboarded: true,
+            aniskip: false,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -155,5 +165,6 @@ mod tests {
         assert_eq!(saved.subtitle_language, "", "junk is dropped");
         assert_eq!(saved.max_resolution, 0, "unknown limits mean no limit");
         assert!(saved.onboarded);
+        assert!(!saved.aniskip);
     }
 }

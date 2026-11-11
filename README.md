@@ -31,7 +31,7 @@ See [`docs/adr`](docs/adr) for the reasoning behind each decision.
 ```
 core/          Rust workspace (shared logic)
 android/       Android apps (phone and TV), shared UI and the core bridge
-desktop/       Desktop app (in progress)
+desktop/       Desktop app: Windows proof of concept of the player (Compose over mpv)
 design/        Design tokens, the single source of colors, type and spacing
 l10n/          UI strings: English source and translations
 docs/adr/      Architecture decision records

@@ -18,6 +18,8 @@ data class PlaybackState(
     val tracks: List<Track> = emptyList(),
     /** Hardware decoder in use, or null when decoding in software. */
     val hardwareDecoder: String? = null,
+    /** Chapters of the current file, in order; empty when it has none. */
+    val chapters: List<Chapter> = emptyList(),
 )
 
 /** An audio, subtitle or video track of the current file. */

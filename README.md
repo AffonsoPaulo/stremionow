@@ -44,7 +44,7 @@ Requirements:
 
 - Rust stable via [rustup](https://rustup.rs); the Android targets install automatically from `core/rust-toolchain.toml`
 - [cargo-ndk](https://github.com/bbqsrc/cargo-ndk): `cargo install cargo-ndk`
-- JDK 17 or newer and the Android SDK with NDK 27.1.12297006 (Android Studio covers both)
+- JDK 21 or newer (25 recommended) and the Android SDK with platform 37.2 and NDK 30.0.16248370; exact versions are pinned in [`android/gradle/libs.versions.toml`](android/gradle/libs.versions.toml)
 
 Core tests:
 
@@ -60,7 +60,7 @@ cd android
 ./gradlew assembleDebug
 ```
 
-The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV).
+The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV). Release builds and signing are described in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Languages
 

@@ -10,6 +10,7 @@
   <string name="nav_movies">Movies</string>
   <string name="nav_my_list">My list</string>
   <string name="nav_addons">Addons</string>
+  <string name="nav_back">Back</string>
   <!-- Accessibility label for the search button in the header. -->
   <string name="nav_search">Search</string>
   <!-- Accessibility label for the avatar button that opens the profile menu. -->
@@ -20,9 +21,19 @@
   <string name="action_more_info">More info</string>
   <!-- %1$s is the season and episode label, for example "S1 E5". -->
   <string name="action_resume_episode">Resume %1$s</string>
+  <!-- Button that adds a title to My list. -->
+  <string name="action_add_to_list">My list</string>
+  <!-- Same button once the title is in My list. -->
+  <string name="action_in_list">In my list</string>
+  <string name="action_retry">Try again</string>
+  <string name="action_cancel">Cancel</string>
+  <string name="action_open_addons">Open Addons</string>
+  <string name="action_explore_series">Explore series</string>
 
   <!-- Short season and episode label. %1$d is the season number, %2$d the episode number. -->
   <string name="episode_short">S%1$d E%2$d</string>
+  <!-- Episode title in a list. %1$d is the episode number, %2$s its title. -->
+  <string name="episode_numbered">%1$d. %2$s</string>
 
   <!-- Remaining time on a card. %1$s is a duration already formatted for the locale, for example "18 min". -->
   <string name="time_left">%1$s left</string>
@@ -33,6 +44,88 @@
     <item quantity="other">%1$d sources from %2$d addons</item>
   </plurals>
 
-  <!-- Temporary text on the phase 0 placeholder screen. %1$s is the core library version. -->
-  <string name="placeholder_core_version">Core %1$s</string>
+  <!-- Content types. -->
+  <string name="type_movie">Movie</string>
+  <string name="type_series">Series</string>
+  <!-- IMDb rating badge. %1$s is the rating, already formatted. -->
+  <string name="imdb_rating">IMDb %1$s</string>
+
+  <!-- Loading, empty and error states. -->
+  <string name="state_loading">Loading</string>
+  <!-- Spoken state of a switch. -->
+  <string name="state_on">On</string>
+  <string name="state_off">Off</string>
+  <string name="error_load_title">Couldn\'t load this</string>
+  <string name="error_load_body">Check your connection. Anything already loaded is still available.</string>
+  <string name="home_empty_title">No catalogs yet</string>
+  <string name="home_empty_body">Install an addon with catalogs to fill the home screen.</string>
+
+  <!-- Series and movies screens. -->
+  <!-- Genre filter that shows every genre. -->
+  <string name="explore_genre_all">All</string>
+  <string name="explore_loading_more">Loading more…</string>
+  <string name="explore_empty_body">This catalog has nothing to show for this filter.</string>
+
+  <!-- Search screen. -->
+  <string name="search_field_label">Search movies and series</string>
+  <string name="search_hint">Movies and series</string>
+  <string name="search_clear">Clear search</string>
+  <string name="search_idle">Search runs across every catalog addon you have installed.</string>
+  <!-- %1$s is what the user typed. -->
+  <string name="search_empty_title">Nothing found for “%1$s”</string>
+  <string name="search_empty_body">Check the spelling or try the original title.</string>
+
+  <!-- Details screen. -->
+  <string name="details_tab_episodes">Episodes</string>
+  <string name="details_tab_related">You may also like</string>
+  <string name="details_tab_details">Details</string>
+  <!-- Season selector. %1$d is the season number. -->
+  <string name="details_season">Season %1$d</string>
+  <!-- Season 0, which holds specials. -->
+  <string name="details_specials">Specials</string>
+  <string name="details_overview">Overview</string>
+  <string name="details_cast">Cast</string>
+  <string name="details_directors">Direction</string>
+  <string name="details_genres">Genres</string>
+  <string name="details_runtime">Runtime</string>
+  <string name="details_no_episodes">No episodes listed yet.</string>
+
+  <!-- My list. -->
+  <string name="library_empty_title">Your list is empty</string>
+  <string name="library_empty_body">Use “My list” on any movie or series to keep it here.</string>
+
+  <!-- Addons screen. -->
+  <string name="addons_intro">Addons provide catalogs, information, sources and subtitles. Their order sets the priority.</string>
+  <string name="addons_install_label">Install from link</string>
+  <string name="addons_install_hint">https://…/manifest.json</string>
+  <string name="addons_install_action">Install</string>
+  <string name="addons_install_error">Couldn\'t install. Check that the link ends with /manifest.json and try again.</string>
+  <!-- %1$s is the version number. -->
+  <string name="addons_version">v%1$s</string>
+  <string name="addons_kind_catalogs">Catalogs</string>
+  <string name="addons_kind_metadata">Information</string>
+  <string name="addons_kind_streams">Sources</string>
+  <string name="addons_kind_subtitles">Subtitles</string>
+  <!-- Accessibility labels. %1$s is the addon name. -->
+  <string name="addons_toggle">Enable %1$s</string>
+  <string name="addons_move_up">Move %1$s up</string>
+  <string name="addons_move_down">Move %1$s down</string>
+  <string name="addons_remove">Remove %1$s</string>
+  <string name="addons_remove_action">Remove</string>
+  <!-- Confirmation dialog before removing. %1$s is the addon name. -->
+  <string name="addons_remove_title">Remove %1$s?</string>
+  <string name="addons_remove_body">Its catalogs, sources and subtitles will stop showing up. You can install it again from its link.</string>
+
+  <!-- Profile screen, opened from the avatar. -->
+  <string name="profile_title">Profile</string>
+  <!-- Name shown while no Stremio account is connected. -->
+  <string name="profile_local_name">This device</string>
+  <string name="profile_local_body">Your addons and list are saved only on this device.</string>
+  <plurals name="profile_addons_count">
+    <item quantity="one">%1$d installed</item>
+    <item quantity="other">%1$d installed</item>
+  </plurals>
+  <!-- %1$s is the app version, for example "0.1.0". -->
+  <string name="profile_version">StremioNow %1$s</string>
+
 </resources>

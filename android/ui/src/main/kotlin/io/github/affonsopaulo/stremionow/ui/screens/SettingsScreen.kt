@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -73,6 +74,47 @@ fun SettingsScreen() {
     ) {
         item { SnPageTitle(stringResource(R.string.settings_title)) }
         item {
+            val off = stringResource(R.string.player_subtitles_off)
+            val best = stringResource(R.string.onboarding_quality_best)
+            val languages = playbackLanguages(LocalConfiguration.current.locales[0].language)
+            Section(stringResource(R.string.settings_playback)) {
+                Group(stringResource(R.string.onboarding_audio)) {
+                    SnChipRow(
+                        options = (listOf(current.audioLanguage) + languages).filter { it.isNotEmpty() }.distinct(),
+                        selected = current.audioLanguage.ifEmpty { languages.first() },
+                        label = { languageName(it) },
+                        onSelect = { language -> viewModel.update { it.copy(audioLanguage = language) } },
+                    )
+                }
+                Group(stringResource(R.string.player_subtitles)) {
+                    SnChipRow(
+                        options =
+                            listOf("") +
+                                (listOf(current.subtitleLanguage) + languages).filter { it.isNotEmpty() }.distinct(),
+                        selected = current.subtitleLanguage,
+                        label = { if (it.isEmpty()) off else languageName(it) },
+                        onSelect = { language -> viewModel.update { it.copy(subtitleLanguage = language) } },
+                    )
+                }
+                Group(stringResource(R.string.onboarding_quality)) {
+                    SnChipRow(
+                        options = listOf(0u, 2160u, 1080u, 720u),
+                        selected = current.maxResolution,
+                        label = {
+                            if (it == 0u) {
+                                best
+                            } else if (it == 2160u) {
+                                "4K"
+                            } else {
+                                "${it}p"
+                            }
+                        },
+                        onSelect = { lines -> viewModel.update { it.copy(maxResolution = lines) } },
+                    )
+                }
+            }
+        }
+        item {
             Section(stringResource(R.string.settings_torrents)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -128,6 +170,17 @@ private fun Section(
             modifier = Modifier.semantics { heading() },
             style = SnTypography.overline.copy(color = SnColors.fgMuted),
         )
+        content()
+    }
+}
+
+@Composable
+private fun Group(
+    label: String,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(label, style = SnTypography.bodyLg.copy(color = SnColors.fg))
         content()
     }
 }

@@ -161,4 +161,35 @@
   <string name="sources_wifi_body">Você está usando dados móveis. Reproduza este torrent mesmo assim ou desative \"Somente no Wi-Fi\" nas Configurações.</string>
   <string name="sources_wifi_play_anyway">Reproduzir mesmo assim</string>
 
+  <string name="onboarding_welcome_title">Seus addons, do seu jeito</string>
+  <string name="onboarding_welcome_body">O StremioNow reproduz filmes e séries dos addons que você escolhe. Entre para trazer seus addons, sua lista e seu progresso do Stremio, ou comece do zero neste aparelho.</string>
+  <string name="onboarding_sign_in">Entrar com o Stremio</string>
+  <string name="onboarding_local">Continuar sem conta</string>
+  <string name="onboarding_local_note">Você pode entrar depois pelo seu perfil.</string>
+  <string name="onboarding_sign_in_title">Entrar no Stremio</string>
+  <string name="onboarding_sign_in_body">Use o e-mail e a senha da sua conta do Stremio. Seus addons, sua lista e seu progresso vêm junto.</string>
+  <string name="onboarding_email">E-mail</string>
+  <string name="onboarding_password">Senha</string>
+  <string name="onboarding_sign_in_failed">Não foi possível entrar. Confira o e-mail, a senha e a sua conexão.</string>
+  <string name="onboarding_signing_in">Entrando…</string>
+  <string name="onboarding_preferences_title">Como você gosta de assistir?</string>
+  <string name="onboarding_preferences_body">O StremioNow usa isto para escolher a melhor fonte para você. Dá para mudar quando quiser nas Configurações.</string>
+  <string name="onboarding_audio">Idioma do áudio</string>
+  <string name="onboarding_quality">Qualidade máxima</string>
+  <string name="onboarding_quality_best">A melhor disponível</string>
+  <string name="onboarding_continue">Continuar</string>
+  <string name="onboarding_debrid_title">Usa um serviço de debrid?</string>
+  <string name="onboarding_debrid_body">Serviços de debrid transformam torrents em streams diretos e rápidos. Informe sua chave de API e o StremioNow instala o Torrentio com ela. Você pode pular esta etapa.</string>
+  <string name="onboarding_debrid_service">Serviço</string>
+  <string name="onboarding_debrid_key">Chave de API</string>
+  <string name="onboarding_debrid_failed">Não foi possível conectar. Confira a chave e tente de novo.</string>
+  <string name="onboarding_skip">Pular</string>
+  <string name="onboarding_connect">Conectar</string>
+  <string name="settings_playback">Reprodução</string>
+
+  <string name="profile_account_body">Seus addons, sua lista e seu progresso sincronizam com a sua conta do Stremio.</string>
+  <string name="profile_sign_out">Sair da conta</string>
+  <string name="profile_sign_out_title">Sair da conta do Stremio?</string>
+  <string name="profile_sign_out_body">Seus addons, sua lista e seu progresso continuam neste aparelho, mas param de sincronizar.</string>
+
 </resources>

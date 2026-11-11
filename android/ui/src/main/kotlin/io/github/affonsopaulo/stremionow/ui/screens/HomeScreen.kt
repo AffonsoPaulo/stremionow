@@ -37,6 +37,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.core.CatalogRow
+import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
@@ -52,6 +53,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
+import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -66,6 +68,7 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel(
     private val core: StremioCore,
+    private val onSessionExpired: () -> Unit,
 ) : ViewModel() {
     private val mutableRows = MutableStateFlow<Loadable<List<CatalogRow>>>(Loadable.Loading)
     val rows = mutableRows.asStateFlow()
@@ -90,6 +93,11 @@ class HomeViewModel(
             // Installing the defaults can fail offline; the cached home may still load.
             runCatching { core.ensureDefaultAddons() }
                 .onFailure { android.util.Log.w(TAG, "Could not install the default addons", it) }
+            // Signed in: bring account changes from other devices first. An expired session
+            // signs out quietly; local data stays and the app keeps working.
+            runCatching { core.sync() }.onFailure { error ->
+                if (error is CoreException.SignIn) onSessionExpired()
+            }
             mutableRows.value =
                 runCatching { core.home() }
                     .onFailure { android.util.Log.w(TAG, "Could not load the home screen", it) }
@@ -107,7 +115,13 @@ fun HomeScreen(
     onOpenAddons: () -> Unit,
 ) {
     val context = LocalContext.current
-    val viewModel = viewModel { HomeViewModel(AppGraph.core(context)) }
+    val viewModel =
+        viewModel {
+            HomeViewModel(AppGraph.core(context)) {
+                SecureStore.clear(context, SecureStore.STREMIO_AUTH_KEY)
+                AppGraph.scope.launch { runCatching { AppGraph.core(context).signOut() } }
+            }
+        }
     val state by viewModel.rows.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshContinueWatching() }

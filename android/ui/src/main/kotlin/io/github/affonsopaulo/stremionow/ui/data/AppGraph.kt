@@ -20,7 +20,10 @@ object AppGraph {
     fun core(context: Context): StremioCore =
         core ?: synchronized(this) {
             core ?: StremioCore(File(context.applicationContext.noBackupFilesDir, "core").absolutePath)
-                .also { core = it }
+                .also { opened ->
+                    SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let(opened::restoreSession)
+                    core = opened
+                }
         }
 }
 

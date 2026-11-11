@@ -20,7 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -37,9 +39,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.R
+import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnListRow
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
@@ -54,14 +58,27 @@ import kotlinx.coroutines.launch
 class ProfileViewModel(
     private val core: StremioCore,
 ) : ViewModel() {
+    private val mutableEmail = MutableStateFlow<String?>(null)
+
+    /** The signed-in Stremio account, or null when the app is used locally. */
+    val email = mutableEmail.asStateFlow()
     private val mutableAddonCount = MutableStateFlow<Int?>(null)
 
     /** Number of installed addons, or null until it is known. */
     val addonCount = mutableAddonCount.asStateFlow()
 
+    fun signOut(context: android.content.Context) {
+        SecureStore.clear(context, SecureStore.STREMIO_AUTH_KEY)
+        viewModelScope.launch {
+            runCatching { core.signOut() }
+            refresh()
+        }
+    }
+
     fun refresh() {
         viewModelScope.launch {
             mutableAddonCount.value = runCatching { io { core.addons().size } }.getOrNull()
+            mutableEmail.value = runCatching { io { core.accountEmail() } }.getOrNull()?.ifBlank { null }
         }
     }
 }
@@ -74,10 +91,26 @@ class ProfileViewModel(
 fun ProfileScreen(
     onOpenAddons: () -> Unit,
     onOpenSettings: () -> Unit,
+    onSignIn: () -> Unit,
 ) {
     val context = LocalContext.current
     val viewModel = viewModel { ProfileViewModel(AppGraph.core(context)) }
     val addonCount by viewModel.addonCount.collectAsStateWithLifecycle()
+    val email by viewModel.email.collectAsStateWithLifecycle()
+    var confirmSignOut by remember { mutableStateOf(false) }
+    if (confirmSignOut) {
+        SnDialog(
+            title = stringResource(R.string.profile_sign_out_title),
+            body = stringResource(R.string.profile_sign_out_body),
+            confirmText = stringResource(R.string.profile_sign_out),
+            dismissText = stringResource(R.string.action_cancel),
+            onConfirm = {
+                confirmSignOut = false
+                viewModel.signOut(context)
+            },
+            onDismiss = { confirmSignOut = false },
+        )
+    }
     // Addons can change on their own page, so recount whenever this screen comes back.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
     val version =
@@ -90,12 +123,25 @@ fun ProfileScreen(
         contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
     ) {
-        item(key = "identity") { Identity() }
+        item(key = "identity") { Identity(email) }
         item(key = "rows") {
             Column(
                 modifier = Modifier.widthIn(max = 720.dp),
                 verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
+                if (email == null) {
+                    SnListRow(
+                        icon = SnIcons.User,
+                        title = stringResource(R.string.onboarding_sign_in),
+                        onClick = onSignIn,
+                    )
+                } else {
+                    SnListRow(
+                        icon = SnIcons.User,
+                        title = stringResource(R.string.profile_sign_out),
+                        onClick = { confirmSignOut = true },
+                    )
+                }
                 SnListRow(
                     icon = SnIcons.Layers,
                     title = stringResource(R.string.nav_addons),
@@ -121,7 +167,7 @@ fun ProfileScreen(
 }
 
 @Composable
-private fun Identity() {
+private fun Identity(email: String?) {
     val circle = RoundedCornerShape(SnRadius.radiusFull)
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -138,11 +184,11 @@ private fun Identity() {
         }
         Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
             BasicText(
-                stringResource(R.string.profile_local_name),
+                email ?: stringResource(R.string.profile_local_name),
                 style = SnTypography.headingMd.copy(color = SnColors.fg),
             )
             BasicText(
-                stringResource(R.string.profile_local_body),
+                stringResource(if (email == null) R.string.profile_local_body else R.string.profile_account_body),
                 style = SnTypography.body.copy(color = SnColors.fgMuted),
             )
         }

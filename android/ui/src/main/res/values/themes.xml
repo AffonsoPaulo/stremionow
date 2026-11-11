@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+  <!-- Window theme shared by the phone and TV apps. Compose draws everything else; this only
+       keeps the window dark while the first frame loads. Colors come from the design tokens. -->
+  <style name="Theme.StremioNow" parent="android:Theme.Material.NoActionBar">
+    <item name="android:windowBackground">@color/sn_bg</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+  </style>
+</resources>

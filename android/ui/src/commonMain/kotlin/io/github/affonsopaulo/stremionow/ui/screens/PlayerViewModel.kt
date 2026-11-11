@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package io.github.affonsopaulo.stremionow.ui.screens
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import io.github.affonsopaulo.stremionow.core.StreamSource
+import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.core.SubtitleTrack
+import io.github.affonsopaulo.stremionow.core.TorrentProgress
+import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.player.PlayerOptions
+import io.github.affonsopaulo.stremionow.player.Track
+import io.github.affonsopaulo.stremionow.player.VideoPlayer
+import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
+import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.platform.logWarning
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.Locale
+
+/** How often the torrent state is read for the loading screen. */
+private const val TORRENT_STATUS_INTERVAL_MS = 1_000L
+
+/** How often progress is written while playing. */
+private const val PROGRESS_INTERVAL_MS = 10_000L
+
+/** External subtitles kept per language, so the list stays usable. */
+private const val SUBTITLES_PER_LANGUAGE = 3
+
+/**
+ * Plays one source of [selection]: asks the core for the address to play, picks subtitles in
+ * the viewer's languages and saves progress while playing and when the screen goes away. The
+ * platform's player comes from [createPlayer], given the playback preferences.
+ */
+class PlayerViewModel<out P : VideoPlayer>(
+    private val core: StremioCore,
+    val selection: PlaybackSession.Selection,
+    private val source: StreamSource,
+    createPlayer: (PlayerOptions) -> P,
+) : ViewModel() {
+    /** The user's choices from setup and Settings, falling back to the device language. */
+    private val settings = runCatching { core.settings() }.getOrNull()
+    private val audioLanguage = settings?.audioLanguage?.ifEmpty { null } ?: Locale.getDefault().language
+
+    /** Empty when the user turned subtitles off by default. */
+    private val subtitleChoice =
+        settings?.subtitleLanguage ?: Locale
+            .getDefault()
+            .language
+            .takeIf { it != "en" }
+            .orEmpty()
+    private val subtitleLanguage =
+        subtitleChoice.ifEmpty { null }?.let {
+            Locale
+                .forLanguageTag(
+                    it,
+                ).isO3LanguageOrNull()
+        }
+
+    val player: P =
+        createPlayer(
+            PlayerOptions(
+                audioLanguages = listOf(audioLanguage),
+                // Subtitles start on only when the device language is not English.
+                subtitleLanguages = listOfNotNull(subtitleChoice.ifEmpty { null }),
+            ),
+        )
+
+    private val mutablePreparing = MutableStateFlow(true)
+
+    /** True until the player has an address: torrents first need peers and the file list. */
+    val preparing = mutablePreparing.asStateFlow()
+    private val mutableTorrent = MutableStateFlow<TorrentProgress?>(null)
+
+    /** Live torrent state for the loading screen; null for web sources. */
+    val torrent = mutableTorrent.asStateFlow()
+    private val mutablePrepareFailed = MutableStateFlow(false)
+
+    /** The source could not be prepared (no peers, no video file, engine error). */
+    val prepareFailed = mutablePrepareFailed.asStateFlow()
+
+    init {
+        source.infoHash?.let { hash ->
+            viewModelScope.launch {
+                while (isActive) {
+                    mutableTorrent.value = core.torrentStatus(hash)
+                    delay(TORRENT_STATUS_INTERVAL_MS)
+                }
+            }
+        }
+        viewModelScope.launch {
+            // Every source plays through the local server, so the player never sees debrid keys.
+            val url =
+                runCatching { core.playbackUrl(source) }
+                    .onFailure { logWarning("Could not prepare the source", it) }
+                    .getOrNull()
+            if (url == null) {
+                mutablePreparing.value = false
+                mutablePrepareFailed.value = true
+                return@launch
+            }
+            mutablePreparing.value = false
+            val saved = runCatching { io { core.progress(selection.details.item.id) } }.getOrNull()
+            val start =
+                saved
+                    ?.takeIf { it.videoId == selection.videoId }
+                    ?.positionMs
+                    ?.toDouble()
+                    ?.div(1000) ?: 0.0
+            player.load(url, start)
+            addSubtitles()
+            selectSubtitleIfMissing()
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                delay(PROGRESS_INTERVAL_MS)
+                if (!player.state.value.isPaused) saveProgress()
+            }
+        }
+    }
+
+    /** Adds the source's subtitles and the addons' ones in the device language and English. */
+    private suspend fun addSubtitles() {
+        val fromAddons = runCatching { core.subtitles(selection.kind, selection.videoId) }.getOrDefault(emptyList())
+        val wanted = listOfNotNull(subtitleLanguage, "eng").distinct()
+        (source.subtitles + fromAddons)
+            .filter { it.lang.lowercase(Locale.ROOT) in wanted }
+            .groupBy { it.lang.lowercase(Locale.ROOT) }
+            .flatMap { (_, tracks) -> tracks.distinctBy(SubtitleTrack::url).take(SUBTITLES_PER_LANGUAGE) }
+            .groupBy { "${it.lang}/${it.addonName}" }
+            .values
+            .forEach { tracks ->
+                // The panel shows the language already; tell same-language files apart by
+                // addon and number.
+                tracks.forEachIndexed { index, track ->
+                    val title = if (tracks.size > 1) "${track.addonName} ${index + 1}" else track.addonName
+                    // Relayed like the video, so subtitle addresses stay out of the player too.
+                    val url = runCatching { core.relayUrl(track.url) }.getOrNull() ?: return@forEachIndexed
+                    player.addSubtitle(url, title = title, language = track.lang, select = false)
+                }
+            }
+    }
+
+    /**
+     * When the file has no subtitle in the device language, picks the first external one in
+     * it, so viewers who need subtitles get them without opening the panel.
+     */
+    private suspend fun selectSubtitleIfMissing() {
+        val language = subtitleLanguage?.takeIf { it != "eng" } ?: return
+        val state = player.state.first { it.isLoaded && it.tracks.isNotEmpty() }
+        val subtitles = state.tracks.filter { it.type == Track.Type.Subtitle }
+        if (subtitles.none { it.isSelected }) {
+            subtitles
+                .firstOrNull {
+                    it.language?.lowercase(
+                        Locale.ROOT,
+                    ) == language
+                }?.let { player.selectSubtitle(it.id) }
+        }
+    }
+
+    fun saveProgress() {
+        val state = player.state.value
+        val duration = state.durationSeconds ?: return
+        if (!state.isLoaded || duration <= 0) return
+        val item = selection.details.item
+        val progress =
+            WatchProgress(
+                id = item.id,
+                kind = item.kind,
+                name = item.name,
+                poster = item.poster,
+                background = item.background,
+                videoId = selection.videoId,
+                season = selection.episode?.season,
+                episode = selection.episode?.episode,
+                positionMs = (state.positionSeconds * 1000).toLong().coerceAtLeast(0).toULong(),
+                durationMs = (duration * 1000).toLong().toULong(),
+                updatedAt = 0,
+            )
+        viewModelScope.launch { runCatching { io { core.saveProgress(progress) } } }
+    }
+
+    override fun onCleared() {
+        val state = player.state.value
+        val duration = state.durationSeconds
+        if (state.isLoaded && duration != null && duration > 0) {
+            val item = selection.details.item
+            // The scope is already cancelled here, so write synchronously; it is one SQLite row.
+            runCatching {
+                core.saveProgress(
+                    WatchProgress(
+                        id = item.id,
+                        kind = item.kind,
+                        name = item.name,
+                        poster = item.poster,
+                        background = item.background,
+                        videoId = selection.videoId,
+                        season = selection.episode?.season,
+                        episode = selection.episode?.episode,
+                        positionMs = (state.positionSeconds * 1000).toLong().coerceAtLeast(0).toULong(),
+                        durationMs = (duration * 1000).toLong().toULong(),
+                        updatedAt = 0,
+                    ),
+                )
+            }
+        }
+        player.release()
+        // The screen is gone, so finish on the app's scope: stop the download and trim the cache.
+        source.infoHash?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
+    }
+}
+
+private fun Locale.isO3LanguageOrNull(): String? = runCatching { isO3Language }.getOrNull()?.ifEmpty { null }

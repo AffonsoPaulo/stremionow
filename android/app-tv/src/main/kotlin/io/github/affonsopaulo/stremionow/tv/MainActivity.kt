@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import io.github.affonsopaulo.stremionow.ui.StremioNowApp
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
+import io.github.affonsopaulo.stremionow.ui.data.parse
 import kotlinx.coroutines.launch
 
 /** Entry point of the Android TV and Fire TV app. */

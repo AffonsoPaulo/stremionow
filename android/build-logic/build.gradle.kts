@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     compileOnly(libs.android.gradle.api)
+    compileOnly(libs.kotlin.gradle.plugin)
     compileOnly(localGroovy())
 }
 
@@ -18,9 +19,17 @@ gradlePlugin {
             id = "stremionow.android.library"
             implementationClass = "stremionow.buildlogic.AndroidLibraryConventionPlugin"
         }
+        register("multiplatformLibrary") {
+            id = "stremionow.multiplatform.library"
+            implementationClass = "stremionow.buildlogic.MultiplatformLibraryConventionPlugin"
+        }
         register("designTokens") {
             id = "stremionow.design-tokens"
             implementationClass = "stremionow.buildlogic.DesignTokensPlugin"
+        }
+        register("strings") {
+            id = "stremionow.strings"
+            implementationClass = "stremionow.buildlogic.StringsPlugin"
         }
         register("rustCore") {
             id = "stremionow.rust-core"

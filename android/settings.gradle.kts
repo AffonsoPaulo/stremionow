@@ -18,4 +18,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "StremioNow"
 
-include(":app-mobile", ":app-tv", ":ui", ":core-bridge")
+include(":app-mobile", ":app-tv", ":ui", ":core-bridge", ":player")

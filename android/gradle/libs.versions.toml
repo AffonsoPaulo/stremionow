@@ -5,6 +5,10 @@ composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 coreKtx = "1.19.1"
 jna = "5.19.1"
+libmpv = "1.0.0"
+coroutines = "1.11.0"
+spotless = "8.11.0"
+ktlint = "1.8.0"
 # Android SDK levels, Java bytecode level and NDK used by every module (see docs/adr/0004-android-baseline.md).
 compileSdk = "37"
 compileSdkMinor = "2"
@@ -22,9 +26,12 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+libmpv = { module = "dev.jdtech.mpv:libmpv", version.ref = "libmpv" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 android-gradle-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

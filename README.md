@@ -2,7 +2,7 @@
 
 A fast, native client for the Stremio addon ecosystem, built for Android phones, Android TV, Fire TV and the desktop (Windows, macOS, Linux).
 
-> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account; the desktop app is in progress.
+> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account. The desktop app shares their interface and plays through mpv; it is tested on Windows only so far.
 
 StremioNow does not host or provide any content. It plays what the addons you install point to. By default it installs the same addons as the official Stremio app: catalogs, metadata, subtitles and links to streaming services, but no source of copyrighted content.
 
@@ -30,8 +30,9 @@ See [`docs/adr`](docs/adr) for the reasoning behind each decision.
 
 ```
 core/          Rust workspace (shared logic)
-android/       Android apps (phone and TV), shared UI and the core bridge
-desktop/       Desktop app: Windows proof of concept of the player (Compose over mpv)
+android/       Android apps (phone and TV), and the shared Kotlin Multiplatform modules:
+               interface (ui), player and core bridge (see docs/adr/0006-shared-ui.md)
+desktop/       Desktop app (Compose Multiplatform); includes the android/ build for the shared modules
 design/        Design tokens, the single source of colors, type and spacing
 l10n/          UI strings: English source and translations
 docs/adr/      Architecture decision records
@@ -61,6 +62,15 @@ cd android
 ```
 
 The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV): one per ABI (`arm64-v8a` for most phones and TVs, `armeabi-v7a` for older or low-end devices, `x86_64` for emulators) and a universal one. Release builds and signing are described in [`docs/RELEASING.md`](docs/RELEASING.md).
+
+Desktop app (needs the Android SDK too, since it includes the `android/` build for the shared modules; cargo-ndk and the NDK are not needed). Gradle builds the core for the machine, and on Windows downloads a pinned libmpv; on macOS and Linux, install libmpv from the system (`brew install mpv`, `libmpv2`):
+
+```
+cd desktop
+./gradlew run                 # add --args="--verbose" for mpv's detailed logs
+```
+
+It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux).
 
 ## Languages
 

@@ -6,7 +6,7 @@ Date: 2026-11-11
 
 **Result: passed on Windows 11, with one known issue (window size when dragging between monitors with different scales). macOS, Linux X11 and Wayland are not tested on this machine.**
 
-This validates [ADR 0005](../adr/0005-desktop-ui.md) on Windows: libmpv renders into its own borderless native window, and the Compose interface runs in a transparent, undecorated window kept exactly on top of it. The code is the standalone Gradle build in [`desktop/`](../../desktop), separate from `android/` until the shared `ui` module becomes Kotlin Multiplatform.
+This validates [ADR 0005](../adr/0005-desktop-ui.md) on Windows: libmpv renders into its own borderless native window, and the Compose interface runs in a transparent, undecorated window kept exactly on top of it. The proof of concept was a standalone Gradle build in [`desktop/`](../../desktop). Its player, window code and controls have since moved into the shared Kotlin Multiplatform modules ([ADR 0006](../adr/0006-shared-ui.md)): `MpvPlayer` (desktop) in `android/player`, and `WindowPair`, `VideoWindow` and the overlay in `android/ui` under `desktopMain`.
 
 ### Setup
 
@@ -100,19 +100,20 @@ The decision is not final for all platforms. Before committing the desktop UI to
 
 ### Build and run
 
-From `desktop/` (set `JAVA_HOME` to a JDK 25, for example Android Studio's JBR):
+The proof of concept played one address given on the command line. The desktop app that replaced it browses addons and plays sources through the core, so it no longer takes an address. From `desktop/` (set `JAVA_HOME` to a JDK 25, for example Android Studio's JBR; the Android SDK must be installed, see ADR 0006):
 
 ```
-./gradlew run                                    # default 1080p sample
-./gradlew run --args="<url>"                     # any address; add --verbose for mpv's detailed logs
-./gradlew run --args="https://repo.jellyfin.org/test-videos/HDR/HDR10/HEVC/Test%20Jellyfin%204K%20HEVC%20HDR10%2040M.mp4"
+./gradlew run                                    # the desktop app
+./gradlew run --args="--verbose"                 # with mpv's detailed logs
 ./gradlew packageDistributionForCurrentOS -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
 ./gradlew spotlessCheck
 ```
 
-`run` and the installers depend on `prepareNativeResources`, which builds the Rust core (`cargo build -p stremionow-ffi --release`), generates the UniFFI bindings from a debug build, downloads and verifies libmpv and the CA bundle, and lays them out as Compose's app resources. On macOS and Linux the core is built the same way, and libmpv comes from the system (`brew install mpv`, `libmpv2`); those paths have not been exercised.
+`run` and the installers depend on `prepareNativeResources`, which builds the Rust core (`cargo build -p stremionow-ffi --release`), downloads and verifies libmpv and the CA bundle, and lays them out as Compose's app resources. The core's Kotlin bindings come with the shared `core-bridge` module. On macOS and Linux the core is built the same way, and libmpv comes from the system (`brew install mpv`, `libmpv2`); those paths have not been exercised.
 
 ### Moving this into a Kotlin Multiplatform `ui` module
+
+Done; see [ADR 0006](../adr/0006-shared-ui.md). The notes below are what this proof of concept recommended.
 
 - The overlay (`PlayerOverlay`, `SeekBar`, the icons and colors) is plain Compose with no AWT types except the hidden cursor and resize cursors; it can move to `commonMain`/`desktopMain` and replace `Theme.kt` with the generated design tokens. Window actions reach it through the `PlayerActions` interface.
 - `mpv/` (`Mpv`, `Player`) and `window/` (`VideoWindow`, `WindowPair`, `WindowSystem`) are desktop-only (`jvm("desktop")` source set). `Player` mirrors the Android `MpvPlayer` API (`state`, `load`, `togglePause`, `seekBy`, `seekTo`); a shared interface in `commonMain` would let one player screen drive both.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Standalone build of the desktop app (Compose Multiplatform on the JVM). It is kept apart from
-// android/ until the shared `ui` module moves to Kotlin Multiplatform; see docs/poc/phase-5.md.
+// The desktop app (Compose Multiplatform on the JVM). Its interface, player and Rust core
+// bindings are the shared Kotlin Multiplatform modules of the Android build, included here and
+// substituted by their coordinates (see docs/adr/0006-shared-ui.md).
 pluginManagement {
     includeBuild("build-logic")
     repositories {
@@ -19,5 +20,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "StremioNow-desktop"
+
+includeBuild("../android")
 
 include(":app")

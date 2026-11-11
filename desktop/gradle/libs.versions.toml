@@ -9,8 +9,9 @@ ktlint = "1.8.0"
 java = "21"
 
 [libraries]
+# The shared interface, from the included android/ build.
+stremionow-ui = { module = "io.github.affonsopaulo.stremionow:ui" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
-jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "coroutines" }
 
 [plugins]

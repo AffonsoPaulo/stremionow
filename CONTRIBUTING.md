@@ -29,9 +29,9 @@ docs(adr): record desktop UI decision
 
 ## Project rules
 
-CI checks Rust formatting, lint and tests, Kotlin formatting (ktlint through Spotless), Android Lint, the Android build and license headers. Reviewers enforce the rules CI cannot check.
+CI checks Rust formatting, lint and tests, Kotlin formatting (ktlint through Spotless), Android Lint, the Android build, the desktop build with its tests, and license headers. Reviewers enforce the rules CI cannot check.
 
-Format Kotlin locally with `./gradlew spotlessApply` from `android/`.
+Format Kotlin locally with `./gradlew spotlessApply` from `android/` and from `desktop/`.
 
 - **No hard-coded UI text.** Every string lives in [`l10n/`](l10n) and is translatable.
 - **No colors, sizes or fonts outside the design tokens.** They come from [`design/tokens.json`](design/tokens.json); generated theme files are never edited by hand.

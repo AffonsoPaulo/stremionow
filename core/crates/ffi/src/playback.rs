@@ -6,10 +6,11 @@ use stremionow_addons::InstalledAddon;
 use stremionow_library::ProgressEntry;
 use stremionow_protocol::{Stream, Subtitle};
 
-use stremionow_ranking::{Preferences, SourceText, badges, parse};
+use stremionow_ranking::{Preferences, Resolution, SourceText, badges, parse};
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::{AddonInfo, CoreError};
+use crate::settings::AppSettings;
 
 /// Progress below this is not worth a "Continue watching" entry.
 const MIN_PROGRESS_MS: u64 = 30_000;
@@ -106,7 +107,11 @@ impl StremioCore {
 
     /// Orders sources best first for the user's preferences.
     pub fn rank_streams(&self, sources: Vec<StreamSource>) -> Vec<StreamSource> {
-        rank(sources)
+        let preferences = self
+            .settings()
+            .map(|settings| ranking_preferences(&settings))
+            .unwrap_or_default();
+        rank(sources, &preferences)
     }
 
     /// Subtitles for a video from every subtitle addon. Addons that fail are skipped.
@@ -293,10 +298,27 @@ fn is_info_hash(hash: &str) -> bool {
         || (hash.len() == 32 && hash.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
-/// Orders sources best first. Preferences are the defaults until the settings screen lets
-/// users change them.
-fn rank(mut sources: Vec<StreamSource>) -> Vec<StreamSource> {
-    stremionow_ranking::rank(&mut sources, &Preferences::default(), source_text);
+/// The ranking preferences that follow from the user's settings.
+fn ranking_preferences(settings: &AppSettings) -> Preferences {
+    Preferences {
+        max_resolution: match settings.max_resolution {
+            2160 => Some(Resolution::P2160),
+            1080 => Some(Resolution::P1080),
+            720 => Some(Resolution::P720),
+            _ => None,
+        },
+        preferred_languages: [&settings.audio_language]
+            .into_iter()
+            .filter(|language| !language.is_empty())
+            .cloned()
+            .collect(),
+        ..Preferences::default()
+    }
+}
+
+/// Orders sources best first for the given preferences.
+fn rank(mut sources: Vec<StreamSource>, preferences: &Preferences) -> Vec<StreamSource> {
+    stremionow_ranking::rank(&mut sources, preferences, source_text);
     // Sources the app plays itself come before links to other apps; the sort is stable,
     // so each group keeps its ranking.
     sources.sort_by_key(|source| !plays_in_app(source));
@@ -420,13 +442,34 @@ mod tests {
 
     #[test]
     fn playable_sources_come_before_links_out() {
-        let ranked = rank(vec![
-            source("4k remux", None, Some("https://service.example/title")),
-            source("480p", Some("https://cdn.example/a.mp4"), None),
-            source("1080p", Some("https://cdn.example/b.mp4"), None),
-        ]);
+        let ranked = rank(
+            vec![
+                source("4k remux", None, Some("https://service.example/title")),
+                source("480p", Some("https://cdn.example/a.mp4"), None),
+                source("1080p", Some("https://cdn.example/b.mp4"), None),
+            ],
+            &Preferences::default(),
+        );
         let names: Vec<_> = ranked.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["1080p", "480p", "4k remux"]);
+    }
+
+    #[test]
+    fn settings_limit_resolution_and_prefer_language() {
+        let preferences = ranking_preferences(&AppSettings {
+            max_resolution: 1080,
+            audio_language: "pt".into(),
+            ..AppSettings::default()
+        });
+        let ranked = rank(
+            vec![
+                source("4k", Some("https://cdn.example/4k.mkv"), None),
+                source("1080p", Some("https://cdn.example/hd.mkv"), None),
+            ],
+            &preferences,
+        );
+        assert_eq!(ranked[0].name, "1080p", "sources above the limit sink");
+        assert_eq!(preferences.preferred_languages, ["pt"]);
     }
 
     #[test]

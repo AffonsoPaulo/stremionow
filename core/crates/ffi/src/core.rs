@@ -12,6 +12,7 @@ use stremionow_addons::{AddonClient, AddonError, InstalledAddon};
 use stremionow_library::{LibraryEntry, Store};
 use stremionow_protocol::{AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse};
 
+use crate::account::Account;
 use crate::records::{
     AddonInfo, CatalogInfo, CatalogRow, CoreError, LibraryItem, MetaDetails, MetaItem,
 };
@@ -31,9 +32,9 @@ const DEFAULT_ADDONS: &[(&str, u32)] = &[
     ("https://opensubtitles-v3.strem.io/manifest.json", 1),
 ];
 /// Current version of [`DEFAULT_ADDONS`].
-const DEFAULTS_VERSION: u32 = 2;
+pub(crate) const DEFAULTS_VERSION: u32 = 2;
 /// Setting that holds the version of the defaults already installed.
-const DEFAULTS_INSTALLED: &str = "default_addons_installed";
+pub(crate) const DEFAULTS_INSTALLED: &str = "default_addons_installed";
 
 /// How long each addon may take before it is skipped.
 /// Generous enough for slow mobile networks; stale cached data is shown meanwhile.
@@ -55,6 +56,7 @@ pub struct StremioCore {
     store: Mutex<Store>,
     pub(crate) client: AddonClient,
     pub(crate) streaming: Streaming,
+    pub(crate) account: Account,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -62,17 +64,7 @@ impl StremioCore {
     /// Opens the core with its database inside `data_dir`, creating the directory if needed.
     #[uniffi::constructor]
     pub fn new(data_dir: String) -> Result<Arc<Self>, CoreError> {
-        let directory = PathBuf::from(data_dir);
-        std::fs::create_dir_all(&directory).map_err(|e| CoreError::Storage {
-            reason: e.to_string(),
-        })?;
-        let store = Store::open(&directory.join("stremionow.db"))?;
-        let _ = store.prune_cache(now_millis() - millis(CACHE_RETENTION));
-        Ok(Arc::new(Self {
-            store: Mutex::new(store),
-            client: AddonClient::new(ADDON_TIMEOUT)?,
-            streaming: Streaming::new(directory.join("streams"))?,
-        }))
+        Self::open(data_dir, Account::new()?)
     }
 
     /// Installs the default addons the first time the app runs, and the ones a newer version
@@ -128,23 +120,25 @@ impl StremioCore {
     /// Installs the addon whose manifest is at `url`, or refreshes it if already installed.
     pub async fn install_addon(&self, url: String) -> Result<AddonInfo, CoreError> {
         let addon = self.client.install(&url).await?;
-        self.save_addon(&addon)
+        let info = self.save_addon(&addon)?;
+        self.addons_changed()?;
+        Ok(info)
     }
 
     pub fn remove_addon(&self, manifest_url: String) -> Result<(), CoreError> {
         self.store()?.remove_addon(&manifest_url)?;
-        Ok(())
+        self.addons_changed()
     }
 
     pub fn set_addon_enabled(&self, manifest_url: String, enabled: bool) -> Result<(), CoreError> {
         self.store()?.set_addon_enabled(&manifest_url, enabled)?;
-        Ok(())
+        self.addons_changed()
     }
 
     /// Moves an addon to `index` in the order; the order sets catalog and source priority.
     pub fn move_addon(&self, manifest_url: String, index: u32) -> Result<(), CoreError> {
         self.store()?.move_addon(&manifest_url, index as usize)?;
-        Ok(())
+        self.addons_changed()
     }
 
     /// Rows of the home screen: the first page of every browsable catalog, in addon order.
@@ -366,7 +360,9 @@ impl StremioCore {
     }
 
     pub fn remove_from_library(&self, id: String) -> Result<(), CoreError> {
-        self.store()?.remove_from_library(&id)?;
+        let store = self.store()?;
+        store.remove_from_library(&id)?;
+        self.note_removal(&store, &id)?;
         Ok(())
     }
 
@@ -376,6 +372,22 @@ impl StremioCore {
 }
 
 impl StremioCore {
+    /// Opens the core with the given account client; tests point it at a fake server.
+    pub(crate) fn open(data_dir: String, account: Account) -> Result<Arc<Self>, CoreError> {
+        let directory = PathBuf::from(data_dir);
+        std::fs::create_dir_all(&directory).map_err(|e| CoreError::Storage {
+            reason: e.to_string(),
+        })?;
+        let store = Store::open(&directory.join("stremionow.db"))?;
+        let _ = store.prune_cache(now_millis() - millis(CACHE_RETENTION));
+        Ok(Arc::new(Self {
+            store: Mutex::new(store),
+            client: AddonClient::new(ADDON_TIMEOUT)?,
+            streaming: Streaming::new(directory.join("streams"))?,
+            account,
+        }))
+    }
+
     /// Saves a downloaded addon, keeping its position and enabled state if it was installed.
     fn save_addon(&self, addon: &InstalledAddon) -> Result<AddonInfo, CoreError> {
         let json = serde_json::to_string(&addon.manifest).map_err(|e| CoreError::InvalidAddon {

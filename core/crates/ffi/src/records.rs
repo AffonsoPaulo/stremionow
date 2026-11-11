@@ -23,6 +23,9 @@ pub enum CoreError {
     /// A source could not be prepared for playback (no peers, no video file, engine error).
     #[error("playback error: {reason}")]
     Playback { reason: String },
+    /// Signing in to the Stremio account failed or the session ended.
+    #[error("sign-in error: {reason}")]
+    SignIn { reason: String },
 }
 
 impl From<AddonError> for CoreError {

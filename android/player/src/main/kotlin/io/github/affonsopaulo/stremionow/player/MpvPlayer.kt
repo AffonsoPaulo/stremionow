@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import java.util.Locale
+import kotlin.concurrent.thread
 
 /** Playback preferences applied when the player is created. */
 data class PlayerOptions(
@@ -143,7 +144,15 @@ class MpvPlayer private constructor(
         if (released) return
         released = true
         mpv.removeObserver(this)
-        mpv.destroy()
+        // Destroying waits for mpv's threads, which can be stuck on a slow network read (a
+        // torrent still finding pieces, say). Doing it on the main thread froze the app long
+        // enough for Android to kill it, so it happens on its own thread.
+        thread(name = "mpv-release", isDaemon = true) {
+            runCatching {
+                mpv.command(arrayOf("stop"))
+                mpv.destroy()
+            }
+        }
     }
 
     private fun setPaused(paused: Boolean) {

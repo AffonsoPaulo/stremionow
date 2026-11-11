@@ -25,6 +25,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-android-build
+        with:
+          caches: "false"
       - name: Build unsigned release APKs
         working-directory: android
         run: ./gradlew assembleRelease --console=plain

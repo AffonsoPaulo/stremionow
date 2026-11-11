@@ -11,6 +11,11 @@ inputs:
   gradle-cache-read-only:
     description: Restore the Gradle cache without saving it.
     default: "true"
+  caches:
+    description: >-
+      Restore build caches. Release builds turn this off so nothing written by other workflow
+      runs can end up in signed APKs.
+    default: "true"
 
 runs:
   using: composite
@@ -31,6 +36,7 @@ runs:
 
     - name: Restore Android NDK
       id: ndk-cache
+      if: inputs.caches == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.ANDROID_HOME }}/ndk/${{ steps.versions.outputs.ndk }}
@@ -57,6 +63,7 @@ runs:
       run: rustup show active-toolchain || rustup toolchain install
 
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      if: inputs.caches == 'true'
       with:
         workspaces: core
         shared-key: android
@@ -68,3 +75,4 @@ runs:
     - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       with:
         cache-read-only: ${{ inputs.gradle-cache-read-only }}
+        cache-disabled: ${{ inputs.caches != 'true' }}

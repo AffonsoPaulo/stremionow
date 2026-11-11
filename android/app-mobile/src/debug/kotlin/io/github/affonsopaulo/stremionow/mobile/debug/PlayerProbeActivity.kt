@@ -43,7 +43,9 @@ class PlayerProbeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val url = intent.getStringExtra("url")
+        // Exported so adb can start it, so it only plays web addresses: any other app could
+        // otherwise point mpv at this app's private files.
+        val url = intent.getStringExtra("url")?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
         if (url.isNullOrBlank()) {
             finish()
             return

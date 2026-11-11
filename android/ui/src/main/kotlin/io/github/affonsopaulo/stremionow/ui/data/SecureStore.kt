@@ -67,6 +67,8 @@ object SecureStore {
     private fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
+    /** Synchronized so two first uses cannot create two keys and lose a value to the other. */
+    @Synchronized
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }

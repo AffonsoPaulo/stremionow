@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +47,9 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 enum class SnButtonStyle { Primary, Secondary, Tonal, Ghost, Danger }
 
 private val Pill = RoundedCornerShape(SnRadius.radiusFull)
+
+/** Space the focus ring takes outside an element: its gap plus its width. */
+private val FocusRingSpace = 6.dp
 
 /** Pill button of the design system. Only one [SnButtonStyle.Primary] per area. */
 @Composable
@@ -156,9 +161,12 @@ fun <T> SnChipRow(
     // Keep the selection in view, for example when a screen opens already filtered.
     val selectedIndex = options.indexOf(selected)
     LaunchedEffect(selectedIndex) { if (selectedIndex > 0) listState.animateScrollToItem(selectedIndex) }
+    // Room for the focus ring around the first and last chips; the offset keeps the first
+    // chip aligned with whatever sits above the row.
     LazyRow(
-        modifier = modifier,
+        modifier = modifier.offset(x = -FocusRingSpace),
         state = listState,
+        contentPadding = PaddingValues(horizontal = FocusRingSpace, vertical = FocusRingSpace),
         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
     ) {
         itemsIndexed(options) { _, option ->

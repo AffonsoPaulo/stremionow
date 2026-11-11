@@ -82,6 +82,7 @@ fun SnSearchField(
                     Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester)
+                        .dpadExits()
                         .semantics { contentDescription = label },
                 textStyle = SnTypography.sectionTitle.copy(color = SnColors.fg),
                 singleLine = true,

@@ -40,6 +40,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
+import io.github.affonsopaulo.stremionow.ui.data.TitleLink
 import io.github.affonsopaulo.stremionow.ui.screens.AddonsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.DetailsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ExploreScreen
@@ -88,7 +89,11 @@ private object Routes {
 
 /** Root of the interface, shared by the phone and TV apps. */
 @Composable
-fun StremioNowApp(isTv: Boolean) {
+fun StremioNowApp(
+    isTv: Boolean,
+    link: TitleLink.Target? = null,
+    onLinkOpened: () -> Unit = {},
+) {
     CompositionLocalProvider(LocalIsTv provides isTv) {
         val navController = rememberNavController()
         val entry by navController.currentBackStackEntryAsState()
@@ -265,6 +270,13 @@ fun StremioNowApp(isTv: Boolean) {
                             navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
                         },
                     )
+                }
+            }
+            // A link from outside (the TV home screen) opens its title over whatever is showing.
+            LaunchedEffect(link, setup) {
+                if (link != null && !setup) {
+                    navController.navigate(Routes.details(link.kind, link.id)) { launchSingleTop = true }
+                    onLinkOpened()
                 }
             }
             if (phone && !keyboardOpen && !immersive && !setup) {

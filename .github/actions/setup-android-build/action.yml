@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Set up Android build
+description: >-
+  Installs the JDK, the Rust toolchain with the Android targets, cargo-ndk and the pinned
+  Android NDK and SDK platform, with caches for Cargo, the NDK and Gradle.
+
+inputs:
+  gradle-cache-read-only:
+    description: Restore the Gradle cache without saving it.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: 25
+
+    - name: Read pinned Android versions
+      id: versions
+      shell: bash
+      run: |
+        catalog=android/gradle/libs.versions.toml
+        read_version() { sed -n "s/^$1 = \"\(.*\)\"/\1/p" "$catalog"; }
+        echo "ndk=$(read_version ndk)" >> "$GITHUB_OUTPUT"
+        echo "platform=$(read_version compileSdk).$(read_version compileSdkMinor)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Android NDK
+      id: ndk-cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.ANDROID_HOME }}/ndk/${{ steps.versions.outputs.ndk }}
+        key: android-ndk-${{ runner.os }}-${{ steps.versions.outputs.ndk }}
+
+    - name: Install Android NDK and SDK platform
+      shell: bash
+      run: |
+        packages=("platforms;android-${{ steps.versions.outputs.platform }}")
+        if [ "${{ steps.ndk-cache.outputs.cache-hit }}" != "true" ]; then
+          packages+=("ndk;${{ steps.versions.outputs.ndk }}")
+        fi
+        yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "${packages[@]}" > /dev/null
+
+    - name: Install Rust
+      shell: bash
+      working-directory: core
+      run: rustup show active-toolchain || rustup toolchain install
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: core
+        shared-key: android
+
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-ndk
+
+    - uses: gradle/actions/setup-gradle@v6
+      with:
+        cache-read-only: ${{ inputs.gradle-cache-read-only }}

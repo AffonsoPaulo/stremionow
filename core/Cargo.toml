@@ -40,6 +40,19 @@ rusqlite = { version = "0.42.0", features = ["bundled"] }
 log = "0.4.35"
 tempfile = "3.27.0"
 wiremock = "0.6.5"
+librqbit = { version = "9.1.0", default-features = false }
+# `sha1-ring` selects librqbit's SHA-1 backend (aws-lc-rs, despite the name) without librqbit's
+# `rust-tls` feature, which would also switch reqwest's TLS to aws-lc-rs (the workspace uses ring).
+librqbit-core = { version = "9.1.0", default-features = false, features = ["sha1-ring"] }
+# Builds aws-lc on Windows x86_64 with the assembly objects shipped in the crate instead of
+# requiring NASM on the build machine. No effect on other targets.
+aws-lc-rs = { version = "1.19.0", default-features = false, features = ["prebuilt-nasm"] }
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+tokio-util = { version = "0.7.20", features = ["io"] }
+getrandom = "0.4.3"
 
 [profile.release]
 lto = "thin"

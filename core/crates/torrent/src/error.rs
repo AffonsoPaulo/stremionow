@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Errors reported to the app.
+
+use std::fmt;
+use std::time::Duration;
+
+/// Why the stream server could not do what was asked.
+#[derive(Debug, thiserror::Error)]
+pub enum TorrentError {
+    /// The info hash is not 40 hexadecimal digits.
+    #[error("invalid info hash: {0:?}")]
+    InvalidInfoHash(String),
+    /// Only `http` and `https` sources can be proxied.
+    #[error("unsupported URL: only http and https sources can be proxied")]
+    UnsupportedUrl,
+    /// No peer sent the torrent metadata in time.
+    #[error("no peer sent the torrent metadata within {} seconds", .0.as_secs())]
+    MetadataTimeout(Duration),
+    /// The torrent contains nothing a video player can open.
+    #[error("the torrent contains no video file")]
+    NoVideoFile,
+    /// [`StreamServer::stop`](crate::StreamServer::stop) was called while the torrent was
+    /// being added.
+    #[error("the torrent was stopped")]
+    Stopped,
+    /// The torrent engine failed.
+    #[error("torrent engine error: {0}")]
+    Engine(String),
+    /// A local file, socket or random number source failed.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl TorrentError {
+    /// Wraps an engine error. The alternate form makes `anyhow` errors print their causes.
+    pub(crate) fn engine(error: impl fmt::Display) -> Self {
+        Self::Engine(format!("{error:#}"))
+    }
+}

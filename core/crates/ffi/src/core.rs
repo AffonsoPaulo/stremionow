@@ -232,6 +232,47 @@ impl StremioCore {
         Ok(dedupe(response.metas.into_iter().map(MetaItem::from)))
     }
 
+    /// Catalogs that can search, in addon order. Ask each with
+    /// [`StremioCore::search_catalog`] to show results as they arrive.
+    pub fn search_catalogs(&self) -> Result<Vec<CatalogInfo>, CoreError> {
+        Ok(self
+            .enabled()?
+            .iter()
+            .flat_map(|addon| {
+                addon
+                    .manifest
+                    .catalogs
+                    .iter()
+                    .filter(|c| c.supports_extra("search"))
+                    .map(move |c| CatalogInfo::new(addon, c))
+            })
+            .collect())
+    }
+
+    /// Results of one catalog for `query`; an empty list for a blank query.
+    pub async fn search_catalog(
+        &self,
+        catalog: CatalogInfo,
+        query: String,
+    ) -> Result<Vec<MetaItem>, CoreError> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let addon = self.find_addon(&catalog.addon_manifest_url)?;
+        let descriptor = addon
+            .manifest
+            .catalogs
+            .iter()
+            .find(|c| c.id == catalog.catalog_id && c.kind == catalog.kind)
+            .ok_or(CoreError::NotFound)?;
+        let metas = self
+            .client
+            .catalog(&addon, descriptor, None, Some(query), 0)
+            .await?;
+        Ok(dedupe(metas.into_iter().map(MetaItem::from)))
+    }
+
     /// Searches every catalog that supports search. Each catalog gives one row, in addon
     /// order, so results stay grouped by type the way the addons describe them; catalogs
     /// with no match are left out.
@@ -580,6 +621,35 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].catalog.catalog_id, "search");
         assert_eq!(rows[0].items[0].id, "tt9");
+    }
+
+    #[tokio::test]
+    async fn searches_one_catalog_at_a_time() {
+        let server = addon_server("A").await;
+        Mock::given(method("GET"))
+            .and(path("/catalog/movie/search/search=office.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "metas": [{"id": "tt9", "type": "movie", "name": "Office"}]
+            })))
+            .mount(&server)
+            .await;
+        let (core, _dir) = core();
+        core.install_addon(format!("{}/manifest.json", server.uri()))
+            .await
+            .expect("installs");
+        let catalogs = core.search_catalogs().expect("lists");
+        assert_eq!(catalogs.len(), 1);
+        let items = core
+            .search_catalog(catalogs[0].clone(), " office ".into())
+            .await
+            .expect("searches");
+        assert_eq!(items[0].id, "tt9");
+        assert!(
+            core.search_catalog(catalogs[0].clone(), "  ".into())
+                .await
+                .expect("blank")
+                .is_empty()
+        );
     }
 
     #[test]

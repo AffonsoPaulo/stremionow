@@ -1,0 +1,138 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+package io.github.affonsopaulo.stremionow.ui.theme
+
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.unit.dp
+
+/**
+ * Icons of the design system, drawn after Lucide (ISC license): 24 × 24, 2 px strokes with
+ * round caps. Tint them with `ColorFilter.tint`; the white base color is only a placeholder.
+ */
+object SnIcons {
+    val Search = stroke("search", "M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0 -14z", "M20 20l-3.5 -3.5")
+    val Play = fill("play", "M7 4.5v15l13 -7.5z")
+    val Pause = fill("pause", "M6 4.5h4v15h-4z", "M14 4.5h4v15h-4z")
+    val Plus = stroke("plus", "M12 5v14", "M5 12h14")
+    val Check = stroke("check", "M5 12l5 5l9 -10")
+    val Close = stroke("close", "M18 6L6 18", "M6 6l12 12")
+    val ChevronUp = stroke("chevron-up", "M6 15l6 -6l6 6")
+    val ChevronDown = stroke("chevron-down", "M6 9l6 6l6 -6")
+    val ChevronLeft = stroke("chevron-left", "M15 18l-6 -6l6 -6")
+    val ChevronRight = stroke("chevron-right", "M9 18l6 -6l-6 -6")
+    val Info = stroke("info", "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18z", "M12 11v6", "M12 7.5v0.01")
+    val Trash = stroke("trash", "M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 13h10l1 -13", "M9 7V4h6v3")
+    val Layers = stroke("layers", "M12 3l9 5l-9 5l-9 -5z", "M3 13l9 5l9 -5", "M3 17.5l9 5l9 -5")
+    val Episodes =
+        stroke(
+            "episodes",
+            "M5 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-8a2 2 0 0 1 2 -2z",
+            "M7 4h12a2 2 0 0 1 2 2v10",
+        )
+    val Next = fill("next", "M5 5v14l11 -7z", "M18 5h2v14h-2z")
+    val Back10 = stroke("back-10", "M3 12a9 9 0 1 0 3 -6.7L3 8", "M3 3v5h5")
+    val Forward10 = stroke("forward-10", "M21 12a9 9 0 1 1 -3 -6.7L21 8", "M21 3v5h-5")
+    val Subtitles =
+        stroke(
+            "subtitles",
+            "M21 15a2 2 0 0 1 -2 2H8l-5 4V5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2z",
+            "M7 9h4",
+            "M14 9h3",
+            "M7 13h7",
+        )
+    val Bolt = fill("bolt", "M13 2L4 14h7l-1 8l9 -12h-7z")
+    val Peers =
+        stroke(
+            "peers",
+            "M8 3a4 4 0 1 0 0 8a4 4 0 1 0 0 -8z",
+            "M2 21a6 6 0 0 1 12 0",
+            "M17 5a3 3 0 1 1 0 6",
+            "M22 21a5 5 0 0 0 -5 -5",
+        )
+    val Settings =
+        stroke("settings", "M4 6h10", "M18 6h2", "M4 12h4", "M12 12h8", "M4 18h12", "M16 4v4", "M10 10v4", "M18 16v4")
+    val Skip = fill("skip", "M5 5v14l9 -7z", "M14 5v14l7 -7z")
+    val Home =
+        stroke(
+            "home",
+            "M3 10a2 2 0 0 1 0.709 -1.528l7 -5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1 -2 2H5" +
+                "a2 2 0 0 1 -2 -2z",
+            "M15 21v-8a1 1 0 0 0 -1 -1h-4a1 1 0 0 0 -1 1v8",
+        )
+    val Tv =
+        stroke(
+            "tv",
+            "M4 7h16a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2z",
+            "M17 2l-5 5l-5 -5",
+        )
+    val Film =
+        stroke(
+            "film",
+            "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2z",
+            "M7 3v18",
+            "M17 3v18",
+            "M3 12h18",
+            "M3 7.5h4",
+            "M3 16.5h4",
+            "M17 7.5h4",
+            "M17 16.5h4",
+        )
+    val User = stroke("user", "M12 3a4 4 0 1 0 0 8a4 4 0 1 0 0 -8z", "M19 21v-2a4 4 0 0 0 -4 -4H9a4 4 0 0 0 -4 4v2")
+    val Bookmark = stroke("bookmark", "M19 21l-7 -4l-7 4V5a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2z")
+    val Minus = stroke("minus", "M5 12h14")
+    val FullScreen =
+        stroke(
+            "full-screen",
+            "M8 3H5a2 2 0 0 0 -2 2v3",
+            "M21 8V5a2 2 0 0 0 -2 -2h-3",
+            "M3 16v3a2 2 0 0 0 2 2h3",
+            "M16 21h3a2 2 0 0 0 2 -2v-3",
+        )
+    val ExitFullScreen =
+        stroke(
+            "exit-full-screen",
+            "M8 3v3a2 2 0 0 1 -2 2H3",
+            "M21 8h-3a2 2 0 0 1 -2 -2V3",
+            "M3 16h3a2 2 0 0 1 2 2v3",
+            "M16 21v-3a2 2 0 0 1 2 -2h3",
+        )
+
+    private fun stroke(
+        name: String,
+        vararg paths: String,
+    ): ImageVector = build(name, paths, filled = false)
+
+    private fun fill(
+        name: String,
+        vararg paths: String,
+    ): ImageVector = build(name, paths, filled = true)
+
+    private fun build(
+        name: String,
+        paths: Array<out String>,
+        filled: Boolean,
+    ): ImageVector =
+        ImageVector
+            .Builder(
+                name = name,
+                defaultWidth = 24.dp,
+                defaultHeight = 24.dp,
+                viewportWidth = 24f,
+                viewportHeight = 24f,
+            ).apply {
+                for (path in paths) {
+                    addPath(
+                        pathData = addPathNodes(path),
+                        fill = if (filled) SolidColor(Color.White) else null,
+                        stroke = if (filled) null else SolidColor(Color.White),
+                        strokeLineWidth = if (filled) 0f else 2f,
+                        strokeLineCap = StrokeCap.Round,
+                        strokeLineJoin = StrokeJoin.Round,
+                    )
+                }
+            }.build()
+}

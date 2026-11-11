@@ -23,5 +23,8 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+    // Layout Inspector support in debug builds; the shared ui module has a single variant.
+    debugImplementation(platform(libs.compose.bom))
+    debugImplementation(libs.compose.ui.tooling)
     implementation(libs.androidx.tvprovider)
 }

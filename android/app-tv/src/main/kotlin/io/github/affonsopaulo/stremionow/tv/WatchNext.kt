@@ -10,6 +10,7 @@ import androidx.tvprovider.media.tv.TvContractCompat
 import androidx.tvprovider.media.tv.WatchNextProgram
 import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
+import io.github.affonsopaulo.stremionow.ui.data.build
 
 /**
  * Mirrors "Continue watching" into the Android TV home screen's Watch Next row. The app owns

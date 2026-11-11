@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package stremionow.buildlogic
 
-import com.android.build.api.variant.LibraryAndroidComponentsExtension
+import com.android.build.api.variant.KotlinMultiplatformAndroidComponentsExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
 /**
- * Generates the Compose theme and color resources from `design/tokens.json` and adds them
- * to every variant of the Android library module that applies this plugin.
+ * Generates the Compose theme and color resources from `design/tokens.json`. The theme goes to
+ * `commonMain` of the Kotlin Multiplatform module that applies this plugin, so every platform
+ * shares it; the color resources go to its Android target, for window themes and drawables.
  */
 class DesignTokensPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -24,11 +26,17 @@ class DesignTokensPlugin : Plugin<Project> {
                 resOutputDirectory.set(project.layout.buildDirectory.dir("generated/designTokens/res"))
             }
 
-        project.plugins.withId("com.android.library") {
-            val components = project.extensions.getByType(LibraryAndroidComponentsExtension::class.java)
+        project.plugins.withId("org.jetbrains.kotlin.multiplatform") {
+            project.extensions
+                .getByType(KotlinMultiplatformExtension::class.java)
+                .sourceSets
+                .getByName("commonMain")
+                .kotlin
+                .srcDir(generate.flatMap { it.kotlinOutputDirectory })
+        }
+        project.plugins.withId("com.android.kotlin.multiplatform.library") {
+            val components = project.extensions.getByType(KotlinMultiplatformAndroidComponentsExtension::class.java)
             components.onVariants { variant ->
-                (variant.sources.kotlin ?: variant.sources.java)
-                    ?.addGeneratedSourceDirectory(generate, GenerateDesignTokensTask::kotlinOutputDirectory)
                 variant.sources.res?.addGeneratedSourceDirectory(generate, GenerateDesignTokensTask::resOutputDirectory)
             }
         }

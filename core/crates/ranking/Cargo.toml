@@ -1,0 +1,12 @@
+[package]
+name = "stremionow-ranking"
+description = "Scores and orders playback sources by user preferences and device capabilities."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

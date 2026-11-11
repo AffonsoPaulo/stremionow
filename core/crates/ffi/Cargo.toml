@@ -1,0 +1,12 @@
+[package]
+name = "stremionow-ffi"
+description = "Bindings that expose the core to the app interfaces."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

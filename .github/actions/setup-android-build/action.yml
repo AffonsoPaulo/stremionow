@@ -43,7 +43,13 @@ runs:
         if [ "${{ steps.ndk-cache.outputs.cache-hit }}" != "true" ]; then
           packages+=("ndk;${{ steps.versions.outputs.ndk }}")
         fi
-        yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "${packages[@]}" > /dev/null
+        sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+        # `yes` is killed by SIGPIPE once sdkmanager exits; keep that from failing the step under pipefail.
+        (yes || true) | "$sdkmanager" --licenses > /dev/null
+        if ! (yes || true) | "$sdkmanager" --install "${packages[@]}" > "$RUNNER_TEMP/sdkmanager.log" 2>&1; then
+          cat "$RUNNER_TEMP/sdkmanager.log"
+          exit 1
+        fi
 
     - name: Install Rust
       shell: bash

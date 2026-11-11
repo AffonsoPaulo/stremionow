@@ -203,4 +203,37 @@
   <string name="sources_wifi_body">You\'re on mobile data. Play this torrent anyway, or turn off \"Only on Wi-Fi\" in Settings.</string>
   <string name="sources_wifi_play_anyway">Play anyway</string>
 
+  <!-- First-run setup. -->
+  <string name="onboarding_welcome_title">Your addons, your way</string>
+  <string name="onboarding_welcome_body">StremioNow plays movies and series from the addons you choose. Sign in to bring your Stremio addons, list and progress, or start fresh on this device.</string>
+  <string name="onboarding_sign_in">Sign in with Stremio</string>
+  <string name="onboarding_local">Continue without an account</string>
+  <string name="onboarding_local_note">You can sign in later from your profile.</string>
+  <string name="onboarding_sign_in_title">Sign in to Stremio</string>
+  <string name="onboarding_sign_in_body">Use your Stremio account\'s email and password. Your addons, list and progress come with you.</string>
+  <string name="onboarding_email">Email</string>
+  <string name="onboarding_password">Password</string>
+  <string name="onboarding_sign_in_failed">Couldn\'t sign in. Check your email, password and connection.</string>
+  <string name="onboarding_signing_in">Signing in…</string>
+  <string name="onboarding_preferences_title">How do you like to watch?</string>
+  <string name="onboarding_preferences_body">StremioNow uses this to pick the best source for you. You can change it anytime in Settings.</string>
+  <string name="onboarding_audio">Audio language</string>
+  <string name="onboarding_quality">Highest quality</string>
+  <string name="onboarding_quality_best">Best available</string>
+  <string name="onboarding_continue">Continue</string>
+  <string name="onboarding_debrid_title">Using a debrid service?</string>
+  <string name="onboarding_debrid_body">Debrid services turn torrents into fast direct streams. Add your API key and StremioNow installs Torrentio with it. You can skip this.</string>
+  <string name="onboarding_debrid_service">Service</string>
+  <string name="onboarding_debrid_key">API key</string>
+  <string name="onboarding_debrid_failed">Couldn\'t connect. Check the key and try again.</string>
+  <string name="onboarding_skip">Skip</string>
+  <string name="onboarding_connect">Connect</string>
+  <string name="settings_playback">Playback</string>
+
+  <!-- Account in the profile. -->
+  <string name="profile_account_body">Your addons, list and progress sync with your Stremio account.</string>
+  <string name="profile_sign_out">Sign out</string>
+  <string name="profile_sign_out_title">Sign out of Stremio?</string>
+  <string name="profile_sign_out_body">Your addons, list and progress stay on this device, but stop syncing.</string>
+
 </resources>

@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavHostController
@@ -37,12 +38,14 @@ import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
+import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.screens.AddonsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.DetailsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ExploreScreen
 import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
+import io.github.affonsopaulo.stremionow.ui.screens.OnboardingScreen
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ProfileScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
@@ -66,6 +69,8 @@ private object Routes {
     const val PERSON = "person/{name}"
     const val SOURCES = "sources"
     const val SETTINGS = "settings"
+    const val ONBOARDING = "onboarding"
+    const val SIGN_IN = "sign-in"
     const val PLAYER = "player"
 
     fun details(
@@ -112,6 +117,14 @@ fun StremioNowApp(isTv: Boolean) {
         val phone = SnLayout.formFactor == FormFactor.Phone
         // The player owns the whole screen: no header, no tab bar, no insets.
         val immersive = entry?.destination?.route == Routes.PLAYER
+        // First run shows the setup instead of the app's navigation.
+        val context = LocalContext.current
+        val startRoute =
+            remember {
+                val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
+                if (onboarded) Routes.HOME else Routes.ONBOARDING
+            }
+        val setup = entry?.destination?.route == Routes.ONBOARDING || entry?.destination?.route == Routes.SIGN_IN
         // Bumped when Search is chosen while already open, to focus the field and raise the keyboard.
         var searchFocusRequests by remember { mutableIntStateOf(0) }
         val openTab = { destination: TopDestination ->
@@ -138,8 +151,8 @@ fun StremioNowApp(isTv: Boolean) {
                     },
                 ),
         ) {
-            if (immersive) {
-                // No chrome over the video.
+            if (immersive || setup) {
+                // No chrome over the video or the first-run setup.
             } else if (phone) {
                 SnPhoneHeader(
                     title = phoneTitle(entry?.destination?.route, entry?.arguments?.getString("genre")),
@@ -150,7 +163,7 @@ fun StremioNowApp(isTv: Boolean) {
             } else {
                 SnHeader(current = section, onNavigate = openTab)
             }
-            NavHost(navController = navController, startDestination = Routes.HOME, modifier = Modifier.weight(1f)) {
+            NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.weight(1f)) {
                 val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
                 val watch = { details: MetaDetails, episode: Episode? ->
                     PlaybackSession.select(PlaybackSession.Selection(details, episode))
@@ -195,10 +208,21 @@ fun StremioNowApp(isTv: Boolean) {
                     ProfileScreen(
                         onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                        onSignIn = { navController.navigate(Routes.SIGN_IN) { launchSingleTop = true } },
                     )
                 }
                 composable(Routes.ADDONS) { AddonsScreen() }
                 composable(Routes.SETTINGS) { SettingsScreen() }
+                composable(Routes.SIGN_IN) {
+                    OnboardingScreen(onFinished = { navController.popBackStack() }, signInOnly = true)
+                }
+                composable(Routes.ONBOARDING) {
+                    OnboardingScreen(
+                        onFinished = {
+                            navController.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
+                        },
+                    )
+                }
                 composable(
                     Routes.DETAILS,
                     arguments =
@@ -242,7 +266,7 @@ fun StremioNowApp(isTv: Boolean) {
                     )
                 }
             }
-            if (phone && !keyboardOpen && !immersive) {
+            if (phone && !keyboardOpen && !immersive && !setup) {
                 SnTabBar(current = section, onNavigate = openTab)
             }
         }

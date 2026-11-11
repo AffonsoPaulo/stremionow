@@ -126,15 +126,32 @@ class PlayerViewModel(
     val selection: PlaybackSession.Selection,
     private val source: StreamSource,
 ) : ViewModel() {
-    private val subtitleLanguage = Locale.getDefault().isO3LanguageOrNull()
+    /** The user's choices from setup and Settings, falling back to the device language. */
+    private val settings = runCatching { core.settings() }.getOrNull()
+    private val audioLanguage = settings?.audioLanguage?.ifEmpty { null } ?: Locale.getDefault().language
+
+    /** Empty when the user turned subtitles off by default. */
+    private val subtitleChoice =
+        settings?.subtitleLanguage ?: Locale
+            .getDefault()
+            .language
+            .takeIf { it != "en" }
+            .orEmpty()
+    private val subtitleLanguage =
+        subtitleChoice.ifEmpty { null }?.let {
+            Locale
+                .forLanguageTag(
+                    it,
+                ).isO3LanguageOrNull()
+        }
 
     val player: MpvPlayer =
         MpvPlayer.create(
             context,
             PlayerOptions(
-                audioLanguages = listOfNotNull(Locale.getDefault().language),
+                audioLanguages = listOf(audioLanguage),
                 // Subtitles start on only when the device language is not English.
-                subtitleLanguages = listOfNotNull(Locale.getDefault().language.takeIf { it != "en" }),
+                subtitleLanguages = listOfNotNull(subtitleChoice.ifEmpty { null }),
                 verboseLogs = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
             ),
         )

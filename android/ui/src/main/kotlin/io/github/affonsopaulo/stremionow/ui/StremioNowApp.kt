@@ -44,6 +44,7 @@ import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ProfileScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
+import io.github.affonsopaulo.stremionow.ui.screens.SettingsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SourcesScreen
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
@@ -62,6 +63,7 @@ private object Routes {
     const val GENRE = "genre/{kind}/{genre}"
     const val PERSON = "person/{name}"
     const val SOURCES = "sources"
+    const val SETTINGS = "settings"
     const val PLAYER = "player"
 
     fun details(
@@ -182,9 +184,13 @@ fun StremioNowApp(isTv: Boolean) {
                     LibraryScreen(onOpenTitle = openTitle, onExplore = { navController.openTop(TopDestination.Series) })
                 }
                 composable(Routes.PROFILE) {
-                    ProfileScreen(onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } })
+                    ProfileScreen(
+                        onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                    )
                 }
                 composable(Routes.ADDONS) { AddonsScreen() }
+                composable(Routes.SETTINGS) { SettingsScreen() }
                 composable(
                     Routes.DETAILS,
                     arguments =
@@ -255,6 +261,7 @@ private fun phoneTitle(
         Routes.ADDONS -> stringResource(R.string.nav_addons)
         Routes.DETAILS -> ""
         Routes.SOURCES -> stringResource(R.string.sources_title)
+        Routes.SETTINGS -> stringResource(R.string.settings_title)
         else -> null
     }
 

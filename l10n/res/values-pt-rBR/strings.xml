@@ -141,4 +141,12 @@
   <string name="player_error_body">Ela pode estar fora do ar ou num formato que este aparelho não reproduz.</string>
   <string name="player_choose_other">Escolher outra fonte</string>
 
+  <string name="settings_title">Configurações</string>
+  <string name="settings_torrents">Torrents</string>
+  <string name="settings_wifi_only">Somente no Wi-Fi</string>
+  <string name="settings_wifi_only_body">Não iniciar torrents usando dados móveis.</string>
+  <string name="settings_cache">Tamanho do cache</string>
+  <string name="settings_cache_body">Espaço que os torrents podem ocupar neste aparelho, para que títulos assistidos de novo comecem mais rápido.</string>
+  <string name="settings_gigabytes">%1$d GB</string>
+
 </resources>

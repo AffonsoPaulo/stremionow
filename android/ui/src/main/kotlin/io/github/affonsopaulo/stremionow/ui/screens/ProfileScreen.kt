@@ -71,7 +71,10 @@ class ProfileViewModel(
  * is stored on the device, and the header says so instead of showing a fake account.
  */
 @Composable
-fun ProfileScreen(onOpenAddons: () -> Unit) {
+fun ProfileScreen(
+    onOpenAddons: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     val context = LocalContext.current
     val viewModel = viewModel { ProfileViewModel(AppGraph.core(context)) }
     val addonCount by viewModel.addonCount.collectAsStateWithLifecycle()
@@ -98,6 +101,11 @@ fun ProfileScreen(onOpenAddons: () -> Unit) {
                     title = stringResource(R.string.nav_addons),
                     detail = addonCount?.let { pluralStringResource(R.plurals.profile_addons_count, it, it) },
                     onClick = onOpenAddons,
+                )
+                SnListRow(
+                    icon = SnIcons.Settings,
+                    title = stringResource(R.string.settings_title),
+                    onClick = onOpenSettings,
                 )
             }
         }

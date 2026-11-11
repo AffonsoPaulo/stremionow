@@ -38,7 +38,10 @@ const FORWARDED_HEADERS: [HeaderName; 5] = [
 
 /// Remote sources the player may fetch through the server, each behind a random token.
 pub(crate) struct Proxy {
-    client: reqwest::Client,
+    /// For sources at public addresses: it only ever connects to public IPs.
+    public: reqwest::Client,
+    /// For sources the user pointed at their own network on purpose, such as a home server.
+    local: reqwest::Client,
     sources: Mutex<Sources>,
 }
 
@@ -53,7 +56,8 @@ impl Proxy {
     /// Creates the proxy and its HTTP client, which verifies TLS with the bundled web roots.
     pub(crate) fn new() -> Result<Self, TorrentError> {
         Ok(Self {
-            client: http_client()?,
+            public: http_client(true)?,
+            local: http_client(false)?,
             sources: Mutex::default(),
         })
     }
@@ -86,8 +90,12 @@ impl Proxy {
         let Some(url) = self.sources().by_token.get(token).cloned() else {
             return http::not_found();
         };
-        let mut request = self
-            .client
+        let client = if is_private_host(&url) {
+            &self.local
+        } else {
+            &self.public
+        };
+        let mut request = client
             .request(method.clone(), url)
             // The player needs the bytes as stored; a compressed body would break ranges.
             .header(header::ACCEPT_ENCODING, "identity");
@@ -129,7 +137,10 @@ fn relay(upstream: reqwest::Response, head_only: bool) -> Response<Body> {
     response
 }
 
-fn http_client() -> Result<reqwest::Client, TorrentError> {
+/// The relay's HTTP client. With `public_only`, names resolve to public addresses only, so a
+/// public source cannot reach the user's network through DNS (a name pointing at a private
+/// address, or one that changes answers between checks): the vetted address is the one used.
+fn http_client(public_only: bool) -> Result<reqwest::Client, TorrentError> {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
@@ -140,7 +151,13 @@ fn http_client() -> Result<reqwest::Client, TorrentError> {
     .map_err(io::Error::other)?
     .with_root_certificates(roots)
     .with_no_client_auth();
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder();
+    let builder = if public_only {
+        builder.dns_resolver(Arc::new(PublicResolver))
+    } else {
+        builder
+    };
+    builder
         .tls_backend_preconfigured(tls)
         .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(CONNECT_TIMEOUT)
@@ -175,21 +192,58 @@ fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-/// Whether `url` points at this device or a private, link-local or unique-local network.
-pub(crate) fn is_private_host(url: &url::Url) -> bool {
-    match url.host() {
-        Some(url::Host::Ipv4(ip)) => {
-            ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
-        }
-        Some(url::Host::Ipv6(ip)) => {
+/// Resolves names to their public addresses only, failing when there are none.
+struct PublicResolver;
+
+impl reqwest::dns::Resolve for PublicResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let host = name.as_str().to_owned();
+            let public: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|address| !is_private_ip(address.ip()))
+                .collect();
+            if public.is_empty() {
+                return Err("the source resolves only to private addresses".into());
+            }
+            Ok(Box::new(public.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// Whether `ip` is on this device or a network that is not the public internet: loopback,
+/// private, shared (carrier-grade NAT), link-local, unique-local, unspecified or broadcast.
+pub(crate) fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => is_private_v4(ip),
+        std::net::IpAddr::V6(ip) => {
             ip.is_loopback()
                 || ip.is_unspecified()
                 || (ip.segments()[0] & 0xfe00) == 0xfc00
                 || (ip.segments()[0] & 0xffc0) == 0xfe80
-                || ip
-                    .to_ipv4_mapped()
-                    .is_some_and(|v4| v4.is_loopback() || v4.is_private())
+                || ip.to_ipv4_mapped().is_some_and(is_private_v4)
         }
+    }
+}
+
+fn is_private_v4(ip: std::net::Ipv4Addr) -> bool {
+    let [first, second, ..] = ip.octets();
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || first == 0
+        || (first == 100 && (64..128).contains(&second))
+}
+
+/// Whether `url` points at this device or a private network, judging by its text alone:
+/// IP literals and local names. Names that resolve to private addresses are caught by
+/// [`PublicResolver`] when connecting.
+pub(crate) fn is_private_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => is_private_v4(ip),
+        Some(url::Host::Ipv6(ip)) => is_private_ip(std::net::IpAddr::V6(ip)),
         Some(url::Host::Domain(name)) => {
             let name = name.to_ascii_lowercase();
             name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local")
@@ -214,6 +268,10 @@ mod tests {
             "http://[fe80::1]/x",
             "http://localhost/x",
             "http://nas.local/x",
+            "http://100.64.0.1/x",
+            "http://0.1.2.3/x",
+            "http://[::ffff:192.168.1.1]/x",
+            "http://[::ffff:169.254.0.1]/x",
         ] {
             assert!(
                 is_private_host(&url::Url::parse(private).expect("url")),
@@ -230,6 +288,17 @@ mod tests {
                 "{public}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn public_sources_never_resolve_to_private_addresses() {
+        use reqwest::dns::Resolve;
+        let name: reqwest::dns::Name = "localhost".parse().expect("name");
+        let result = PublicResolver.resolve(name).await;
+        assert!(
+            result.is_err(),
+            "localhost must not resolve for a public source"
+        );
     }
 
     #[test]
@@ -272,7 +341,7 @@ mod live_check {
     #[tokio::test]
     #[ignore = "needs the network"]
     async fn follows_public_https_redirects() {
-        let client = super::http_client().expect("client");
+        let client = super::http_client(true).expect("client");
         let response = client
             .get("https://archive.org/download/night-of-the-living-dead-mp-4-burned/NightOfTheLivingDead%20%28mp4%29-BURNED.ia.mp4")
             .header("Range", "bytes=0-1")

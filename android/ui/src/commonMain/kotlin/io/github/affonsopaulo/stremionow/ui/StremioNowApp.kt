@@ -36,6 +36,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
+import io.github.affonsopaulo.stremionow.ui.crash.crashReportPrompt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
@@ -115,6 +116,8 @@ fun StremioNowApp(
     onLinkOpened: () -> Unit = {},
 ) {
     CompositionLocalProvider(LocalIsTv provides isTv) {
+        // Asks about the last crash report; in a crash loop, before the app starts.
+        if (crashReportPrompt()) return@CompositionLocalProvider
         val navController = rememberNavController()
         val entry by navController.currentBackStackEntryAsState()
         val current =

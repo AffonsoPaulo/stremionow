@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,6 +39,8 @@ import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnListRow
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
+import io.github.affonsopaulo.stremionow.ui.crash.TestCrashMenu
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -100,6 +103,8 @@ fun ProfileScreen(
     val addonCount by viewModel.addonCount.collectAsStateWithLifecycle()
     val email by viewModel.email.collectAsStateWithLifecycle()
     var confirmSignOut by remember { mutableStateOf(false) }
+    var showTestCrashes by remember { mutableStateOf(false) }
+    if (showTestCrashes) TestCrashMenu(onDismiss = { showTestCrashes = false })
     if (confirmSignOut) {
         SnDialog(
             title = stringResource(Res.string.profile_sign_out_title),
@@ -157,14 +162,32 @@ fun ProfileScreen(
         }
         if (version != null) {
             item(key = "version") {
-                BasicText(
-                    stringResource(Res.string.profile_version, version),
-                    style = SnTypography.caption.copy(color = SnColors.fgSubtle),
-                )
+                val text = stringResource(Res.string.profile_version, version)
+                val style = SnTypography.caption.copy(color = SnColors.fgSubtle)
+                if (CrashReports.isDebugBuild) {
+                    // Debug builds only: selecting the version seven times opens the test-crash menu.
+                    var taps by remember { mutableIntStateOf(0) }
+                    BasicText(
+                        text,
+                        style = style,
+                        modifier =
+                            Modifier.snClickable(RoundedCornerShape(SnRadius.radiusSm)) {
+                                if (++taps >= TEST_CRASH_TAPS) {
+                                    taps = 0
+                                    showTestCrashes = true
+                                }
+                            },
+                    )
+                } else {
+                    BasicText(text, style = style)
+                }
             }
         }
     }
 }
+
+/** Selections of the version line that open the test-crash menu of debug builds. */
+private const val TEST_CRASH_TAPS = 7
 
 @Composable
 private fun Identity(email: String?) {

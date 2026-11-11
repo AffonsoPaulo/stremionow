@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -98,6 +99,20 @@ fun Modifier.snClickable(
             role = role,
             onClick = onClick,
         )
+}
+
+/**
+ * Makes an element that is not a button reachable by keyboard and D-pad, with the same focus
+ * ring as [snClickable], such as a block of text that scrolls with the arrow keys.
+ */
+@Composable
+fun Modifier.snFocusable(shape: Shape): Modifier {
+    val feedback = LocalSnFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    return this
+        .then(if (focused && feedback.showFocus) Modifier.focusRing(shape) else Modifier)
+        .focusable(interactionSource = interaction)
 }
 
 /** Gap between an element and its focus ring, so the ring shows on light elements too. */

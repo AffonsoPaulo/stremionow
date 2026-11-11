@@ -18,4 +18,6 @@ dependencies {
     api(libs.jna) {
         artifact { type = "aar" }
     }
+    // Async functions of the core become suspend functions.
+    api(libs.kotlinx.coroutines.android)
 }

@@ -21,9 +21,17 @@ androidComponents {
 }
 
 dependencies {
+    api(project(":core-bridge"))
+    api(project(":player"))
     api(platform(libs.compose.bom))
     api(libs.compose.foundation)
     api(libs.compose.ui)
+    api(libs.androidx.lifecycle.viewmodel.compose)
+    api(libs.androidx.lifecycle.runtime.compose)
+    api(libs.androidx.navigation.compose)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+    implementation(libs.okhttp)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 }

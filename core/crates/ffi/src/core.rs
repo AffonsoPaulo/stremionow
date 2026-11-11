@@ -16,11 +16,22 @@ use crate::records::{
     AddonInfo, CatalogInfo, CatalogRow, CoreError, LibraryItem, MetaDetails, MetaItem,
 };
 
-/// Addons installed on first launch: catalogs and metadata, and subtitles.
-const DEFAULT_ADDONS: &[&str] = &[
-    "https://v3-cinemeta.strem.io/manifest.json",
-    "https://opensubtitles-v3.strem.io/manifest.json",
+/// Addons installed by default, the same ones the official Stremio app starts with, each with
+/// the version of this list that added it. Stremio's "Local Files" needs its local streaming
+/// server and the old OpenSubtitles v1 speaks a legacy protocol, so neither is included.
+const DEFAULT_ADDONS: &[(&str, u32)] = &[
+    ("https://v3-cinemeta.strem.io/manifest.json", 1),
+    ("https://v3-channels.strem.io/manifest.json", 2),
+    ("https://watchhub.strem.io/manifest.json", 2),
+    (
+        "https://caching.stremio.net/publicdomainmovies.now.sh/manifest.json",
+        2,
+    ),
+    ("https://opensubtitles-v3.strem.io/manifest.json", 1),
 ];
+/// Current version of [`DEFAULT_ADDONS`].
+const DEFAULTS_VERSION: u32 = 2;
+/// Setting that holds the version of the defaults already installed.
 const DEFAULTS_INSTALLED: &str = "default_addons_installed";
 
 /// How long each addon may take before it is skipped.
@@ -61,15 +72,28 @@ impl StremioCore {
         }))
     }
 
-    /// Installs the default addons the first time the app runs. Safe to call on every launch;
-    /// it does nothing once they are installed, and retries on the next launch after a failure.
+    /// Installs the default addons the first time the app runs, and the ones a newer version
+    /// of the list added after an update. Safe to call on every launch: it does nothing once
+    /// they are installed, and retries on the next launch after a failure.
     pub async fn ensure_default_addons(&self) -> Result<(), CoreError> {
-        if self.store()?.setting(DEFAULTS_INSTALLED)?.is_some() {
+        let installed_version = self
+            .store()?
+            .setting(DEFAULTS_INSTALLED)?
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        if installed_version >= DEFAULTS_VERSION {
             return Ok(());
         }
+        let present: Vec<String> = self
+            .store()?
+            .addons()?
+            .into_iter()
+            .map(|addon| addon.manifest_url)
+            .collect();
+        let wanted = defaults_to_install(installed_version, &present);
         // Download the manifests at once, then save them in list order so Cinemeta comes
         // first. The ones that worked are kept; a failure is retried on the next launch.
-        let fetched = join_all(DEFAULT_ADDONS.iter().map(|url| self.client.install(url))).await;
+        let fetched = join_all(wanted.iter().map(|url| self.client.install(url))).await;
         let mut first_error = None;
         for result in fetched {
             match result {
@@ -84,7 +108,8 @@ impl StremioCore {
         if let Some(error) = first_error {
             return Err(error.into());
         }
-        self.store()?.set_setting(DEFAULTS_INSTALLED, "1")?;
+        self.store()?
+            .set_setting(DEFAULTS_INSTALLED, &DEFAULTS_VERSION.to_string())?;
         Ok(())
     }
 
@@ -207,8 +232,10 @@ impl StremioCore {
         Ok(dedupe(response.metas.into_iter().map(MetaItem::from)))
     }
 
-    /// Searches every catalog that supports search and merges the results in addon order.
-    pub async fn search(&self, query: String) -> Result<Vec<MetaItem>, CoreError> {
+    /// Searches every catalog that supports search. Each catalog gives one row, in addon
+    /// order, so results stay grouped by type the way the addons describe them; catalogs
+    /// with no match are left out.
+    pub async fn search(&self, query: String) -> Result<Vec<CatalogRow>, CoreError> {
         let query = query.trim().to_owned();
         if query.is_empty() {
             return Ok(Vec::new());
@@ -232,18 +259,26 @@ impl StremioCore {
             .await;
 
         let mut first_error = None;
-        let mut items = Vec::new();
-        for result in results {
+        let mut rows = Vec::new();
+        for ((addon, catalog), result) in targets.iter().zip(results) {
             match result {
-                Ok(metas) => items.extend(metas.into_iter().map(MetaItem::from)),
+                Ok(metas) => {
+                    let items = dedupe(metas.into_iter().map(MetaItem::from));
+                    if !items.is_empty() {
+                        rows.push(CatalogRow {
+                            catalog: CatalogInfo::new(addon, catalog),
+                            items,
+                        });
+                    }
+                }
                 Err(error) => {
                     first_error.get_or_insert(error);
                 }
             }
         }
-        match (items.is_empty(), first_error) {
+        match (rows.is_empty(), first_error) {
             (true, Some(error)) => Err(error.into()),
-            _ => Ok(dedupe(items)),
+            _ => Ok(rows),
         }
     }
 
@@ -380,6 +415,16 @@ impl StremioCore {
             .map_err(|e| AddonError::InvalidResponse(e.to_string()))?;
         Ok((value, body))
     }
+}
+
+/// Default addons to install when the list at `installed_version` is already in place:
+/// the ones added later that are not installed yet, in list order.
+fn defaults_to_install(installed_version: u32, present: &[String]) -> Vec<&'static str> {
+    DEFAULT_ADDONS
+        .iter()
+        .filter(|(url, since)| *since > installed_version && !present.iter().any(|p| p == url))
+        .map(|(url, _)| *url)
+        .collect()
 }
 
 /// Removes repeated ids, keeping the first occurrence.
@@ -531,8 +576,29 @@ mod tests {
             .await
             .expect("installs");
         assert!(core.search("   ".into()).await.expect("blank").is_empty());
-        let results = core.search("  office ".into()).await.expect("search");
-        assert_eq!(results[0].id, "tt9");
+        let rows = core.search("  office ".into()).await.expect("search");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].catalog.catalog_id, "search");
+        assert_eq!(rows[0].items[0].id, "tt9");
+    }
+
+    #[test]
+    fn defaults_cover_new_installs_and_updates() {
+        let all = defaults_to_install(0, &[]);
+        assert_eq!(all.len(), DEFAULT_ADDONS.len());
+        assert!(all[0].contains("cinemeta"), "Cinemeta comes first");
+
+        // An install from version 1 only gets the additions, minus any already present.
+        let present = vec!["https://watchhub.strem.io/manifest.json".to_owned()];
+        let update = defaults_to_install(1, &present);
+        assert_eq!(
+            update,
+            vec![
+                "https://v3-channels.strem.io/manifest.json",
+                "https://caching.stremio.net/publicdomainmovies.now.sh/manifest.json",
+            ]
+        );
+        assert!(defaults_to_install(DEFAULTS_VERSION, &[]).is_empty());
     }
 
     #[tokio::test]

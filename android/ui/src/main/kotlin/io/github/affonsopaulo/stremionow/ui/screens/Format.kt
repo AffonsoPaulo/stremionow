@@ -27,3 +27,14 @@ fun MetaItem.metaLine(runtime: String? = null): String =
         imdbRating?.let { stringResource(R.string.imdb_rating, it) },
         genres.take(3).joinToString(", ").ifEmpty { null },
     ).joinToString(" · ")
+
+/** Plural name of a content type, for section titles and filters. Unknown types show as sent. */
+@Composable
+fun kindLabel(kind: String): String =
+    when (kind) {
+        "movie" -> stringResource(R.string.kind_movies)
+        "series" -> stringResource(R.string.kind_series)
+        "channel" -> stringResource(R.string.kind_channels)
+        "tv" -> stringResource(R.string.kind_tv)
+        else -> kind.replaceFirstChar { it.uppercaseChar() }
+    }

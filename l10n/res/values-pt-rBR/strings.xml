@@ -32,6 +32,10 @@
 
   <string name="type_movie">Filme</string>
   <string name="type_series">Série</string>
+  <string name="kind_movies">Filmes</string>
+  <string name="kind_series">Séries</string>
+  <string name="kind_channels">Canais</string>
+  <string name="kind_tv">Canais de TV</string>
   <string name="imdb_rating">IMDb %1$s</string>
 
   <string name="state_loading">Carregando</string>
@@ -52,6 +56,8 @@
   <string name="search_idle">A busca usa todos os addons de catálogo que você instalou.</string>
   <string name="search_empty_title">Nada encontrado para “%1$s”</string>
   <string name="search_empty_body">Confira a ortografia ou tente o título original.</string>
+  <string name="search_see_all">Ver tudo</string>
+  <string name="search_see_all_label">Ver tudo em %1$s</string>
 
   <string name="details_tab_episodes">Episódios</string>
   <string name="details_tab_related">Você também pode gostar</string>

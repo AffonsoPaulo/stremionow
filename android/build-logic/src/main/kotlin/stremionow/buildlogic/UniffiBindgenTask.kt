@@ -62,17 +62,27 @@ abstract class UniffiBindgenTask : DefaultTask() {
         cargo(
             workspace,
             listOf(
-                "run", "--quiet", "--package", "uniffi-bindgen", "--",
+                "run",
+                "--quiet",
+                "--package",
+                "uniffi-bindgen",
+                "--",
                 "generate",
-                "--library", library.absolutePath,
-                "--language", "kotlin",
-                "--out-dir", output.absolutePath,
+                "--library",
+                library.absolutePath,
+                "--language",
+                "kotlin",
+                "--out-dir",
+                output.absolutePath,
                 "--no-format",
             ),
         )
     }
 
-    private fun cargo(workspace: File, arguments: List<String>) {
+    private fun cargo(
+        workspace: File,
+        arguments: List<String>,
+    ) {
         execOperations.exec {
             workingDir = workspace
             executable = cargoExecutable()

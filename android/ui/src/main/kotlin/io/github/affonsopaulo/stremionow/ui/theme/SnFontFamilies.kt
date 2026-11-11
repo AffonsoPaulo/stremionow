@@ -15,24 +15,29 @@ import io.github.affonsopaulo.stremionow.ui.R
  */
 object SnFontFamilies {
     /** Outfit, for title logos and page titles. */
-    val display: FontFamily = FontFamily(
-        variableFont(R.font.outfit, FontWeight.SemiBold),
-        variableFont(R.font.outfit, FontWeight.Bold),
-        variableFont(R.font.outfit, FontWeight.ExtraBold),
-    )
+    val display: FontFamily =
+        FontFamily(
+            variableFont(R.font.outfit, FontWeight.SemiBold),
+            variableFont(R.font.outfit, FontWeight.Bold),
+            variableFont(R.font.outfit, FontWeight.ExtraBold),
+        )
 
     /** Inter, for everything else. */
-    val text: FontFamily = FontFamily(
-        variableFont(R.font.inter, FontWeight.Normal),
-        variableFont(R.font.inter, FontWeight.Medium),
-        variableFont(R.font.inter, FontWeight.SemiBold),
-        variableFont(R.font.inter, FontWeight.Bold),
-        variableFont(R.font.inter, FontWeight.ExtraBold),
-    )
+    val text: FontFamily =
+        FontFamily(
+            variableFont(R.font.inter, FontWeight.Normal),
+            variableFont(R.font.inter, FontWeight.Medium),
+            variableFont(R.font.inter, FontWeight.SemiBold),
+            variableFont(R.font.inter, FontWeight.Bold),
+            variableFont(R.font.inter, FontWeight.ExtraBold),
+        )
 }
 
 @OptIn(ExperimentalTextApi::class)
-private fun variableFont(resId: Int, weight: FontWeight): Font =
+private fun variableFont(
+    resId: Int,
+    weight: FontWeight,
+): Font =
     Font(
         resId = resId,
         weight = weight,

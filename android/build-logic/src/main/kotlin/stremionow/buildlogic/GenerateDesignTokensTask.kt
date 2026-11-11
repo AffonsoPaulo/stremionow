@@ -52,7 +52,10 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         writeColorResources(colors)
     }
 
-    private fun writeKotlin(tokens: Map<String, Any?>, colors: List<ColorToken>) {
+    private fun writeKotlin(
+        tokens: Map<String, Any?>,
+        colors: List<ColorToken>,
+    ) {
         val code = StringBuilder()
         code.appendLine("// Generated from design/tokens.json by the generateDesignTokens task. Do not edit.")
         code.appendLine("package ${packageName.get()}")
@@ -69,10 +72,11 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         code.appendLine("object SnColors {")
         for (color in colors) {
             code.appendDoc(color.usage)
-            val value = when (color) {
-                is ColorToken.Literal -> "Color(0x${color.argb})"
-                is ColorToken.Alias -> camelCase(color.target)
-            }
+            val value =
+                when (color) {
+                    is ColorToken.Literal -> "Color(0x${color.argb})"
+                    is ColorToken.Alias -> camelCase(color.target)
+                }
             code.appendLine("    val ${camelCase(color.name)}: Color = $value")
         }
         code.appendLine("}")
@@ -107,7 +111,10 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         code.appendLine("}")
     }
 
-    private fun appendTypography(code: StringBuilder, tokens: Map<String, Any?>) {
+    private fun appendTypography(
+        code: StringBuilder,
+        tokens: Map<String, Any?>,
+    ) {
         val groups = tokens["type"]?.asMap("type")?.get("groups")?.asList("type.groups") ?: return
         code.appendLine()
         code.appendLine("/** Text styles. Font families come from SnFontFamilies. */")
@@ -115,15 +122,24 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         for (group in groups.map { it.asMap("type group") }) {
             val groupFamily = group["family"] as? String
             for (style in group["styles"].asList("type styles").map { it.asMap("type style") }) {
-                val family = style["family"] as? String ?: groupFamily
-                    ?: throw GradleException("Text style ${style["name"]} has no font family.")
+                val family =
+                    style["family"] as? String ?: groupFamily
+                        ?: throw GradleException("Text style ${style["name"]} has no font family.")
                 code.appendDoc(style["usage"] as? String)
                 code.appendLine("    val ${camelCase(style.string("name"))}: TextStyle = TextStyle(")
                 code.appendLine("        fontFamily = SnFontFamilies.${camelCase(family)},")
-                style["fontWeight"]?.let { code.appendLine("        fontWeight = FontWeight(${number(it).roundToInt()}),") }
+                style["fontWeight"]?.let {
+                    code.appendLine(
+                        "        fontWeight = FontWeight(${number(it).roundToInt()}),",
+                    )
+                }
                 code.appendLine("        fontSize = ${pixels(style.string("fontSize"))}.sp,")
                 style["lineHeight"]?.let { code.appendLine("        lineHeight = ${lineHeight(it)},") }
-                (style["letterSpacing"] as? String)?.let { code.appendLine("        letterSpacing = ${letterSpacing(it)},") }
+                (style["letterSpacing"] as? String)?.let {
+                    code.appendLine(
+                        "        letterSpacing = ${letterSpacing(it)},",
+                    )
+                }
                 code.appendLine("    )")
             }
         }
@@ -136,10 +152,11 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         xml.appendLine("<!-- Generated from design/tokens.json by the generateDesignTokens task. Do not edit. -->")
         xml.appendLine("<resources>")
         for (color in colors) {
-            val value = when (color) {
-                is ColorToken.Literal -> "#${color.argb}"
-                is ColorToken.Alias -> "@color/${resourceName(color.target)}"
-            }
+            val value =
+                when (color) {
+                    is ColorToken.Literal -> "#${color.argb}"
+                    is ColorToken.Alias -> "@color/${resourceName(color.target)}"
+                }
             xml.appendLine("    <color name=\"${resourceName(color.name)}\">$value</color>")
         }
         xml.appendLine("</resources>")
@@ -153,22 +170,36 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         val name: String
         val usage: String?
 
-        data class Literal(override val name: String, override val usage: String?, val argb: String) : ColorToken
+        data class Literal(
+            override val name: String,
+            override val usage: String?,
+            val argb: String,
+        ) : ColorToken
 
-        data class Alias(override val name: String, override val usage: String?, val target: String) : ColorToken
+        data class Alias(
+            override val name: String,
+            override val usage: String?,
+            val target: String,
+        ) : ColorToken
     }
 
     private fun colorTokens(tokens: Map<String, Any?>): List<ColorToken> {
         val color = tokens["color"].asMap("color")
-        val firstTheme = color["themes"]?.asList("color.themes")?.firstOrNull()?.asMap("theme")?.get("id") as? String
+        val firstTheme =
+            color["themes"]
+                ?.asList("color.themes")
+                ?.firstOrNull()
+                ?.asMap("theme")
+                ?.get("id") as? String
         return color["tokens"].asList("color.tokens").map { entry ->
             val token = entry.asMap("color token")
             val name = token.string("name")
-            val raw = when (val value = token["value"]) {
-                is String -> value
-                is Map<*, *> -> (value[firstTheme] ?: value.values.first()) as String
-                else -> throw GradleException("Color $name has no value.")
-            }
+            val raw =
+                when (val value = token["value"]) {
+                    is String -> value
+                    is Map<*, *> -> (value[firstTheme] ?: value.values.first()) as String
+                    else -> throw GradleException("Color $name has no value.")
+                }
             val usage = token["usage"] as? String
             val alias = Regex("""^\{([A-Za-z0-9_.-]+)}$""").find(raw.trim())
             if (alias != null) {
@@ -179,7 +210,10 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
         }
     }
 
-    private fun argb(name: String, value: String): String {
+    private fun argb(
+        name: String,
+        value: String,
+    ): String {
         if (value.startsWith("#")) {
             val hex = value.removePrefix("#").uppercase(Locale.ROOT)
             return when (hex.length) {
@@ -189,15 +223,25 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
                 else -> throw GradleException("Color $name has an invalid hex value: $value")
             }
         }
-        val rgba = Regex("""^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$""").find(value)
-            ?: throw GradleException("Color $name uses an unsupported format: $value")
+        val rgba =
+            Regex("""^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$""").find(value)
+                ?: throw GradleException("Color $name uses an unsupported format: $value")
         val (r, g, b) = rgba.destructured
         val alpha = rgba.groupValues[4].ifEmpty { "1" }.toDouble()
-        return listOf((alpha * 255).roundToInt(), r.toDouble().roundToInt(), g.toDouble().roundToInt(), b.toDouble().roundToInt())
-            .joinToString("") { "%02X".format(it.coerceIn(0, 255)) }
+        return listOf(
+            (alpha * 255).roundToInt(),
+            r.toDouble().roundToInt(),
+            g.toDouble().roundToInt(),
+            b.toDouble().roundToInt(),
+        ).joinToString("") { "%02X".format(it.coerceIn(0, 255)) }
     }
 
-    private fun pixels(value: String): String = value.trim().removeSuffix("px").toDouble().let(::kotlinNumber)
+    private fun pixels(value: String): String =
+        value
+            .trim()
+            .removeSuffix("px")
+            .toDouble()
+            .let(::kotlinNumber)
 
     private fun lineHeight(value: Any): String =
         when (value) {
@@ -226,7 +270,8 @@ abstract class GenerateDesignTokensTask : DefaultTask() {
             parts.drop(1).joinToString("") { part -> part.replaceFirstChar { it.titlecase(Locale.ROOT) } }
     }
 
-    private fun resourceName(name: String): String = "sn_" + name.replace('-', '_').replace('.', '_').lowercase(Locale.ROOT)
+    private fun resourceName(name: String): String =
+        "sn_" + name.replace('-', '_').replace('.', '_').lowercase(Locale.ROOT)
 
     private fun StringBuilder.appendDoc(text: String?) {
         if (text.isNullOrBlank()) return

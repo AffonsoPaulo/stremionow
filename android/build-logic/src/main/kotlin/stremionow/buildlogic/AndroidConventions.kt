@@ -81,7 +81,9 @@ private fun Project.versionCatalog(): VersionCatalog =
     extensions.getByType(VersionCatalogsExtension::class.java).named("libs")
 
 private fun VersionCatalog.intVersion(alias: String): Int =
-    findVersion(alias).orElseThrow { IllegalStateException("Missing version \"$alias\" in libs.versions.toml") }
-        .requiredVersion.toInt()
+    findVersion(alias)
+        .orElseThrow { IllegalStateException("Missing version \"$alias\" in libs.versions.toml") }
+        .requiredVersion
+        .toInt()
 
 private fun VersionCatalog.javaVersion(): JavaVersion = JavaVersion.toVersion(intVersion("java"))

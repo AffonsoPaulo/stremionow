@@ -23,19 +23,21 @@ fun SnWordmark(
     modifier: Modifier = Modifier,
     fontSize: TextUnit = 26.sp,
 ) {
-    val text = buildAnnotatedString {
-        append("Stremio")
-        withStyle(SpanStyle(color = SnColors.accent)) { append("Now") }
-    }
+    val text =
+        buildAnnotatedString {
+            append("Stremio")
+            withStyle(SpanStyle(color = SnColors.accent)) { append("Now") }
+        }
     BasicText(
         text = text,
         modifier = modifier.semantics { contentDescription = "StremioNow" },
-        style = TextStyle(
-            color = SnColors.fg,
-            fontFamily = SnFontFamilies.display,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = fontSize,
-            letterSpacing = (-0.02).em,
-        ),
+        style =
+            TextStyle(
+                color = SnColors.fg,
+                fontFamily = SnFontFamilies.display,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = fontSize,
+                letterSpacing = (-0.02).em,
+            ),
     )
 }

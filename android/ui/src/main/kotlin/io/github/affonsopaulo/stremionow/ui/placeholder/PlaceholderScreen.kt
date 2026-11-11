@@ -29,10 +29,11 @@ fun PlaceholderScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(SnColors.bg)
-            .safeDrawingPadding(),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(SnColors.bg)
+                .safeDrawingPadding(),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space4, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

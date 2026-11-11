@@ -25,10 +25,18 @@
 
   <string name="time_left">faltam %1$s</string>
 
-  <plurals name="sources_found">
-    <item quantity="one">%1$d fonte de %2$d addons</item>
-    <item quantity="other">%1$d fontes de %2$d addons</item>
+  <string name="sources_summary">%1$s de %2$s</string>
+  <plurals name="sources_count">
+    <item quantity="one">%1$d fonte</item>
+    <item quantity="many">%1$d fontes</item>
+    <item quantity="other">%1$d fontes</item>
   </plurals>
+  <plurals name="sources_addons">
+    <item quantity="one">%1$d addon</item>
+    <item quantity="many">%1$d addons</item>
+    <item quantity="other">%1$d addons</item>
+  </plurals>
+  <string name="sources_title">Escolher fonte</string>
 
   <string name="type_movie">Filme</string>
   <string name="type_series">Série</string>
@@ -82,6 +90,8 @@
   <string name="addons_install_hint">https://…/manifest.json</string>
   <string name="addons_install_action">Instalar</string>
   <string name="addons_install_error">Não foi possível instalar. Confira se o link termina em /manifest.json e tente de novo.</string>
+  <string name="addons_installing">Instalando…</string>
+  <string name="addons_local_network_needed">Este addon está na sua rede local. Permita que o StremioNow encontre dispositivos na sua rede para instalá-lo.</string>
   <string name="addons_version">v%1$s</string>
   <string name="addons_kind_catalogs">Catálogos</string>
   <string name="addons_kind_metadata">Informações</string>
@@ -105,5 +115,30 @@
     <item quantity="other">%1$d instalados</item>
   </plurals>
   <string name="profile_version">StremioNow %1$s</string>
+
+  <string name="action_resume">Continuar</string>
+  <string name="action_close">Fechar</string>
+  <string name="home_continue_watching">Continuar assistindo</string>
+  <string name="sources_searching">Procurando fontes…</string>
+  <string name="sources_best">Melhor opção</string>
+  <string name="sources_opens_outside">Abre fora do app</string>
+  <string name="sources_empty_title">Nenhuma fonte encontrada</string>
+  <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="player_play">Reproduzir</string>
+  <string name="player_pause">Pausar</string>
+  <string name="player_back10">Voltar 10 segundos</string>
+  <string name="player_forward10">Avançar 10 segundos</string>
+  <string name="player_timeline">Posição da reprodução</string>
+  <string name="player_tracks">Áudio e legendas</string>
+  <string name="player_audio">Áudio</string>
+  <string name="player_subtitles">Legendas</string>
+  <string name="player_subtitles_off">Desativadas</string>
+  <string name="player_track_number">Faixa %1$d</string>
+  <string name="player_episodes">Episódios</string>
+  <string name="player_next">Próximo episódio</string>
+  <string name="player_change_source">Trocar fonte</string>
+  <string name="player_error_title">Não foi possível reproduzir esta fonte</string>
+  <string name="player_error_body">Ela pode estar fora do ar ou num formato que este aparelho não reproduz.</string>
+  <string name="player_choose_other">Escolher outra fonte</string>
 
 </resources>

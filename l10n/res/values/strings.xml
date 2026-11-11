@@ -38,11 +38,17 @@
   <!-- Remaining time on a card. %1$s is a duration already formatted for the locale, for example "18 min". -->
   <string name="time_left">%1$s left</string>
 
-  <!-- Count of sources found for an episode. -->
-  <plurals name="sources_found">
-    <item quantity="one">%1$d source from %2$d addons</item>
-    <item quantity="other">%1$d sources from %2$d addons</item>
+  <!-- Source picker summary: %1$s is sources_count, %2$s is sources_addons, for example "12 sources from 3 addons". -->
+  <string name="sources_summary">%1$s from %2$s</string>
+  <plurals name="sources_count">
+    <item quantity="one">%1$d source</item>
+    <item quantity="other">%1$d sources</item>
   </plurals>
+  <plurals name="sources_addons">
+    <item quantity="one">%1$d addon</item>
+    <item quantity="other">%1$d addons</item>
+  </plurals>
+  <string name="sources_title">Choose a source</string>
 
   <!-- Content types. -->
   <string name="type_movie">Movie</string>
@@ -114,6 +120,9 @@
   <string name="addons_install_hint">https://…/manifest.json</string>
   <string name="addons_install_action">Install</string>
   <string name="addons_install_error">Couldn\'t install. Check that the link ends with /manifest.json and try again.</string>
+  <string name="addons_installing">Installing…</string>
+  <!-- Shown when the user declines local network access for an addon hosted on their network. -->
+  <string name="addons_local_network_needed">This addon is on your local network. Allow StremioNow to find devices on your network to install it.</string>
   <!-- %1$s is the version number. -->
   <string name="addons_version">v%1$s</string>
   <string name="addons_kind_catalogs">Catalogs</string>
@@ -141,5 +150,34 @@
   </plurals>
   <!-- %1$s is the app version, for example "0.1.0". -->
   <string name="profile_version">StremioNow %1$s</string>
+
+  <!-- Watching. -->
+  <string name="action_resume">Resume</string>
+  <string name="action_close">Close</string>
+  <string name="home_continue_watching">Continue watching</string>
+  <string name="sources_searching">Looking for sources…</string>
+  <!-- Marks the source the app recommends, at the top of the list. -->
+  <string name="sources_best">Best match</string>
+  <!-- On sources that open in another app, such as a streaming service or YouTube. -->
+  <string name="sources_opens_outside">Opens outside the app</string>
+  <string name="sources_empty_title">No sources found</string>
+  <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <string name="player_play">Play</string>
+  <string name="player_pause">Pause</string>
+  <string name="player_back10">Back 10 seconds</string>
+  <string name="player_forward10">Forward 10 seconds</string>
+  <string name="player_timeline">Playback position</string>
+  <string name="player_tracks">Audio and subtitles</string>
+  <string name="player_audio">Audio</string>
+  <string name="player_subtitles">Subtitles</string>
+  <string name="player_subtitles_off">Off</string>
+  <!-- Fallback name of a track without language or title. %1$d is its number. -->
+  <string name="player_track_number">Track %1$d</string>
+  <string name="player_episodes">Episodes</string>
+  <string name="player_next">Next episode</string>
+  <string name="player_change_source">Change source</string>
+  <string name="player_error_title">Couldn\'t play this source</string>
+  <string name="player_error_body">It may be offline, or in a format this device can\'t play.</string>
+  <string name="player_choose_other">Choose another source</string>
 
 </resources>

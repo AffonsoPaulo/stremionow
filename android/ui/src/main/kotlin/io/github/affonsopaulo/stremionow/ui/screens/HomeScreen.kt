@@ -28,7 +28,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,16 +38,20 @@ import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.core.CatalogRow
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.R
 import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
+import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
+import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
+import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
@@ -62,6 +68,16 @@ class HomeViewModel(
 ) : ViewModel() {
     private val mutableRows = MutableStateFlow<Loadable<List<CatalogRow>>>(Loadable.Loading)
     val rows = mutableRows.asStateFlow()
+    private val mutableContinueWatching = MutableStateFlow<List<WatchProgress>>(emptyList())
+
+    /** Titles in progress; local, so it shows even offline. */
+    val continueWatching = mutableContinueWatching.asStateFlow()
+
+    fun refreshContinueWatching() {
+        viewModelScope.launch {
+            mutableContinueWatching.value = runCatching { io { core.continueWatching() } }.getOrDefault(emptyList())
+        }
+    }
 
     init {
         load()
@@ -86,11 +102,14 @@ private const val TAG = "StremioNow"
 @Composable
 fun HomeScreen(
     onOpenTitle: (MetaItem) -> Unit,
+    onOpenProgress: (WatchProgress) -> Unit,
     onOpenAddons: () -> Unit,
 ) {
     val context = LocalContext.current
     val viewModel = viewModel { HomeViewModel(AppGraph.core(context)) }
     val state by viewModel.rows.collectAsStateWithLifecycle()
+    val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshContinueWatching() }
 
     when (val rows = state) {
         Loadable.Loading -> {
@@ -110,7 +129,7 @@ fun HomeScreen(
                     onAction = onOpenAddons,
                 )
             } else {
-                HomeContent(rows.value, onOpenTitle)
+                HomeContent(rows.value, continueWatching, onOpenTitle, onOpenProgress)
             }
         }
     }
@@ -119,7 +138,9 @@ fun HomeScreen(
 @Composable
 private fun HomeContent(
     rows: List<CatalogRow>,
+    continueWatching: List<WatchProgress>,
     onOpenTitle: (MetaItem) -> Unit,
+    onOpenProgress: (WatchProgress) -> Unit,
 ) {
     val featured = rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it.background != null } }
     LazyColumn(
@@ -129,6 +150,9 @@ private fun HomeContent(
     ) {
         if (featured != null) {
             item(key = "hero") { Hero(featured, onOpenTitle) }
+        }
+        if (continueWatching.isNotEmpty()) {
+            item(key = "continue") { ContinueWatchingRow(continueWatching, onOpenProgress) }
         }
         items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
             CatalogRowSection(row, onOpenTitle)
@@ -226,4 +250,51 @@ private fun CatalogRowSection(
     onOpenTitle: (MetaItem) -> Unit,
 ) {
     SnPosterSection(row.catalog.name, row.items, onOpenTitle, subtitle = { it.cardSubtitle() })
+}
+
+/** Titles in progress, with how far along each one is and the time left. */
+@Composable
+private fun ContinueWatchingRow(
+    items: List<WatchProgress>,
+    onOpen: (WatchProgress) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+        SnSectionHeader(stringResource(R.string.home_continue_watching))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        ) {
+            items(items, key = { it.id }) { progress ->
+                val season = progress.season?.toInt()
+                val episode = progress.episode?.toInt()
+                val minutesLeft = ((progress.durationMs - progress.positionMs).toLong() / 60_000).coerceAtLeast(1)
+                val meta =
+                    listOfNotNull(
+                        if (season != null &&
+                            episode != null
+                        ) {
+                            stringResource(R.string.episode_short, season, episode)
+                        } else {
+                            null
+                        },
+                        stringResource(R.string.time_left, "$minutesLeft min"),
+                    ).joinToString(" · ")
+                SnEpisodeCard(
+                    title = progress.name,
+                    thumbnail = progress.background ?: progress.poster,
+                    meta = meta,
+                    overview = null,
+                    onClick = { onOpen(progress) },
+                    progress =
+                        if (progress.durationMs >
+                            0u
+                        ) {
+                            progress.positionMs.toFloat() / progress.durationMs.toFloat()
+                        } else {
+                            null
+                        },
+                )
+            }
+        }
+    }
 }

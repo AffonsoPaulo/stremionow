@@ -35,13 +35,16 @@ import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
+import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.screens.AddonsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.DetailsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ExploreScreen
 import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
+import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ProfileScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
+import io.github.affonsopaulo.stremionow.ui.screens.SourcesScreen
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -58,6 +61,8 @@ private object Routes {
     const val DETAILS = "details/{kind}/{id}"
     const val GENRE = "genre/{kind}/{genre}"
     const val PERSON = "person/{name}"
+    const val SOURCES = "sources"
+    const val PLAYER = "player"
 
     fun details(
         kind: String,
@@ -72,15 +77,9 @@ private object Routes {
     fun person(name: String) = "person/${Uri.encode(name)}"
 }
 
-/**
- * Root of the interface, shared by the phone and TV apps. [onPlay] opens playback for a
- * title or episode; it is wired by each app.
- */
+/** Root of the interface, shared by the phone and TV apps. */
 @Composable
-fun StremioNowApp(
-    isTv: Boolean,
-    onPlay: ((MetaDetails, Episode?) -> Unit)? = null,
-) {
+fun StremioNowApp(isTv: Boolean) {
     CompositionLocalProvider(LocalIsTv provides isTv) {
         val navController = rememberNavController()
         val entry by navController.currentBackStackEntryAsState()
@@ -94,7 +93,6 @@ fun StremioNowApp(
                 Routes.PROFILE -> TopDestination.Profile
                 else -> null
             }
-        // Addons is a page of the profile, so the avatar stays highlighted there.
         // The tab whose stack the user is in, so it stays highlighted on inner pages too.
         val backStack by navController.currentBackStack.collectAsState()
         val section =
@@ -102,6 +100,8 @@ fun StremioNowApp(
                 TopRoutes::get,
             )
         val phone = SnLayout.formFactor == FormFactor.Phone
+        // The player owns the whole screen: no header, no tab bar, no insets.
+        val immersive = entry?.destination?.route == Routes.PLAYER
         // Bumped when Search is chosen while already open, to focus the field and raise the keyboard.
         var searchFocusRequests by remember { mutableIntStateOf(0) }
         val openTab = { destination: TopDestination ->
@@ -117,7 +117,9 @@ fun StremioNowApp(
                 .background(SnColors.bg)
                 // On phones the tab bar pads itself so its background reaches the screen edge.
                 .windowInsetsPadding(
-                    if (phone) {
+                    if (immersive) {
+                        WindowInsets(0)
+                    } else if (phone) {
                         WindowInsets.safeDrawing
                             .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
                             .union(WindowInsets.ime)
@@ -126,7 +128,9 @@ fun StremioNowApp(
                     },
                 ),
         ) {
-            if (phone) {
+            if (immersive) {
+                // No chrome over the video.
+            } else if (phone) {
                 SnPhoneHeader(
                     title = phoneTitle(entry?.destination?.route, entry?.arguments?.getString("genre")),
                     onBack = if (current == null) ({ navController.navigateUp() }) else null,
@@ -138,9 +142,14 @@ fun StremioNowApp(
             }
             NavHost(navController = navController, startDestination = Routes.HOME, modifier = Modifier.weight(1f)) {
                 val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
+                val watch = { details: MetaDetails, episode: Episode? ->
+                    PlaybackSession.select(PlaybackSession.Selection(details, episode))
+                    navController.navigate(Routes.SOURCES) { launchSingleTop = true }
+                }
                 composable(Routes.HOME) {
                     HomeScreen(
                         onOpenTitle = { openTitle(it.kind, it.id) },
+                        onOpenProgress = { openTitle(it.kind, it.id) },
                         onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
                     )
                 }
@@ -190,11 +199,36 @@ fun StremioNowApp(
                         onOpenTitle = { openTitle(it.kind, it.id) },
                         onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
                         onSearchPerson = { navController.navigate(Routes.person(it)) },
-                        onPlay = onPlay,
+                        onPlay = watch,
+                    )
+                }
+                composable(Routes.SOURCES) {
+                    SourcesScreen(
+                        // The picker gives way to the player, so Back from the player returns
+                        // to the title rather than to the list.
+                        onPlay = {
+                            navController.navigate(
+                                Routes.PLAYER,
+                            ) { popUpTo(Routes.SOURCES) { inclusive = true } }
+                        },
+                        onGone = { navController.popBackStack() },
+                    )
+                }
+                composable(Routes.PLAYER) {
+                    PlayerScreen(
+                        onBack = { navController.popBackStack() },
+                        onChangeSource = {
+                            navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                        },
+                        onOpenEpisode = { episode ->
+                            val current = PlaybackSession.selection ?: return@PlayerScreen
+                            PlaybackSession.select(current.copy(episode = episode))
+                            navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                        },
                     )
                 }
             }
-            if (phone && !keyboardOpen) {
+            if (phone && !keyboardOpen && !immersive) {
                 SnTabBar(current = section, onNavigate = openTab)
             }
         }
@@ -220,6 +254,7 @@ private fun phoneTitle(
         Routes.PROFILE -> stringResource(R.string.profile_title)
         Routes.ADDONS -> stringResource(R.string.nav_addons)
         Routes.DETAILS -> ""
+        Routes.SOURCES -> stringResource(R.string.sources_title)
         else -> null
     }
 

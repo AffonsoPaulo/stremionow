@@ -21,9 +21,14 @@
       android:supportsRtl="true"
       android:theme="@style/Theme.StremioNow">
 
+    <!--
+      Compose redraws for size and orientation changes itself; recreating the activity would
+      interrupt playback and rebuild the video surface every time the device rotates.
+    -->
     <activity
         android:name=".MainActivity"
         android:exported="true"
+        android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
         android:screenOrientation="landscape">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />

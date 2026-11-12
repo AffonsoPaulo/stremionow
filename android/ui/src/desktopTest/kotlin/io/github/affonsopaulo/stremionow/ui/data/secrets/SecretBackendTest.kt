@@ -39,7 +39,16 @@ class SecretBackendTest {
     @Test
     fun secretServiceRoundTrip() {
         assumeTrue(Platform.isLinux())
-        roundTrip(LibsecretSecrets("io.github.affonsopaulo.stremionow.Test"))
+        val schema = "io.github.affonsopaulo.stremionow.Test"
+        try {
+            roundTrip(LibsecretSecrets(schema))
+        } catch (failure: SecretStoreUnavailableException) {
+            if (!required) throw failure
+            // A keyring without a default collection (a bare CI session): the in-memory session
+            // collection still proves the calls, the schema and the D-Bus round trip.
+            System.err.println("Default collection unusable (${failure.message}); trying the session collection")
+            roundTrip(LibsecretSecrets(schema, collection = "session"))
+        }
     }
 
     @Test
@@ -71,14 +80,25 @@ class SecretBackendTest {
         store.clear("key")
     }
 
+    /**
+     * Saves, reads, replaces and clears a secret. A store that cannot be used skips the test,
+     * unless it is [required]: it may answer a lookup yet refuse to save (a locked keyring with
+     * no one to unlock it), so that holds for every step, not only the first.
+     */
     private fun roundTrip(backend: SecretBackend) {
         val name = "test_" + UUID.randomUUID().toString().replace("-", "")
         try {
-            backend.clear(name)
+            roundTrip(backend, name)
         } catch (failure: SecretStoreUnavailableException) {
             if (required) throw failure
-            assumeNoException("${backend.description} is not available here", failure)
+            assumeNoException("${backend.description} is not available here: ${failure.message}", failure)
         }
+    }
+
+    private fun roundTrip(
+        backend: SecretBackend,
+        name: String,
+    ) {
         try {
             assertNull(backend.load(name))
             backend.save(name, "first value ✓ ação")

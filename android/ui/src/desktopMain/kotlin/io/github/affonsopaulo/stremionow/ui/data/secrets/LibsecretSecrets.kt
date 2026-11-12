@@ -19,6 +19,8 @@ import com.sun.jna.ptr.PointerByReference
  */
 internal class LibsecretSecrets(
     private val schemaName: String,
+    /** Collection to store in; null is the default one (the login keyring). */
+    private val collection: String? = null,
 ) : SecretBackend {
     override val description = "Secret Service"
 
@@ -52,7 +54,7 @@ internal class LibsecretSecrets(
                         api.secret.secret_password_storev_sync(
                             schema,
                             attributes,
-                            null,
+                            collection,
                             "StremioNow ($name)",
                             password,
                             null,

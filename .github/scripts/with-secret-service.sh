@@ -15,15 +15,30 @@ fi
 
 # --unlock reads the password from stdin and creates (then unlocks) the login keyring, which
 # becomes the default collection. The password only protects this throwaway keyring.
-printf 'ci-keyring' | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+printf 'ci-keyring' | gnome-keyring-daemon --unlock --daemonize --components=secrets > /dev/null
 
 # Wait until the daemon owns the Secret Service name on the bus.
+registered=false
 for _ in $(seq 1 50); do
   if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
     org.freedesktop.DBus.NameHasOwner string:org.freedesktop.secrets 2> /dev/null | grep -q 'boolean true'; then
-    exec "$@"
+    registered=true
+    break
   fi
   sleep 0.1
 done
-echo "gnome-keyring-daemon did not register org.freedesktop.secrets" >&2
-exit 1
+if [ "$registered" != true ]; then
+  echo "gnome-keyring-daemon did not register org.freedesktop.secrets" >&2
+  exit 1
+fi
+
+# Report what the keyring offers, so a failing test can be told apart from a keyring problem.
+if command -v secret-tool > /dev/null; then
+  if printf 'probe' | secret-tool store --label='CI probe' stremionow-ci probe; then
+    echo "Secret Service: storing in the default collection works"
+    secret-tool clear stremionow-ci probe || true
+  else
+    echo "Secret Service: storing in the default collection failed" >&2
+  fi
+fi
+exec "$@"

@@ -118,8 +118,9 @@ internal class OverlayState {
 }
 
 /**
- * Space, K, Left, Right, J, L, F and Esc, wherever the focus is in the overlay. Esc leaves full
- * screen first, then closes a panel, then leaves the player through [onBack].
+ * Space, K, Left, Right, J, L, F, N and Esc, wherever the focus is in the overlay. Esc (and the
+ * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
+ * [onNext], when there is one.
  */
 internal fun handlePlayerShortcut(
     event: KeyEvent,
@@ -127,6 +128,7 @@ internal fun handlePlayerShortcut(
     pair: WindowPair,
     state: OverlayState,
     onBack: () -> Unit,
+    onNext: (() -> Unit)?,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
     when (event.key) {
@@ -146,12 +148,12 @@ internal fun handlePlayerShortcut(
             pair.toggleFullScreen()
         }
 
+        Key.N -> {
+            onNext?.invoke() ?: return false
+        }
+
         Key.Escape -> {
-            when {
-                pair.isFullScreen -> pair.exitFullScreen()
-                state.panel != null -> state.panel = null
-                else -> onBack()
-            }
+            playerBack(pair, state, onBack)
         }
 
         // Compose moves the focus; the controls only need to be showing.
@@ -166,6 +168,40 @@ internal fun handlePlayerShortcut(
     }
     state.poke()
     return true
+}
+
+/** One step back: out of full screen, then out of an open panel, then out of the player. */
+internal fun playerBack(
+    pair: WindowPair,
+    state: OverlayState,
+    onBack: () -> Unit,
+) {
+    when {
+
+        pair.isFullScreen -> pair.exitFullScreen()
+
+        state.panel != null -> state.panel = null
+
+        else -> onBack()
+    }
+    state.poke()
+}
+
+/** Media keys and buttons (see [MediaKeys]): play and pause, next episode, back to the start. */
+internal fun handleMediaCommand(
+    command: MediaCommand,
+    player: VideoPlayer,
+    state: OverlayState,
+    onNext: (() -> Unit)?,
+) {
+    when (command) {
+        MediaCommand.PlayPause -> player.togglePause()
+        MediaCommand.Play -> player.play()
+        MediaCommand.Pause, MediaCommand.Stop -> player.pause()
+        MediaCommand.Next -> onNext?.invoke()
+        MediaCommand.Previous -> player.seekTo(0.0)
+    }
+    state.poke()
 }
 
 /**
@@ -392,7 +428,10 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
         ) {
-            SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onBack)
+            val backLabel = stringResource(Res.string.nav_back)
+            WithTooltip(backLabel, stringResource(Res.string.player_key_escape), TooltipSide.Below) {
+                SnIconButton(SnIcons.ChevronLeft, backLabel, onBack)
+            }
             Column(Modifier.weight(1f)) {
                 BasicText(
                     selection.details.item.name,
@@ -413,7 +452,10 @@ private fun Controls(
                     BasicText(label, style = SnTypography.body.copy(color = SnColors.fgSecondary), maxLines = 1)
                 }
             }
-            SnIconButton(SnIcons.Minus, stringResource(Res.string.player_minimize), onMinimize)
+            val minimizeLabel = stringResource(Res.string.player_minimize)
+            WithTooltip(minimizeLabel, side = TooltipSide.Below) {
+                SnIconButton(SnIcons.Minus, minimizeLabel, onMinimize)
+            }
         }
 
         Row(
@@ -421,28 +463,32 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space10),
         ) {
-            SnIconButton(SnIcons.Back10, stringResource(Res.string.player_back10), { onSeekBy(-SEEK_STEP_SECONDS) })
-            val playLabel = stringResource(if (playback.isPaused) Res.string.player_play else Res.string.player_pause)
-            Box(
-                Modifier
-                    .size(72.dp)
-                    .semantics { contentDescription = playLabel }
-                    .snClickable(RoundedCornerShape(SnRadius.radiusFull), onClick = onTogglePause)
-                    .background(SnColors.overlayLight, RoundedCornerShape(SnRadius.radiusFull)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    if (playback.isPaused) SnIcons.Play else SnIcons.Pause,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp),
-                    colorFilter = ColorFilter.tint(SnColors.fg),
-                )
+            val back10Label = stringResource(Res.string.player_back10)
+            WithTooltip(back10Label, stringResource(Res.string.player_key_left)) {
+                SnIconButton(SnIcons.Back10, back10Label, { onSeekBy(-SEEK_STEP_SECONDS) })
             }
-            SnIconButton(
-                SnIcons.Forward10,
-                stringResource(Res.string.player_forward10),
-                { onSeekBy(SEEK_STEP_SECONDS) },
-            )
+            val playLabel = stringResource(if (playback.isPaused) Res.string.player_play else Res.string.player_pause)
+            WithTooltip(playLabel, stringResource(Res.string.player_key_space)) {
+                Box(
+                    Modifier
+                        .size(72.dp)
+                        .semantics { contentDescription = playLabel }
+                        .snClickable(RoundedCornerShape(SnRadius.radiusFull), onClick = onTogglePause)
+                        .background(SnColors.overlayLight, RoundedCornerShape(SnRadius.radiusFull)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        if (playback.isPaused) SnIcons.Play else SnIcons.Pause,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        colorFilter = ColorFilter.tint(SnColors.fg),
+                    )
+                }
+            }
+            val forward10Label = stringResource(Res.string.player_forward10)
+            WithTooltip(forward10Label, stringResource(Res.string.player_key_right)) {
+                SnIconButton(SnIcons.Forward10, forward10Label, { onSeekBy(SEEK_STEP_SECONDS) })
+            }
         }
 
         Column(
@@ -472,21 +518,32 @@ private fun Controls(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
-                SnIconButton(SnIcons.Subtitles, stringResource(Res.string.player_tracks), onTracks)
+                val tracksLabel = stringResource(Res.string.player_tracks)
+                WithTooltip(tracksLabel) { SnIconButton(SnIcons.Subtitles, tracksLabel, onTracks) }
                 if (selection.details.episodes.isNotEmpty()) {
-                    SnIconButton(SnIcons.Episodes, stringResource(Res.string.player_episodes), onEpisodes)
+                    val episodesLabel = stringResource(Res.string.player_episodes)
+                    WithTooltip(episodesLabel) { SnIconButton(SnIcons.Episodes, episodesLabel, onEpisodes) }
                 }
-                SnIconButton(SnIcons.Layers, stringResource(Res.string.player_change_source), onChangeSource)
+                val sourceLabel = stringResource(Res.string.player_change_source)
+                WithTooltip(sourceLabel) { SnIconButton(SnIcons.Layers, sourceLabel, onChangeSource) }
                 Box(Modifier.weight(1f))
-                if (hasNext) SnIconButton(SnIcons.Next, stringResource(Res.string.player_next), onNext)
-                SnIconButton(
-                    icon = if (isFullScreen) SnIcons.ExitFullScreen else SnIcons.FullScreen,
-                    label =
-                        stringResource(
-                            if (isFullScreen) Res.string.player_exit_full_screen else Res.string.player_full_screen,
-                        ),
-                    onClick = onToggleFullScreen,
-                )
+                if (hasNext) {
+                    val nextLabel = stringResource(Res.string.player_next)
+                    WithTooltip(nextLabel, stringResource(Res.string.player_key_next)) {
+                        SnIconButton(SnIcons.Next, nextLabel, onNext)
+                    }
+                }
+                val fullScreenLabel =
+                    stringResource(
+                        if (isFullScreen) Res.string.player_exit_full_screen else Res.string.player_full_screen,
+                    )
+                WithTooltip(fullScreenLabel, stringResource(Res.string.player_key_full_screen)) {
+                    SnIconButton(
+                        icon = if (isFullScreen) SnIcons.ExitFullScreen else SnIcons.FullScreen,
+                        label = fullScreenLabel,
+                        onClick = onToggleFullScreen,
+                    )
+                }
             }
         }
     }

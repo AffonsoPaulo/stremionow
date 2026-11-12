@@ -15,7 +15,10 @@ internal actual object DevicePlatform {
         return host?.substringBefore('.')?.takeIf { it.isNotBlank() } ?: "StremioNow"
     }
 
-    // Desktops are never on mobile data as far as the app can tell (see Connectivity).
+    actual fun kind(context: PlatformContext): DeviceKind = DeviceKind.Computer
+
+    // Desktops are never on mobile data as far as the app can tell (see Connectivity), and
+    // the core reads the gateway itself, so there is no network hint to give.
     actual fun watchNetwork(
         context: PlatformContext,
         core: StremioCore,

@@ -255,11 +255,24 @@
   <string name="devices_section_serve">Share this device</string>
   <string name="devices_serve">Serve to other devices</string>
   <string name="devices_serve_body">Download torrents for the devices you pair, while StremioNow is open here.</string>
-  <!-- Label before this device's name, as other devices see it. -->
-  <string name="devices_serve_name">Name</string>
   <!-- Label before this device's local network address, for example "192.168.1.20:47630". -->
   <string name="devices_serve_address">Address</string>
   <string name="devices_serve_using_other">Stop using the other device below to serve from this one.</string>
+  <!-- Label of the field with the name other devices see for this one when it serves. -->
+  <string name="devices_name_label">Name other devices see</string>
+  <string name="devices_name_save">Save name</string>
+  <!-- The neutral name a server announces until the user chooses one. %1$s is the kind of device. -->
+  <string name="devices_default_name">StremioNow (%1$s)</string>
+  <string name="devices_kind_tv">TV</string>
+  <string name="devices_kind_phone">phone</string>
+  <string name="devices_kind_tablet">tablet</string>
+  <string name="devices_kind_computer">computer</string>
+  <string name="devices_paused_other_network">Paused: this isn\'t the network where you turned serving on, so other devices can\'t use this one here.</string>
+  <string name="devices_paused_no_network">Paused: not connected to a home network.</string>
+  <string name="devices_serve_here">Serve on this network</string>
+  <string name="devices_serve_here_title">Serve on this network?</string>
+  <string name="devices_serve_here_body">Paired devices on this network will be able to download torrents through this one. Do this only on a network you trust, such as your home\'s, not a café, hotel or office network.</string>
+  <string name="devices_pair_contested">Another device tried to pair with this code. If it wasn\'t yours, someone else on this network is trying to pair: get a new code before typing it on your device.</string>
   <string name="devices_serve_starting">Starting…</string>
   <string name="devices_serve_no_network">Not connected to a home network. Connect to Wi-Fi or Ethernet, then turn this on again.</string>
   <string name="devices_serve_failed">Couldn\'t start serving. Try again.</string>

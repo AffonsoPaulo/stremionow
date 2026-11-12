@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -23,6 +24,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
+import io.github.affonsopaulo.stremionow.ui.components.SnListRow
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
@@ -32,6 +34,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
+import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
@@ -50,18 +53,20 @@ class SettingsViewModel(
         viewModelScope.launch { mutableSettings.value = runCatching { io { core.settings() } }.getOrNull() }
     }
 
-    /** Applies a change at once; there is no Save button to forget. */
+    /**
+     * Applies a change at once; there is no Save button to forget. The change is applied to
+     * the saved settings again, so what other pages changed meanwhile (Other devices) stays.
+     */
     fun update(change: (AppSettings) -> AppSettings) {
         val current = settings.value ?: return
-        val updated = change(current)
-        mutableSettings.value = updated
-        viewModelScope.launch { runCatching { io { core.updateSettings(updated) } } }
+        mutableSettings.value = change(current)
+        viewModelScope.launch { runCatching { io { core.updateSettings(change(core.settings())) } } }
     }
 }
 
-/** Playback and download preferences. */
+/** Playback and download preferences. [onOpenDevices] opens Settings › Other devices. */
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onOpenDevices: () -> Unit) {
     val context = LocalPlatformContext.current
     val viewModel = viewModel { SettingsViewModel(AppGraph.core(context)) }
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -77,7 +82,7 @@ fun SettingsScreen() {
             val off = stringResource(Res.string.player_subtitles_off)
             val best = stringResource(Res.string.onboarding_quality_best)
             val languages = playbackLanguages(deviceLanguage())
-            Section(stringResource(Res.string.settings_playback)) {
+            SettingsSection(stringResource(Res.string.settings_playback)) {
                 Group(stringResource(Res.string.onboarding_audio)) {
                     SnChipRow(
                         options = (listOf(current.audioLanguage) + languages).filter { it.isNotEmpty() }.distinct(),
@@ -115,29 +120,13 @@ fun SettingsScreen() {
             }
         }
         item {
-            Section(stringResource(Res.string.settings_torrents)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
-                        BasicText(
-                            stringResource(Res.string.settings_wifi_only),
-                            style = SnTypography.bodyLg.copy(color = SnColors.fg),
-                        )
-                        BasicText(
-                            stringResource(Res.string.settings_wifi_only_body),
-                            style = SnTypography.body.copy(color = SnColors.fgMuted),
-                        )
-                    }
-                    SnSwitch(
-                        checked = current.torrentWifiOnly,
-                        label = stringResource(Res.string.settings_wifi_only),
-                        onText = stringResource(Res.string.state_on),
-                        offText = stringResource(Res.string.state_off),
-                        onToggle = { viewModel.update { it.copy(torrentWifiOnly = !it.torrentWifiOnly) } },
-                    )
-                }
+            SettingsSection(stringResource(Res.string.settings_torrents)) {
+                SettingsToggle(
+                    title = stringResource(Res.string.settings_wifi_only),
+                    body = stringResource(Res.string.settings_wifi_only_body),
+                    checked = current.torrentWifiOnly,
+                    onToggle = { viewModel.update { it.copy(torrentWifiOnly = !it.torrentWifiOnly) } },
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
                     BasicText(
                         stringResource(Res.string.settings_cache),
@@ -154,13 +143,25 @@ fun SettingsScreen() {
                         onSelect = { size -> viewModel.update { it.copy(torrentCacheMb = size) } },
                     )
                 }
+                Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+                    SnListRow(
+                        icon = SnIcons.Tv,
+                        title = stringResource(Res.string.settings_devices),
+                        onClick = onOpenDevices,
+                    )
+                    BasicText(
+                        stringResource(Res.string.settings_devices_body),
+                        style = SnTypography.body.copy(color = SnColors.fgMuted),
+                    )
+                }
             }
         }
     }
 }
 
+/** A titled group of settings, also used by Settings › Other devices. */
 @Composable
-private fun Section(
+internal fun SettingsSection(
     title: String,
     content: @Composable () -> Unit,
 ) {
@@ -171,6 +172,34 @@ private fun Section(
             style = SnTypography.overline.copy(color = SnColors.fgMuted),
         )
         content()
+    }
+}
+
+/** A setting turned on and off, with a line explaining it. */
+@Composable
+internal fun SettingsToggle(
+    title: String,
+    body: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = Modifier.alpha(if (enabled) 1f else 0.45f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+            BasicText(title, style = SnTypography.bodyLg.copy(color = SnColors.fg))
+            BasicText(body, style = SnTypography.body.copy(color = SnColors.fgMuted))
+        }
+        SnSwitch(
+            checked = checked,
+            label = title,
+            onText = stringResource(Res.string.state_on),
+            offText = stringResource(Res.string.state_off),
+            onToggle = { if (enabled) onToggle() },
+        )
     }
 }
 

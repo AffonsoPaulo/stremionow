@@ -246,4 +246,75 @@
   <!-- Countdown on the next-episode card. %1$d is the seconds left. -->
   <string name="player_up_next">Up next in %1$d s</string>
 
+  <!-- Settings > Other devices: one device downloads torrents for the others on the home network. -->
+  <string name="settings_devices">Other devices</string>
+  <string name="settings_devices_body">Download torrents on one device and watch on another.</string>
+  <string name="devices_title">Other devices</string>
+  <string name="devices_intro">A device on your home network can download torrents for the others. A TV with a weak connection can play through your computer.</string>
+  <!-- Heading of the part of Other devices where this device serves the others. -->
+  <string name="devices_section_serve">Share this device</string>
+  <string name="devices_serve">Serve to other devices</string>
+  <string name="devices_serve_body">Download torrents for the devices you pair, while StremioNow is open here.</string>
+  <!-- Label before this device's name, as other devices see it. -->
+  <string name="devices_serve_name">Name</string>
+  <!-- Label before this device's local network address, for example "192.168.1.20:47630". -->
+  <string name="devices_serve_address">Address</string>
+  <string name="devices_serve_using_other">Stop using the other device below to serve from this one.</string>
+  <string name="devices_serve_starting">Starting…</string>
+  <string name="devices_serve_no_network">Not connected to a home network. Connect to Wi-Fi or Ethernet, then turn this on again.</string>
+  <string name="devices_serve_failed">Couldn\'t start serving. Try again.</string>
+  <string name="devices_pair_action">Pair a device</string>
+  <!-- Accessibility label of the pairing code. %1$s is the code, digit by digit. -->
+  <string name="devices_pair_code_label">Pairing code %1$s</string>
+  <string name="devices_pair_code_body">On the other device, open Settings, Other devices, choose this device and enter this code.</string>
+  <!-- %1$s is the time left, for example "2:41". -->
+  <string name="devices_pair_code_expires">Expires in %1$s</string>
+  <string name="devices_new_code">New code</string>
+  <string name="devices_paired_title">Paired devices</string>
+  <string name="devices_paired_empty">No devices paired yet.</string>
+  <string name="devices_streaming">Streaming now</string>
+  <string name="devices_remove">Remove</string>
+  <!-- Accessibility label of the remove button. %1$s is the device name. -->
+  <string name="devices_remove_label">Remove %1$s</string>
+  <!-- %1$s is the device name. -->
+  <string name="devices_remove_title">Remove %1$s?</string>
+  <string name="devices_remove_body">It stops downloading through this device until you pair it again.</string>
+  <string name="devices_use">Use another device for torrents</string>
+  <string name="devices_use_body">Torrents download on the device you choose and play here. Web and debrid sources still play directly on this device.</string>
+  <string name="devices_use_serving">Turn off \"Serve to other devices\" to use another device.</string>
+  <string name="devices_find">Find devices</string>
+  <string name="devices_searching">Looking for devices on this network…</string>
+  <string name="devices_found_none">No devices found. Check that \"Serve to other devices\" is on there and that both are on the same network, or enter its address.</string>
+  <string name="devices_address_label">Address shown on the other device</string>
+  <!-- Example address in the empty field. Keep the digits. -->
+  <string name="devices_address_hint">192.168.1.20</string>
+  <string name="devices_code_label">Pairing code</string>
+  <string name="devices_code_hint">6 digits</string>
+  <string name="devices_pair">Pair</string>
+  <string name="devices_pairing">Pairing…</string>
+  <string name="devices_error_address">Enter the address shown on the other device, such as 192.168.1.20.</string>
+  <string name="devices_error_code">Enter the 6-digit code shown on the other device.</string>
+  <string name="devices_error_unreachable">Couldn\'t reach that device. Check that it\'s on, serving, and on the same network.</string>
+  <string name="devices_error_no_code">That device isn\'t showing a code. Choose \"Pair a device\" there first.</string>
+  <string name="devices_error_wrong_code">That code isn\'t right. Check it and try again.</string>
+  <string name="devices_error_too_many">Too many attempts. Get a new code on the other device.</string>
+  <string name="devices_error_full">That device has too many paired devices. Remove one there first.</string>
+  <string name="devices_error_not_genuine">That device couldn\'t prove it\'s the one showing the code. Check that you chose the right device.</string>
+  <string name="devices_error_failed">Pairing didn\'t work. Try again.</string>
+  <string name="devices_error_local_network">StremioNow needs access to your local network to reach other devices.</string>
+  <string name="devices_status_checking">Checking…</string>
+  <string name="devices_status_ready">Connected. Torrents download there.</string>
+  <string name="devices_status_unreachable">Not reachable right now. Torrents download on this device until it\'s back.</string>
+  <string name="devices_status_unpaired">It no longer recognizes this device. Stop using it and pair again.</string>
+  <string name="devices_stop_using">Stop using</string>
+  <!-- %1$s is the device name. -->
+  <string name="devices_stop_title">Stop using %1$s?</string>
+  <string name="devices_stop_body">Torrents will download on this device again.</string>
+  <!-- Under the loading logo when a torrent downloads on another device. %1$s is its name. -->
+  <string name="torrent_on_device">Downloading on %1$s</string>
+  <!-- %1$s is the name of the device that couldn't be reached. -->
+  <string name="torrent_fallback_unreachable">Couldn\'t reach %1$s. Downloading on this device.</string>
+  <string name="torrent_fallback_unpaired">%1$s no longer recognizes this device. Downloading here; pair again in Settings.</string>
+  <string name="torrent_fallback_paused">%1$s is on mobile data. Downloading on this device.</string>
+
 </resources>

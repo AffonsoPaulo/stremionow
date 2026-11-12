@@ -23,6 +23,7 @@ object AppGraph {
                 .also { opened ->
                     SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let(opened::restoreSession)
                     core = opened
+                    DeviceSharing.restore(context, opened)
                 }
         }
 }

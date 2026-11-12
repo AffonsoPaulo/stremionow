@@ -102,7 +102,7 @@ fun ClearHeaderOverHero(listState: LazyListState) {
  * Darkens the top of title art where the clear header sits, so the header's light text keeps
  * at least 4.5:1 contrast over the brightest image: over pure white, the secondary text color
  * needs the page color at 0.69 opacity or more. Dark through the header's items, then eased
- * out over about as much again, so the edge never shows.
+ * out over a little less again, so the edge never shows and the picture stays bright below.
  */
 @Composable
 fun Modifier.headerScrim(): Modifier {
@@ -112,10 +112,10 @@ fun Modifier.headerScrim(): Modifier {
         val span = inset.toPx() * SCRIM_SPAN
         val brush =
             Brush.verticalGradient(
-                0f to SnColors.bg.copy(alpha = 0.85f),
-                0.85f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.72f),
-                1.25f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.42f),
-                1.7f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.12f),
+                0f to SnColors.bg.copy(alpha = 0.8f),
+                0.85f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.7f),
+                1.2f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.36f),
+                1.55f / SCRIM_SPAN to SnColors.bg.copy(alpha = 0.1f),
                 1f to SnColors.bg.copy(alpha = 0f),
                 startY = 0f,
                 endY = span,
@@ -128,7 +128,7 @@ fun Modifier.headerScrim(): Modifier {
 }
 
 /** Length of [headerScrim], in header heights. */
-private const val SCRIM_SPAN = 2.1f
+private const val SCRIM_SPAN = 1.85f
 
 /**
  * Darkens art from the side where text starts (the left, or the right in right-to-left

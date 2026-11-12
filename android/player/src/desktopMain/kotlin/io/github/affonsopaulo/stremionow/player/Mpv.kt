@@ -263,7 +263,10 @@ internal class Mpv private constructor(
                         MpvLibrary.installHint(),
                 )
             }
-            val handle = checkNotNull(lib.mpv_create()) { "mpv_create failed" }
+            NumericLocale.useC()
+            val handle =
+                lib.mpv_create()
+                    ?: throw MpvUnavailableException("mpv_create failed (LC_NUMERIC is ${NumericLocale.current()})")
             for ((name, value) in options) {
                 val result = lib.mpv_set_option_string(handle, name, value)
                 if (result < 0) {

@@ -57,6 +57,11 @@ internal class WindowedPlayer private constructor(
                 } catch (failure: MpvUnavailableException) {
                     log.log(System.Logger.Level.ERROR, "Video playback is unavailable: ${failure.message}", failure)
                     return WindowedPlayer(video, null)
+                } catch (failure: Exception) {
+                    // Any other failure to start mpv (a rejected option, the macOS video layer):
+                    // the same message, rather than an exception that takes the app down.
+                    log.log(System.Logger.Level.ERROR, "The player could not start", failure)
+                    return WindowedPlayer(video, null)
                 } catch (failure: Throwable) {
                     video.dispose()
                     throw failure

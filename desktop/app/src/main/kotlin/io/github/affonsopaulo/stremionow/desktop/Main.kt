@@ -18,9 +18,9 @@ import io.github.affonsopaulo.stremionow.ui.desktop.DesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
-import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import io.github.affonsopaulo.stremionow.ui.desktop.SmokeTest
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import java.awt.Color
 import java.awt.Dimension
 import kotlin.concurrent.thread

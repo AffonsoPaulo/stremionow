@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.desktop
 
-import com.sun.jna.Native
 import java.awt.BorderLayout
 import java.awt.Canvas
 import java.awt.Color
@@ -15,15 +14,16 @@ import javax.swing.WindowConstants
  *
  * While the player shows, it is the app's main window as far as the system is concerned (the
  * app's own window steps aside): it owns the taskbar (or dock) entry, its title and icon, and it
- * owns the Compose overlay, which the system therefore keeps directly above it. mpv renders into a child window it creates inside [canvas], a heavyweight
- * AWT component, so no frame ever passes through the JVM.
+ * owns the Compose overlay, which the system therefore keeps directly above it. mpv draws into
+ * [canvas], a heavyweight AWT component (on Windows and X11 through a child window of its own, on
+ * macOS through a layer over the window's content), so no frame ever passes through the JVM.
  */
 internal class VideoWindow(
     title: String,
     icons: List<Image>,
 ) {
-    /** Fills the frame; mpv's child window covers it and follows its size. */
-    private val canvas =
+    /** Fills the frame; mpv's output covers it and follows its size. */
+    val canvas =
         Canvas().apply {
             background = Color.BLACK
             // mpv paints this area; AWT repaints would only flash black over the video.
@@ -41,14 +41,10 @@ internal class VideoWindow(
             contentPane.add(canvas, BorderLayout.CENTER)
         }
 
-    /**
-     * Shows the window at [bounds] (AWT units) and returns the native handle mpv draws into: the
-     * canvas HWND on Windows, its X11 window id on Linux.
-     */
-    fun show(bounds: Rectangle): Long {
+    /** Shows the window at [bounds] (AWT units); mpv can draw into [canvas] from then on. */
+    fun show(bounds: Rectangle) {
         frame.bounds = bounds
         frame.isVisible = true
-        return Native.getComponentID(canvas)
     }
 
     /** Hides the window; mpv may go on drawing into it until it is destroyed. */

@@ -55,7 +55,14 @@ actual fun PlayerScreen(
                     title = "${selection.details.item.name} – StremioNow",
                     bounds = host.playerBounds(),
                     icons = host.icons,
-                ) { handle -> MpvPlayer.create(handle, host.caBundle, options.copy(verboseLogs = host.verboseLogs)) }
+                ) { canvas ->
+                    MpvPlayer.create(
+                        canvas = canvas,
+                        libraryDirectory = host.nativeLibraries,
+                        caFile = host.caBundle,
+                        options = options.copy(verboseLogs = host.verboseLogs),
+                    )
+                }
             }
         }
     val player = viewModel.player

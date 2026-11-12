@@ -3,9 +3,9 @@ package io.github.affonsopaulo.stremionow.player
 
 import com.sun.jna.Library
 import com.sun.jna.Native
-import com.sun.jna.Platform
 import com.sun.jna.Pointer
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -18,8 +18,8 @@ import java.util.concurrent.atomic.AtomicLong
  * instance, including the window mpv created; calls made afterwards are ignored.
  */
 internal class Mpv private constructor(
-    private val lib: LibMpv,
-    private val handle: Pointer,
+    internal val lib: LibMpv,
+    internal val handle: Pointer,
 ) : AutoCloseable {
     /** What the event loop reports besides property changes. */
     sealed interface Event {
@@ -40,6 +40,9 @@ internal class Mpv private constructor(
     }
 
     private val closed = AtomicBoolean(false)
+
+    /** Runs before the handle is destroyed, for objects that must go first (a render context). */
+    private val beforeDestroy = CopyOnWriteArrayList<() -> Unit>()
     private val nextObserverId = AtomicLong(1)
     private val observers = ConcurrentHashMap<Long, (Any?) -> Unit>()
 
@@ -49,6 +52,11 @@ internal class Mpv private constructor(
         Thread(::runEventLoop, "mpv-events").apply {
             isDaemon = true
         }
+
+    /** Runs [action] in [close], after the event loop stopped and before mpv is destroyed. */
+    fun onClose(action: () -> Unit) {
+        beforeDestroy += action
+    }
 
     /** Runs [listener] on the event thread for every [Event]. */
     fun onEvent(listener: (Event) -> Unit) {
@@ -117,6 +125,9 @@ internal class Mpv private constructor(
         // mpv_wait_event must not run while the handle is destroyed: wake the loop and wait for it.
         lib.mpv_wakeup(handle)
         if (Thread.currentThread() != eventThread) eventThread.join(EVENT_THREAD_JOIN_MS)
+        for (action in beforeDestroy) {
+            runCatching(action).onFailure { log.log(System.Logger.Level.WARNING, "mpv clean-up failed", it) }
+        }
         lib.mpv_terminate_destroy(handle)
         observers.clear()
     }
@@ -216,6 +227,7 @@ internal class Mpv private constructor(
         private const val UTF_8 = "UTF-8"
         private const val WAIT_FOREVER = -1.0
         private const val EVENT_THREAD_JOIN_MS = 5_000L
+        private const val CLIENT_API_MAJOR = 2
 
         // mpv_log_level: fatal 10, error 20, warn 30, info 40, then v, debug and trace.
         private const val LOG_LEVEL_ERROR = 20
@@ -223,20 +235,34 @@ internal class Mpv private constructor(
         private const val LOG_LEVEL_INFO = 40
 
         /**
-         * Loads libmpv, applies [options] (`mpv --name=value` without the dashes) and initializes
-         * it. [logLevel] is the lowest mpv log level forwarded to the `StremioNow.mpv` logger.
+         * Loads libmpv from [library] (see [MpvLibrary.locate]), applies [options] (`mpv
+         * --name=value` without the dashes) and initializes it. Each of [preferences] is set to
+         * the first of its values this libmpv accepts, or left alone when it accepts none (values
+         * that only newer versions understand come first). [logLevel] is the lowest mpv log
+         * level forwarded to the `StremioNow.mpv` logger.
+         *
+         * @throws MpvUnavailableException when libmpv cannot be loaded or is too old.
          */
         fun create(
+            library: String,
             options: Map<String, String>,
+            preferences: Map<String, List<String>> = emptyMap(),
             logLevel: String = "warn",
         ): Mpv {
             // mpv takes and returns UTF-8 everywhere, including on Windows.
             val lib =
-                Native.load(
-                    libraryName(),
-                    LibMpv::class.java,
-                    mapOf(Library.OPTION_STRING_ENCODING to UTF_8),
+                try {
+                    Native.load(library, LibMpv::class.java, mapOf(Library.OPTION_STRING_ENCODING to UTF_8))
+                } catch (failure: UnsatisfiedLinkError) {
+                    throw MpvUnavailableException("libmpv could not be loaded. ${MpvLibrary.installHint()}", failure)
+                }
+            val apiMajor = runCatching { lib.mpv_client_api_version().toLong() shr 16 }.getOrNull()
+            if (apiMajor != CLIENT_API_MAJOR.toLong()) {
+                throw MpvUnavailableException(
+                    "libmpv has client API ${apiMajor ?: "unknown"}, $CLIENT_API_MAJOR is needed. " +
+                        MpvLibrary.installHint(),
                 )
+            }
             val handle = checkNotNull(lib.mpv_create()) { "mpv_create failed" }
             for ((name, value) in options) {
                 val result = lib.mpv_set_option_string(handle, name, value)
@@ -244,6 +270,10 @@ internal class Mpv private constructor(
                     lib.mpv_terminate_destroy(handle)
                     error("mpv rejected --$name=$value: ${lib.mpv_error_string(result)}")
                 }
+            }
+            for ((name, values) in preferences) {
+                val accepted = values.firstOrNull { lib.mpv_set_option_string(handle, name, it) >= 0 }
+                if (accepted == null) log.log(System.Logger.Level.WARNING, "mpv accepts none of --$name=$values")
             }
             lib.mpv_request_log_messages(handle, logLevel)
             val initialized = lib.mpv_initialize(handle)
@@ -253,13 +283,5 @@ internal class Mpv private constructor(
             }
             return Mpv(lib, handle).also { it.eventThread.start() }
         }
-
-        /** File name stem JNA looks for: `libmpv-2.dll`, `libmpv.2.dylib` or `libmpv.so.2`. */
-        private fun libraryName(): String =
-            when {
-                Platform.isWindows() -> "libmpv-2"
-                Platform.isMac() -> "mpv.2"
-                else -> "libmpv.so.2"
-            }
     }
 }

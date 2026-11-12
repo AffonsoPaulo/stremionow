@@ -140,6 +140,8 @@
   <string name="player_minimize">Minimizar</string>
   <string name="player_full_screen">Tela cheia</string>
   <string name="player_exit_full_screen">Sair da tela cheia</string>
+  <string name="player_unavailable_title">Não é possível reproduzir vídeos</string>
+  <string name="player_unavailable_body">O StremioNow não conseguiu carregar o reprodutor de vídeo (libmpv). Reinstale o app e tente de novo.</string>
   <string name="player_error_title">Não foi possível reproduzir esta fonte</string>
   <string name="player_error_body">Ela pode estar fora do ar ou num formato que este aparelho não reproduz.</string>
   <string name="player_choose_other">Escolher outra fonte</string>

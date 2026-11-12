@@ -182,6 +182,9 @@
   <string name="player_full_screen">Full screen</string>
   <!-- Desktop player: accessibility label of the same button while the video covers the screen. -->
   <string name="player_exit_full_screen">Exit full screen</string>
+  <!-- Desktop player: shown instead of the video when libmpv, the library that plays video, is missing. -->
+  <string name="player_unavailable_title">Video can\'t play</string>
+  <string name="player_unavailable_body">StremioNow couldn\'t load its video player (libmpv). Reinstall the app and try again.</string>
   <string name="player_error_title">Couldn\'t play this source</string>
   <string name="player_error_body">It may be offline, or in a format this device can\'t play.</string>
   <string name="player_choose_other">Choose another source</string>

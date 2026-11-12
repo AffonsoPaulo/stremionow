@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -49,11 +50,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.PlaybackState
+import io.github.affonsopaulo.stremionow.player.PlayerError
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
+import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
@@ -258,7 +262,9 @@ internal fun PlayerOverlay(
             )
         }
 
-        if (failed) {
+        if (playback.error == PlayerError.PlayerUnavailable) {
+            PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (failed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (playback.isLoaded) {
             PlaybackPrompts(
@@ -293,6 +299,30 @@ internal fun PlayerOverlay(
         if (!pair.isFullScreen) {
             for (edge in ResizeEdge.entries) ResizeHandle(edge, pair)
         }
+    }
+}
+
+/** libmpv could not be loaded: say so, and offer the way back (another source would not help). */
+@Composable
+private fun PlayerUnavailable(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.widthIn(max = 480.dp).padding(SnSpacing.space6),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+    ) {
+        BasicText(
+            stringResource(Res.string.player_unavailable_title),
+            modifier = Modifier.semantics { heading() },
+            style = SnTypography.headingMd.copy(color = SnColors.fg, textAlign = TextAlign.Center),
+        )
+        BasicText(
+            stringResource(Res.string.player_unavailable_body),
+            style = SnTypography.body.copy(color = SnColors.fgSecondary, textAlign = TextAlign.Center),
+        )
+        SnButton(stringResource(Res.string.nav_back), onBack)
     }
 }
 

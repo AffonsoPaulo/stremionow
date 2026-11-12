@@ -2,66 +2,71 @@
 package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.AddonInfo
+import io.github.affonsopaulo.stremionow.core.AddonPreview
+import io.github.affonsopaulo.stremionow.core.CatalogAddon
+import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
-import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
-import io.github.affonsopaulo.stremionow.ui.components.SnDialog
+import io.github.affonsopaulo.stremionow.ui.components.SnChip
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
+import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
+import io.github.affonsopaulo.stremionow.ui.components.SnLoading
+import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
-import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
-import io.github.affonsopaulo.stremionow.ui.components.dpadExits
-import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.SnTabs
+import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
-import io.github.affonsopaulo.stremionow.ui.platform.rememberLocalNetworkAccess
+import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
+import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
-import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSize
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
@@ -70,16 +75,53 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** State of the addons screen. */
-data class AddonsState(
-    val addons: List<AddonInfo> = emptyList(),
-    val installUrl: String = "",
+/** The two parts of the addons screen. */
+enum class AddonsSection { Installed, Discover }
+
+/** Why adding an addon from its link failed. */
+enum class LinkError {
+    /** Not an addon link, or what it points to is not a manifest. */
+    Invalid,
+
+    /** The addon could not be reached. */
+    Unreachable,
+
+    /** The addon is on the local network and the user declined access to it. */
+    LocalNetworkDenied,
+}
+
+/** The "Add addon" dialog: a link to check, then the addon it points to, to confirm. */
+data class LinkFlow(
+    val url: String = "",
+    val checking: Boolean = false,
+    val error: LinkError? = null,
+    val preview: AddonPreview? = null,
     val installing: Boolean = false,
     val installFailed: Boolean = false,
-    /** The addon is on the local network and the user declined access to it. */
-    val localNetworkDenied: Boolean = false,
+    /** The addon no longer matched what the user confirmed, so it is shown again as it is now. */
+    val changed: Boolean = false,
+    /** Opened from Discover: there is no link to go back to, and the user stays in Discover. */
+    val fromCatalog: Boolean = false,
+)
+
+/** State of the addons screen. */
+data class AddonsState(
+    val installed: List<AddonInfo> = emptyList(),
+    val installedLoaded: Boolean = false,
+    val section: AddonsSection = AddonsSection.Installed,
+    /** Null shows every type. */
+    val type: AddonType? = null,
+    val query: String = "",
+    val catalog: List<CatalogAddon> = emptyList(),
+    val catalogLoading: Boolean = false,
+    val catalogFailed: Boolean = false,
+    /** Manifest URLs of Discover addons being checked before their confirmation, and of those that failed. */
+    val checking: Set<String> = emptySet(),
+    val installFailed: Set<String> = emptySet(),
+    /** The "Add addon" dialog, when open. */
+    val link: LinkFlow? = null,
 ) {
-    val hasError: Boolean get() = installFailed || localNetworkDenied
+    val installedIds: Set<String> get() = installed.mapTo(HashSet()) { it.id }
 }
 
 class AddonsViewModel(
@@ -92,27 +134,152 @@ class AddonsViewModel(
         refresh()
     }
 
-    fun setInstallUrl(url: String) =
-        mutableState.update { it.copy(installUrl = url.take(2048), installFailed = false, localNetworkDenied = false) }
+    fun select(section: AddonsSection) {
+        mutableState.update { it.copy(section = section) }
+        val current = state.value
+        if (section == AddonsSection.Discover && current.catalog.isEmpty() && !current.catalogLoading) loadCatalog()
+    }
 
-    fun localNetworkDenied() = mutableState.update { it.copy(localNetworkDenied = true) }
+    fun setType(type: AddonType?) = mutableState.update { it.copy(type = type) }
 
-    fun install() {
-        val url = state.value.installUrl.trim()
-        if (url.isEmpty() || state.value.installing) return
-        mutableState.update { it.copy(installing = true, installFailed = false, localNetworkDenied = false) }
+    fun setQuery(query: String) = mutableState.update { it.copy(query = query.take(100)) }
+
+    fun clearFilters() = mutableState.update { it.copy(type = null, query = "") }
+
+    fun loadCatalog() {
+        mutableState.update { it.copy(catalogLoading = true, catalogFailed = false) }
         viewModelScope.launch {
             val result =
-                runCatching { core.installAddon(url) }
-                    .onFailure { logWarning("Could not install an addon", it) }
+                runCatching { core.discoverAddons() }
+                    .onFailure { logWarning("Could not load the addon lists", it) }
             mutableState.update {
                 it.copy(
-                    installing = false,
-                    installFailed = result.isFailure,
-                    installUrl = if (result.isSuccess) "" else it.installUrl,
+                    catalog = result.getOrDefault(it.catalog),
+                    catalogLoading = false,
+                    catalogFailed = result.isFailure,
                 )
             }
-            refresh()
+        }
+    }
+
+    /**
+     * Downloads a Discover addon's manifest as it is now, then asks to confirm that: the lists
+     * keep snapshots that are often out of date, and the install must be what the user saw.
+     */
+    fun reviewFromCatalog(addon: AddonInfo) {
+        val url = addon.manifestUrl
+        if (url in state.value.checking) return
+        mutableState.update { it.copy(checking = it.checking + url, installFailed = it.installFailed - url) }
+        viewModelScope.launch {
+            val result =
+                runCatching { core.previewAddon(url) }
+                    .onFailure { logWarning("Could not read an addon from Discover", it) }
+            mutableState.update { state ->
+                state.copy(
+                    checking = state.checking - url,
+                    installFailed = if (result.isFailure) state.installFailed + url else state.installFailed,
+                    link =
+                        result.getOrNull()?.let { LinkFlow(url = url, preview = it, fromCatalog = true) }
+                            ?: state.link,
+                )
+            }
+        }
+    }
+
+    fun openLink(url: String = "") = mutableState.update { it.copy(link = LinkFlow(url = url)) }
+
+    fun closeLink() = mutableState.update { it.copy(link = null) }
+
+    fun setLinkUrl(url: String) =
+        mutableState.update { state ->
+            state.copy(link = state.link?.copy(url = url.take(4096), error = null))
+        }
+
+    /** Back from the confirmation to the link. */
+    fun editLink() =
+        mutableState.update { state ->
+            val link = state.link
+            state.copy(
+                link =
+                    if (link == null || link.fromCatalog) {
+                        null
+                    } else {
+                        link.copy(preview = null, installFailed = false, changed = false)
+                    },
+            )
+        }
+
+    fun localNetworkDenied() =
+        mutableState.update { it.copy(link = it.link?.copy(error = LinkError.LocalNetworkDenied)) }
+
+    /** Downloads the manifest behind the link, for the user to confirm. */
+    fun checkLink() {
+        val link = state.value.link ?: return
+        val url = link.url.trim()
+        if (url.isEmpty() || link.checking) return
+        mutableState.update { it.copy(link = it.link?.copy(checking = true, error = null)) }
+        viewModelScope.launch {
+            val result =
+                runCatching { core.previewAddon(url) }
+                    .onFailure { logWarning("Could not read an addon link", it) }
+            mutableState.update { state ->
+                state.copy(
+                    link =
+                        state.link?.copy(
+                            checking = false,
+                            preview = result.getOrNull(),
+                            error =
+                                result.exceptionOrNull()?.let { error ->
+                                    when (error) {
+                                        is CoreException.InvalidAddon -> LinkError.Invalid
+                                        else -> LinkError.Unreachable
+                                    }
+                                },
+                        ),
+                )
+            }
+        }
+    }
+
+    /** Installs the addon the user confirmed in the dialog, then shows it in the installed list. */
+    fun confirmLink() {
+        val link = state.value.link ?: return
+        val preview = link.preview ?: return
+        if (link.installing) return
+        mutableState.update { it.copy(link = it.link?.copy(installing = true, installFailed = false)) }
+        viewModelScope.launch {
+            val url = preview.addon.manifestUrl
+            // Installs exactly the manifest the user saw; should it be gone and the addon have
+            // changed since, the new one is shown for another confirmation instead.
+            val result =
+                runCatching { core.installAddon(url, preview.addon.fingerprint) }
+                    .onFailure { logWarning("Could not install an addon", it) }
+            val fresh =
+                if (result.exceptionOrNull() is CoreException.AddonChanged) {
+                    runCatching { core.previewAddon(url) }.getOrNull()
+                } else {
+                    null
+                }
+            refreshNow()
+            mutableState.update { state ->
+                when {
+                    result.isSuccess && link.fromCatalog -> {
+                        state.copy(link = null)
+                    }
+
+                    result.isSuccess -> {
+                        state.copy(link = null, section = AddonsSection.Installed, type = null, query = "")
+                    }
+
+                    fresh != null -> {
+                        state.copy(link = state.link?.copy(installing = false, preview = fresh, changed = true))
+                    }
+
+                    else -> {
+                        state.copy(link = state.link?.copy(installing = false, installFailed = true))
+                    }
+                }
+            }
         }
     }
 
@@ -130,16 +297,18 @@ class AddonsViewModel(
 
     private fun mutate(change: () -> Unit) {
         viewModelScope.launch {
-            runCatching { io(change) }
-            refresh()
+            runCatching { io(change) }.onFailure { logWarning("Could not change the addons", it) }
+            refreshNow()
         }
     }
 
     private fun refresh() {
-        viewModelScope.launch {
-            val addons = runCatching { io { core.addons() } }.getOrDefault(state.value.addons)
-            mutableState.update { it.copy(addons = addons) }
-        }
+        viewModelScope.launch { refreshNow() }
+    }
+
+    private suspend fun refreshNow() {
+        val addons = runCatching { io { core.addons() } }.getOrNull()
+        mutableState.update { it.copy(installed = addons ?: it.installed, installedLoaded = true) }
     }
 }
 
@@ -148,221 +317,421 @@ fun AddonsScreen() {
     val context = LocalPlatformContext.current
     val viewModel = viewModel { AddonsViewModel(AppGraph.core(context)) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val phone = SnLayout.formFactor == FormFactor.Phone
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-    ) {
-        item(key = "intro") {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
-                SnPageTitle(stringResource(Res.string.nav_addons))
-                BasicText(
-                    stringResource(Res.string.addons_intro),
-                    style = SnTypography.body.copy(color = SnColors.fgMuted),
+    // Dialogs live here, above the list, so they survive the list recomposing.
+    var sharing by remember { mutableStateOf<AddonInfo?>(null) }
+    var configuring by remember { mutableStateOf<AddonInfo?>(null) }
+
+    val installedIds = state.installedIds
+    val shown: List<AddonInfo> =
+        when (state.section) {
+            AddonsSection.Installed -> state.installed
+            AddonsSection.Discover -> state.catalog.map { it.addon }
+        }
+    val options = remember(shown) { typeOptions(shown.map { it.types }) }
+    // A type picked in one section may not exist in the other; then everything shows.
+    val type = state.type?.takeIf { it in options }
+    val matches = { addon: AddonInfo ->
+        (type == null || type in addonTypes(addon.types)) &&
+            matchesQuery(state.query, addon.name, addon.description, addon.id)
+    }
+    val filtering = type != null || state.query.isNotBlank()
+
+    val gridState = rememberLazyGridState()
+    // After a removal, the focus moves to the Remove button of the card that takes its place,
+    // instead of falling back to the top of the screen.
+    val removeFocus = remember { mutableMapOf<String, FocusRequester>() }
+    var focusAfterRemoval by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(focusAfterRemoval, state.installed) {
+        val url = focusAfterRemoval ?: return@LaunchedEffect
+        if (state.installed.none { it.manifestUrl == url }) return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { removeFocus[url]?.requestFocus() }
+        focusAfterRemoval = null
+    }
+    LaunchedEffect(state.section) { gridState.scrollToItem(0) }
+    // On TV, the page starts on its selected tab rather than on the header's search button.
+    val isTv = LocalIsTv.current
+    val tabFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (!isTv) return@LaunchedEffect
+        // The tab is a list item, composed a frame or so after the screen.
+        repeat(10) {
+            withFrameNanos { }
+            if (runCatching { tabFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+        }
+    }
+    val gutter = SnLayout.gutter
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Installed is one column, since its order is the priority. Discover fits as many columns
+        // as cards of the list width allow, in rows it lays out itself, so cards side by side
+        // share a height and their buttons line up.
+        val columns =
+            ((maxWidth - gutter * 2 + SnSpacing.space3) / (SnLayout.listCellMin + SnSpacing.space3))
+                .toInt()
+                .coerceAtLeast(1)
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(1),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding =
+                PaddingValues(
+                    start = SnLayout.gutter,
+                    end = SnLayout.gutter,
+                    top = SnSpacing.space2,
+                    bottom = SnSpacing.space8,
+                ),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+        ) {
+            item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
+                Header(
+                    state = state,
+                    phone = phone,
+                    typeOptions = options,
+                    type = type,
+                    tabFocus = tabFocus,
+                    onSelect = viewModel::select,
+                    onAdd = { viewModel.openLink() },
+                    onType = viewModel::setType,
+                    onQuery = viewModel::setQuery,
                 )
-                InstallField(state, viewModel)
+            }
+            when (state.section) {
+                AddonsSection.Installed -> {
+                    val visible = state.installed.filter(matches)
+                    when {
+                        !state.installedLoaded -> {
+                            Unit
+                        }
+
+                        state.installed.isEmpty() -> {
+                            item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                                SnMessage(
+                                    title = stringResource(Res.string.addons_empty_title),
+                                    body = stringResource(Res.string.addons_empty_body),
+                                    actionText = stringResource(Res.string.addons_open_discover),
+                                    onAction = { viewModel.select(AddonsSection.Discover) },
+                                )
+                            }
+                        }
+
+                        visible.isEmpty() -> {
+                            item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
+                                NoMatch(onClear = viewModel::clearFilters)
+                            }
+                        }
+
+                        else -> {
+                            if (filtering) {
+                                item(key = "reorder-hint", span = { GridItemSpan(maxLineSpan) }) {
+                                    BasicText(
+                                        stringResource(Res.string.addons_reorder_hint),
+                                        style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                                    )
+                                }
+                            }
+                            itemsIndexed(visible, key = {
+                                _,
+                                addon,
+                                ->
+                                "installed/${addon.manifestUrl}"
+                            }) { shownAt, addon ->
+                                val index = state.installed.indexOf(addon)
+                                val removeRequester =
+                                    remember(addon.manifestUrl) {
+                                        removeFocus.getOrPut(addon.manifestUrl) { FocusRequester() }
+                                    }
+                                InstalledAddonCard(
+                                    addon = addon,
+                                    removeFocus = removeRequester,
+                                    position = index,
+                                    // Reordering a filtered list would move addons past hidden ones.
+                                    canReorder = !filtering,
+                                    canMoveUp = index > 0,
+                                    canMoveDown = index < state.installed.lastIndex,
+                                    onlyTitleMetadata = isOnlyTitleMetadata(addon, state.installed),
+                                    onToggle = { viewModel.setEnabled(addon, !addon.enabled) },
+                                    onMoveUp = { viewModel.move(addon, index - 1) },
+                                    onMoveDown = { viewModel.move(addon, index + 1) },
+                                    onRemove = {
+                                        val next = visible.getOrNull(shownAt + 1) ?: visible.getOrNull(shownAt - 1)
+                                        focusAfterRemoval = next?.manifestUrl
+                                        viewModel.remove(addon)
+                                    },
+                                    onShare = { sharing = addon },
+                                    onConfigure = { configuring = addon },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                AddonsSection.Discover -> {
+                    val visible = state.catalog.filter { matches(it.addon) }
+                    when {
+                        state.catalog.isEmpty() && state.catalogFailed -> {
+                            item(key = "catalog-error", span = { GridItemSpan(maxLineSpan) }) {
+                                SnLoadError(onRetry = viewModel::loadCatalog)
+                            }
+                        }
+
+                        state.catalog.isEmpty() -> {
+                            item(key = "catalog-loading", span = { GridItemSpan(maxLineSpan) }) {
+                                SnLoading(Modifier.height(240.dp))
+                            }
+                        }
+
+                        visible.isEmpty() -> {
+                            item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
+                                NoMatch(onClear = viewModel::clearFilters)
+                            }
+                        }
+
+                        else -> {
+                            val rows = visible.chunked(columns)
+                            items(rows, key = { "discover/${it.first().addon.manifestUrl}" }) { row ->
+                                Row(
+                                    Modifier.fillMaxWidth().height(IntrinsicSize.Max),
+                                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                                ) {
+                                    for (entry in row) {
+                                        val url = entry.addon.manifestUrl
+                                        DiscoverAddonCard(
+                                            entry = entry,
+                                            installed = entry.addon.id in installedIds,
+                                            checking = url in state.checking,
+                                            failed = url in state.installFailed,
+                                            onInstall = { viewModel.reviewFromCatalog(entry.addon) },
+                                            onConfigure = { configuring = entry.addon },
+                                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        )
+                                    }
+                                    // A short last row keeps the cards the width of the others.
+                                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        itemsIndexed(state.addons, key = { _, addon -> addon.manifestUrl }) { index, addon ->
-            AddonRow(
-                addon = addon,
-                canMoveUp = index > 0,
-                canMoveDown = index < state.addons.lastIndex,
-                onToggle = { viewModel.setEnabled(addon, !addon.enabled) },
-                onMoveUp = { viewModel.move(addon, index - 1) },
-                onMoveDown = { viewModel.move(addon, index + 1) },
-                onRemove = { viewModel.remove(addon) },
-            )
-        }
+    }
+
+    state.link?.let { link ->
+        AddLinkDialog(
+            link = link,
+            onUrlChange = viewModel::setLinkUrl,
+            onCheck = viewModel::checkLink,
+            onLocalNetworkDenied = viewModel::localNetworkDenied,
+            onEdit = viewModel::editLink,
+            onConfirm = viewModel::confirmLink,
+            onDismiss = viewModel::closeLink,
+        )
+    }
+    sharing?.let { addon -> ShareAddonDialog(addon, onDismiss = { sharing = null }) }
+    configuring?.let { addon ->
+        ConfigureAddonDialog(
+            addon = addon,
+            onAddLink = {
+                configuring = null
+                viewModel.openLink()
+            },
+            onDismiss = { configuring = null },
+        )
     }
 }
 
+/** Whether [addon] is the only enabled addon that gives movies and series their information. */
+internal fun isOnlyTitleMetadata(
+    addon: AddonInfo,
+    installed: List<AddonInfo>,
+): Boolean =
+    addon.providesTitleMetadata &&
+        addon.enabled &&
+        installed.none { it.manifestUrl != addon.manifestUrl && it.enabled && it.providesTitleMetadata }
+
 @Composable
-private fun InstallField(
+private fun Header(
     state: AddonsState,
-    viewModel: AddonsViewModel,
+    phone: Boolean,
+    typeOptions: List<AddonType>,
+    type: AddonType?,
+    tabFocus: FocusRequester,
+    onSelect: (AddonsSection) -> Unit,
+    onAdd: () -> Unit,
+    onType: (AddonType?) -> Unit,
+    onQuery: (String) -> Unit,
 ) {
-    // An addon on the user's network needs local network access first (Android 17+); ask
-    // for it at the moment it is needed, then install either way so the outcome is shown.
-    val requestLocalNetwork =
-        rememberLocalNetworkAccess { granted ->
-            if (granted) viewModel.install() else viewModel.localNetworkDenied()
-        }
-    val keyboard = LocalSoftwareKeyboardController.current
-    val install = {
-        // The result shows in the list below, which the keyboard would cover.
-        keyboard?.hide()
-        requestLocalNetwork(state.installUrl)
-    }
-    val label = stringResource(Res.string.addons_install_label)
-    val shape = RoundedCornerShape(SnRadius.radiusMd)
-    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
-        BasicText(label, style = SnTypography.label.copy(color = SnColors.fgSecondary))
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = SnSpacing.space1),
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+    ) {
+        SnPageTitle(stringResource(Res.string.nav_addons))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
         ) {
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(SnSize.controlLg)
-                    .background(SnColors.surfaceInput, shape)
-                    .border(1.dp, if (state.hasError) SnColors.danger else SnColors.border, shape)
-                    .padding(horizontal = SnSpacing.space4),
-                contentAlignment = Alignment.CenterStart,
+            SnTabs(
+                tabs =
+                    listOf(
+                        stringResource(Res.string.addons_tab_installed),
+                        stringResource(Res.string.addons_tab_discover),
+                    ),
+                selectedIndex = state.section.ordinal,
+                onSelect = { onSelect(AddonsSection.entries[it]) },
+                selectedFocusRequester = tabFocus,
+                modifier = Modifier.weight(1f),
+            )
+            val addLabel = stringResource(Res.string.addons_add)
+            if (phone) {
+                // The phone's row is narrow; the round "+" keeps both tabs in view.
+                SnIconButton(
+                    SnIcons.Plus,
+                    addLabel,
+                    onAdd,
+                    tint = SnColors.onInverse,
+                    background = SnColors.inverse,
+                )
+            } else {
+                SnButton(text = addLabel, onClick = onAdd, icon = SnIcons.Plus)
+            }
+        }
+        BasicText(
+            stringResource(
+                if (state.section ==
+                    AddonsSection.Installed
+                ) {
+                    Res.string.addons_intro
+                } else {
+                    Res.string.addons_discover_intro
+                },
+            ),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        FilterBar(
+            phone = phone,
+            options = typeOptions,
+            type = type,
+            query = state.query,
+            onType = onType,
+            onQuery = onQuery,
+        )
+    }
+}
+
+/**
+ * Type chips and search. Large screens and TV show both in one row; a phone shows the chips
+ * with a search button that opens the field above them.
+ */
+@Composable
+private fun FilterBar(
+    phone: Boolean,
+    options: List<AddonType>,
+    type: AddonType?,
+    query: String,
+    onType: (AddonType?) -> Unit,
+    onQuery: (String) -> Unit,
+) {
+    val searchLabel = stringResource(Res.string.addons_search)
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    // The chips wrap onto another line when they do not fit, so none is ever cut off; the
+    // top padding centers their first line on the search field or button beside them.
+    val chips: @Composable (Modifier) -> Unit = { modifier ->
+        if (options.isNotEmpty()) {
+            val all = stringResource(Res.string.addons_filter_all)
+            FlowRow(
+                modifier = modifier,
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
-                if (state.installUrl.isEmpty()) {
-                    BasicText(
-                        stringResource(Res.string.addons_install_hint),
-                        style = SnTypography.body.copy(color = SnColors.fgMuted),
+                for (option in listOf<AddonType?>(null) + options) {
+                    SnChip(
+                        text = option?.let { stringResource(it.label()) } ?: all,
+                        selected = option == type,
+                        onClick = { onType(option) },
                     )
                 }
-                BasicTextField(
-                    value = state.installUrl,
-                    onValueChange = viewModel::setInstallUrl,
-                    modifier = Modifier.fillMaxWidth().dpadExits().semantics { contentDescription = label },
-                    textStyle = SnTypography.body.copy(color = SnColors.fg),
-                    singleLine = true,
-                    cursorBrush = SolidColor(SnColors.accent),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (state.installUrl.isNotBlank()) install() }),
-                )
             }
-            SnButton(
-                text =
-                    stringResource(
-                        if (state.installing) Res.string.addons_installing else Res.string.addons_install_action,
-                    ),
-                onClick = install,
-                enabled = !state.installing && state.installUrl.isNotBlank(),
+        } else {
+            Box(modifier)
+        }
+    }
+    val clear: @Composable () -> Unit = {
+        if (query.isNotEmpty()) {
+            SnIconButton(SnIcons.Close, stringResource(Res.string.addons_search_clear), {
+                onQuery("")
+                // The button goes away with the text; the field keeps the focus instead.
+                runCatching { searchFocus.requestFocus() }
+            }, tint = SnColors.fgSecondary)
+        }
+    }
+    if (!phone) {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        ) {
+            chips(Modifier.weight(1f).padding(top = (SnSize.controlLg - SnSize.controlSm) / 2))
+            SnTextField(
+                value = query,
+                onValueChange = onQuery,
+                label = searchLabel,
+                hint = searchLabel,
+                leadingIcon = SnIcons.Search,
+                imeAction = ImeAction.Search,
+                focusRequester = searchFocus,
+                modifier = Modifier.width(240.dp),
+                trailing = clear,
             )
         }
-        if (state.hasError) {
-            BasicText(
-                stringResource(
-                    if (state.localNetworkDenied) {
-                        Res.string.addons_local_network_needed
-                    } else {
-                        Res.string.addons_install_error
-                    },
-                ),
-                style = SnTypography.caption.copy(color = SnColors.danger),
+        return
+    }
+    if (searchOpen || query.isNotEmpty()) {
+        LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            SnTextField(
+                value = query,
+                onValueChange = onQuery,
+                label = searchLabel,
+                hint = searchLabel,
+                leadingIcon = SnIcons.Search,
+                imeAction = ImeAction.Search,
+                focusRequester = searchFocus,
+                modifier = Modifier.weight(1f),
             )
+            SnIconButton(
+                SnIcons.Close,
+                stringResource(Res.string.addons_search_close),
+                {
+                    onQuery("")
+                    searchOpen = false
+                },
+                tint = SnColors.fgSecondary,
+            )
+        }
+        chips(Modifier.fillMaxWidth())
+    } else {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            chips(Modifier.weight(1f).padding(top = (SnSize.controlMd - SnSize.controlSm) / 2))
+            SnIconButton(SnIcons.Search, searchLabel, { searchOpen = true }, tint = SnColors.fgSecondary)
         }
     }
 }
 
 @Composable
-private fun AddonRow(
-    addon: AddonInfo,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onToggle: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    val shape = RoundedCornerShape(SnRadius.radiusLg)
-    val kinds =
-        listOfNotNull(
-            stringResource(Res.string.addons_kind_catalogs).takeIf { addon.providesCatalogs },
-            stringResource(Res.string.addons_kind_metadata).takeIf { addon.providesMetadata },
-            stringResource(Res.string.addons_kind_streams).takeIf { addon.providesStreams },
-            stringResource(Res.string.addons_kind_subtitles).takeIf { addon.providesSubtitles },
-        )
-    val meta = (listOf(stringResource(Res.string.addons_version, addon.version)) + kinds).joinToString(" · ")
-    // Removing is confirmed in a dialog, so a slip of the finger cannot drop an addon.
-    var confirmingRemoval by rememberSaveable(addon.manifestUrl) { mutableStateOf(false) }
-
-    // Stacked layout: name, details and switch first, then the less frequent actions in their
-    // own row, so nothing is squeezed on a phone and the order still reads well on a TV.
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(SnColors.surface, shape)
-            .border(1.dp, SnColors.border, shape)
-            .padding(start = SnSpacing.space4, end = SnSpacing.space4, top = SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
-    ) {
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
-                BasicText(
-                    addon.name,
-                    style =
-                        SnTypography.sectionTitle.copy(
-                            color = if (addon.enabled) SnColors.fg else SnColors.fgMuted,
-                        ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                BasicText(
-                    meta,
-                    style = SnTypography.caption.copy(color = SnColors.fgSecondary),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            SnSwitch(
-                checked = addon.enabled,
-                label = stringResource(Res.string.addons_toggle, addon.name),
-                onText = stringResource(Res.string.state_on),
-                offText = stringResource(Res.string.state_off),
-                onToggle = onToggle,
-            )
-        }
-        if (addon.description.isNotBlank()) {
-            BasicText(
-                addon.description,
-                style = SnTypography.body.copy(color = SnColors.fgMuted),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (confirmingRemoval) {
-            SnDialog(
-                title = stringResource(Res.string.addons_remove_title, addon.name),
-                body = stringResource(Res.string.addons_remove_body),
-                confirmText = stringResource(Res.string.addons_remove_action),
-                dismissText = stringResource(Res.string.action_cancel),
-                onConfirm = {
-                    confirmingRemoval = false
-                    onRemove()
-                },
-                onDismiss = { confirmingRemoval = false },
-                destructive = true,
-            )
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(SnColors.border))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = SnSpacing.space1),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-        ) {
-            SnIconButton(
-                SnIcons.ChevronUp,
-                stringResource(Res.string.addons_move_up, addon.name),
-                onMoveUp,
-                tint = SnColors.fgSecondary,
-                enabled = canMoveUp,
-            )
-            SnIconButton(
-                SnIcons.ChevronDown,
-                stringResource(Res.string.addons_move_down, addon.name),
-                onMoveDown,
-                tint = SnColors.fgSecondary,
-                enabled = canMoveDown,
-            )
-            Box(Modifier.weight(1f))
-            SnButton(
-                text = stringResource(Res.string.addons_remove_action),
-                onClick = { confirmingRemoval = true },
-                style = SnButtonStyle.Ghost,
-                icon = SnIcons.Trash,
-            )
-        }
-    }
+private fun NoMatch(onClear: () -> Unit) {
+    SnMessage(
+        title = stringResource(Res.string.addons_no_match_title),
+        body = stringResource(Res.string.addons_no_match_body),
+        actionText = stringResource(Res.string.addons_clear_filters),
+        onAction = onClear,
+    )
 }

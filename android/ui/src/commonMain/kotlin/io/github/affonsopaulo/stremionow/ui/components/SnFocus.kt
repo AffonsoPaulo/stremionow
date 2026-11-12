@@ -40,6 +40,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
@@ -67,6 +69,10 @@ val LocalSnFeedback = compositionLocalOf { SnFeedback() }
  * Makes an element clickable with the design system's focus treatment: a 3 dp ring in the
  * focus color drawn just outside the element, and, when [grow] is set, a 5% scale. Keyboard,
  * D-pad, touch and mouse all work; [LocalSnFeedback] decides when the ring and hover show.
+ *
+ * A disabled element ignores clicks and is announced as disabled, but stays focusable, with
+ * its ring. Otherwise a button that disables itself while it works (Install, Move up on the
+ * first row) would drop the focus somewhere unseen, and a remote would lose its place.
  */
 @Composable
 fun Modifier.snClickable(
@@ -93,14 +99,27 @@ fun Modifier.snClickable(
             scaleY = scale
         }.then(if (showFocus) Modifier.focusRing(shape) else Modifier)
         .then(if (feedback.showHover && enabled) Modifier.pointerHoverIcon(PointerIcon.Hand) else Modifier)
+        .then(if (enabled) Modifier else Modifier.semantics { disabled() })
         .clickable(
             interactionSource = interaction,
             indication = null,
-            enabled = enabled,
             onClickLabel = onClickLabel,
             role = role,
-            onClick = onClick,
+            onClick = { if (enabled) onClick() },
         )
+}
+
+/**
+ * Draws the focus ring around a container while [interaction] reports focus inside it, such
+ * as a text field's box, whose focusable part is the field within.
+ */
+@Composable
+internal fun Modifier.snFocusRingFor(
+    interaction: MutableInteractionSource,
+    shape: Shape,
+): Modifier {
+    val focused by interaction.collectIsFocusedAsState()
+    return if (focused && LocalSnFeedback.current.showFocus) focusRing(shape) else this
 }
 
 /**

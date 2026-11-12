@@ -1,23 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,14 +21,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -46,8 +35,8 @@ import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
+import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.SnWordmark
-import io.github.affonsopaulo.stremionow.ui.components.dpadExits
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -60,8 +49,6 @@ import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
-import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
-import io.github.affonsopaulo.stremionow.ui.theme.SnSize
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -149,7 +136,13 @@ class OnboardingViewModel(
         mutableState.update { it.copy(busy = true, debridFailed = false) }
         viewModelScope.launch {
             val url = "https://torrentio.strem.fun/${service.torrentioKey}=$key/manifest.json"
-            val ok = runCatching { core.installAddon(url) }.isSuccess
+            val ok =
+                runCatching {
+                    // The app builds this address itself; installing what it previewed keeps to
+                    // the core's rule that only a confirmed manifest is installed.
+                    val preview = core.previewAddon(url)
+                    core.installAddon(url, preview.addon.fingerprint)
+                }.isSuccess
             mutableState.update { it.copy(busy = false, debridFailed = !ok) }
             if (ok) onDone()
         }
@@ -421,35 +414,18 @@ private fun Field(
     secret: Boolean = false,
     onDone: () -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(SnRadius.radiusMd)
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
         BasicText(label, style = SnTypography.label.copy(color = SnColors.fgSecondary))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(SnSize.controlLg)
-                .background(SnColors.surfaceInput, shape)
-                .border(1.dp, SnColors.border, shape)
-                .padding(horizontal = SnSpacing.space4),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth().dpadExits().semantics { contentDescription = label },
-                textStyle = SnTypography.body.copy(color = SnColors.fg),
-                singleLine = true,
-                cursorBrush = SolidColor(SnColors.accent),
-                visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-                keyboardOptions =
-                    KeyboardOptions(
-                        keyboardType = keyboardType,
-                        imeAction = imeAction,
-                        autoCorrectEnabled = false,
-                    ),
-                keyboardActions = KeyboardActions(onDone = { onDone() }),
-            )
-        }
+        SnTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            modifier = Modifier.fillMaxWidth(),
+            keyboardType = keyboardType,
+            imeAction = imeAction,
+            onImeAction = onDone,
+            secret = secret,
+        )
     }
 }
 

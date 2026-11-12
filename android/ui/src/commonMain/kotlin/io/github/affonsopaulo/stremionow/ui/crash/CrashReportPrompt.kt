@@ -38,11 +38,16 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialogActions
 import io.github.affonsopaulo.stremionow.ui.components.SnDialogFrame
+import io.github.affonsopaulo.stremionow.ui.components.SnQrCode
 import io.github.affonsopaulo.stremionow.ui.components.snFocusable
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.canShareText
+import io.github.affonsopaulo.stremionow.ui.platform.copyToClipboard
+import io.github.affonsopaulo.stremionow.ui.platform.openWebPage
+import io.github.affonsopaulo.stremionow.ui.platform.shareText
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
@@ -344,7 +349,7 @@ private fun CodeDialog(
             style = SnTypography.body.copy(color = SnColors.fgSecondary),
         )
         Row(Modifier.fillMaxWidth().padding(vertical = SnSpacing.space2), horizontalArrangement = Arrangement.Center) {
-            QrCodeImage(link.url, size = 300.dp, description = stringResource(Res.string.crash_qr_description))
+            SnQrCode(link.url, size = 300.dp, description = stringResource(Res.string.crash_qr_description))
         }
         if (link.shortened) {
             BasicText(

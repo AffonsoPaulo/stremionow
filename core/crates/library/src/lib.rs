@@ -208,6 +208,35 @@ impl Store {
         Ok(())
     }
 
+    /// Puts the addon at `new_url` in the place of the one at `old_url`, keeping its position
+    /// and enabled state, as when an addon is configured again and gets a new address. Any
+    /// other entry already at `new_url` goes away, so the addon is listed once. Adds the addon
+    /// at the end when nothing is installed at `old_url`.
+    pub fn replace_addon(
+        &mut self,
+        old_url: &str,
+        new_url: &str,
+        manifest_json: &str,
+    ) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        if old_url != new_url {
+            transaction.execute("DELETE FROM addons WHERE manifest_url = ?1", [new_url])?;
+        }
+        let replaced = transaction.execute(
+            "UPDATE addons SET manifest_url = ?2, manifest_json = ?3 WHERE manifest_url = ?1",
+            params![old_url, new_url, manifest_json],
+        )?;
+        if replaced == 0 {
+            transaction.execute(
+                "INSERT INTO addons (manifest_url, manifest_json, position)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position), -1) + 1 FROM addons))",
+                params![new_url, manifest_json],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Removes an addon. Returns whether it was installed.
     pub fn remove_addon(&self, manifest_url: &str) -> Result<bool, StoreError> {
         let removed = self
@@ -478,6 +507,37 @@ mod tests {
         assert!(!store.remove_addon("b").expect("second remove is a no-op"));
         store.upsert_addon("d", "{}").expect("adds after removal");
         assert_eq!(urls(&store), ["a", "c", "d"]);
+    }
+
+    #[test]
+    fn replaces_an_addon_in_place() {
+        let mut store = Store::open_in_memory().expect("opens");
+        for url in ["a", "b", "c", "b2"] {
+            store.upsert_addon(url, "{}").expect("adds");
+        }
+        store.set_addon_enabled("b", false).expect("disables");
+        store
+            .replace_addon("b", "b2", r#"{"v":2}"#)
+            .expect("replaces");
+        let addons = store.addons().expect("lists");
+        let urls: Vec<_> = addons.iter().map(|a| a.manifest_url.as_str()).collect();
+        assert_eq!(
+            urls,
+            ["a", "b2", "c"],
+            "keeps the place, drops the duplicate"
+        );
+        assert!(!addons[1].enabled, "keeps the enabled state");
+        assert_eq!(addons[1].manifest_json, r#"{"v":2}"#);
+
+        store
+            .replace_addon("b2", "b2", r#"{"v":3}"#)
+            .expect("refreshes");
+        assert_eq!(
+            store.addons().expect("lists")[1].manifest_json,
+            r#"{"v":3}"#
+        );
+        store.replace_addon("missing", "d", "{}").expect("adds");
+        assert_eq!(store.addons().expect("lists")[3].manifest_url, "d");
     }
 
     #[test]

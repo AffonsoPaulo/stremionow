@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Plain data types shared with the app interfaces.
 
-use stremionow_addons::{AddonError, InstalledAddon};
+use stremionow_addons::{AddonError, InstalledAddon, manifest_fingerprint};
 use stremionow_library::StoreError;
 use stremionow_protocol::{CatalogDescriptor, MetaDetail, MetaPreview, Video};
 
@@ -20,6 +20,9 @@ pub enum CoreError {
     /// The local database failed.
     #[error("storage error: {reason}")]
     Storage { reason: String },
+    /// The addon no longer matches what the user confirmed; nothing was installed.
+    #[error("the addon changed since it was confirmed")]
+    AddonChanged,
     /// A source could not be prepared for playback (no peers, no video file, engine error).
     #[error("playback error: {reason}")]
     Playback { reason: String },
@@ -184,7 +187,7 @@ pub struct CatalogRow {
     pub items: Vec<MetaItem>,
 }
 
-/// An installed addon.
+/// An addon, installed or offered for installing.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct AddonInfo {
     pub manifest_url: String,
@@ -194,31 +197,113 @@ pub struct AddonInfo {
     pub description: String,
     pub logo: Option<String>,
     pub enabled: bool,
+    /// Content types it handles, such as `movie`, `series` or `anime`, as the manifest names
+    /// them (its catalogs' types when the manifest lists none).
+    pub types: Vec<String>,
     pub provides_catalogs: bool,
     pub provides_metadata: bool,
     pub provides_streams: bool,
     pub provides_subtitles: bool,
+    /// It gives the information movies and series need to open (by their IMDb ids), as
+    /// Cinemeta does; an anime addon with its own ids does not count.
+    pub provides_title_metadata: bool,
     pub configurable: bool,
+    /// It does nothing until it is set up on its configuration page.
+    pub configuration_required: bool,
+    /// Its configuration page, for addons that have one.
+    pub configure_url: Option<String>,
+    /// The manifest URL seems to hold the user's settings, possibly a private key, so it
+    /// should not be shared without a warning.
+    pub link_has_settings: bool,
+    /// What the user agrees to when confirming an install: a hash of what the manifest lets
+    /// the addon do (see `manifest_fingerprint`). Pass it back to install exactly that.
+    pub fingerprint: String,
 }
+
+/// Longest name kept, in characters; addons are loosely written and names show in one line.
+const MAX_NAME_CHARS: usize = 100;
+/// Longest description kept, in characters; lists show two or three lines of it.
+const MAX_DESCRIPTION_CHARS: usize = 500;
+const MAX_VERSION_CHARS: usize = 32;
+const MAX_TYPES: usize = 12;
+const MAX_TYPE_CHARS: usize = 32;
 
 impl AddonInfo {
     pub(crate) fn new(addon: &InstalledAddon, enabled: bool) -> Self {
         let manifest = &addon.manifest;
+        let hints = &manifest.behavior_hints;
+        let declared: Vec<&str> = if manifest.types.is_empty() {
+            manifest.catalogs.iter().map(|c| c.kind.as_str()).collect()
+        } else {
+            manifest.types.iter().map(String::as_str).collect()
+        };
+        let mut types: Vec<String> = Vec::new();
+        for kind in declared {
+            let kind = truncate(kind.trim(), MAX_TYPE_CHARS);
+            if !kind.is_empty() && !types.iter().any(|t| t.eq_ignore_ascii_case(&kind)) {
+                types.push(kind);
+            }
+        }
+        types.truncate(MAX_TYPES);
+        let name = truncate(manifest.name.trim(), MAX_NAME_CHARS);
+        let configurable = hints.configurable || hints.configuration_required;
         Self {
             manifest_url: addon.url.manifest_url().to_owned(),
             id: manifest.id.clone(),
-            name: manifest.name.clone(),
-            version: manifest.version.clone(),
-            description: manifest.description.clone(),
+            name: if name.is_empty() {
+                truncate(&manifest.id, MAX_NAME_CHARS)
+            } else {
+                name
+            },
+            version: truncate(manifest.version.trim(), MAX_VERSION_CHARS),
+            description: truncate(manifest.description.trim(), MAX_DESCRIPTION_CHARS),
             logo: https_only(manifest.logo.clone()),
             enabled,
+            types,
             provides_catalogs: !manifest.catalogs.is_empty(),
             provides_metadata: manifest.has_resource("meta"),
             provides_streams: manifest.has_resource("stream"),
             provides_subtitles: manifest.has_resource("subtitles"),
-            configurable: manifest.behavior_hints.configurable,
+            // Movies and series are named by IMDb ids (`tt…`) in Stremio's catalogs.
+            provides_title_metadata: ["movie", "series"]
+                .iter()
+                .any(|kind| manifest.supports("meta", kind, "tt0000001")),
+            configurable,
+            configuration_required: hints.configuration_required,
+            configure_url: configurable.then(|| addon.url.configure_url()),
+            link_has_settings: addon.url.carries_settings(),
+            fingerprint: manifest_fingerprint(manifest),
         }
     }
+}
+
+/// An addon from Stremio's lists, shown under Discover.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct CatalogAddon {
+    /// Its `enabled` flag means nothing here.
+    pub addon: AddonInfo,
+    /// Made by Stremio, as opposed to listed from the community.
+    pub official: bool,
+}
+
+/// An addon downloaded from a link but not installed yet, for the user to confirm.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AddonPreview {
+    pub addon: AddonInfo,
+    /// The installed addon with the same id, which installing replaces in its place; the same
+    /// address means installing only refreshes it.
+    pub replaces: Option<AddonInfo>,
+}
+
+/// `text` cut to `max` characters, with an ellipsis when something was cut.
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut cut: String = text.chars().take(max.saturating_sub(1)).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('…');
+    cut
 }
 
 /// A title saved to "My list".
@@ -250,6 +335,70 @@ mod tests {
             https_only(Some("https://x/p.jpg".into())),
             Some("https://x/p.jpg".into())
         );
+    }
+
+    fn addon(url: &str, manifest: serde_json::Value) -> InstalledAddon {
+        InstalledAddon {
+            url: stremionow_protocol::AddonUrl::parse(url).expect("valid url"),
+            manifest: serde_json::from_value(manifest).expect("valid manifest"),
+        }
+    }
+
+    #[test]
+    fn describes_an_addon() {
+        let info = AddonInfo::new(
+            &addon(
+                "https://addon.example/realdebrid=ABCDEFGHIJKLMNOPQRSTUVWXYZ/manifest.json",
+                serde_json::json!({
+                    "id": "x", "version": "1.2.0", "name": "  X  ", "logo": "http://x/logo.png",
+                    "types": ["movie", "Movie", "series", ""],
+                    "resources": [{"name": "meta", "types": ["series"]}, "stream"],
+                    "behaviorHints": {"configurationRequired": true}
+                }),
+            ),
+            true,
+        );
+        assert_eq!(info.name, "X");
+        assert_eq!(
+            info.types,
+            ["movie", "series"],
+            "trimmed and without repeats"
+        );
+        assert_eq!(info.logo, None, "plain HTTP logos are dropped");
+        assert!(info.provides_metadata && info.provides_title_metadata && info.provides_streams);
+        assert!(info.configurable, "required configuration implies a page");
+        assert_eq!(
+            info.configure_url.as_deref(),
+            Some("https://addon.example/realdebrid=ABCDEFGHIJKLMNOPQRSTUVWXYZ/configure")
+        );
+        assert!(info.link_has_settings);
+    }
+
+    #[test]
+    fn tames_loose_manifests() {
+        let long = "a".repeat(5_000);
+        let info = AddonInfo::new(
+            &addon(
+                "https://addon.example/manifest.json",
+                serde_json::json!({
+                    "id": "only.id", "version": long, "name": " ", "description": long,
+                    "catalogs": [{"type": "channel", "id": "c"}, {"type": "tv", "id": "t"}],
+                    "resources": [
+                        {"name": "meta", "types": ["channel"]},
+                        {"name": "meta", "types": ["series"], "idPrefixes": ["kitsu:"]}
+                    ]
+                }),
+            ),
+            false,
+        );
+        assert_eq!(info.name, "only.id", "falls back to the id");
+        assert_eq!(info.description.chars().count(), MAX_DESCRIPTION_CHARS);
+        assert!(info.description.ends_with('…'));
+        assert_eq!(info.version.chars().count(), MAX_VERSION_CHARS);
+        assert_eq!(info.types, ["channel", "tv"], "catalog types stand in");
+        assert!(info.provides_metadata && !info.provides_title_metadata);
+        assert!(!info.configurable && info.configure_url.is_none());
+        assert!(!info.link_has_settings);
     }
 
     #[test]

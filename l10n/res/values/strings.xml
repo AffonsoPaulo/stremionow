@@ -58,6 +58,9 @@
   <string name="kind_series">Series</string>
   <string name="kind_channels">Channels</string>
   <string name="kind_tv">TV channels</string>
+  <string name="kind_anime">Anime</string>
+  <!-- Addons for any other kind of content. -->
+  <string name="kind_other">Other</string>
   <!-- IMDb rating badge. %1$s is the rating, already formatted. -->
   <string name="imdb_rating">IMDb %1$s</string>
 
@@ -116,7 +119,7 @@
 
   <!-- Addons screen. -->
   <string name="addons_intro">Addons provide catalogs, information, sources and subtitles. Their order sets the priority.</string>
-  <string name="addons_install_label">Install from link</string>
+  <string name="addons_install_label">Addon link</string>
   <string name="addons_install_hint">https://…/manifest.json</string>
   <string name="addons_install_action">Install</string>
   <string name="addons_install_error">Couldn\'t install. Check that the link ends with /manifest.json and try again.</string>
@@ -138,6 +141,87 @@
   <!-- Confirmation dialog before removing. %1$s is the addon name. -->
   <string name="addons_remove_title">Remove %1$s?</string>
   <string name="addons_remove_body">Its catalogs, sources and subtitles will stop showing up. You can install it again from its link.</string>
+  <!-- Sections of the addons screen. -->
+  <string name="addons_tab_installed">Installed</string>
+  <string name="addons_tab_discover">Discover</string>
+  <!-- Main action of the addons screen; opens the dialog to install an addon from its link. -->
+  <string name="addons_add">Add addon</string>
+  <string name="addons_discover_intro">Addons from Stremio\'s official and community lists. Community addons are made by other people: install the ones you trust.</string>
+  <!-- Type filter that shows every addon. -->
+  <string name="addons_filter_all">All</string>
+  <string name="addons_search">Search addons</string>
+  <string name="addons_search_close">Close search</string>
+  <string name="addons_search_clear">Clear search</string>
+  <!-- Shown above the installed list while a filter or search hides some addons. -->
+  <string name="addons_reorder_hint">Clear the filter and search to change the order.</string>
+  <string name="addons_empty_title">No addons installed</string>
+  <string name="addons_empty_body">Addons provide everything you browse and watch. Find some in Discover, or add one from its link.</string>
+  <string name="addons_open_discover">Open Discover</string>
+  <string name="addons_no_match_title">No addons match</string>
+  <string name="addons_no_match_body">Try another name, or another type.</string>
+  <string name="addons_clear_filters">Clear filters</string>
+  <!-- Badge on addons made by Stremio. -->
+  <string name="addons_official">Official</string>
+  <!-- Shown on a Discover addon that is already installed. -->
+  <string name="addons_installed">Installed</string>
+  <string name="addons_configure">Configure</string>
+  <string name="addons_share">Share</string>
+  <!-- Accessibility labels. %1$s is the addon name. -->
+  <string name="addons_configure_named">Configure %1$s</string>
+  <string name="addons_share_named">Share %1$s</string>
+  <string name="addons_install_named">Install %1$s</string>
+  <string name="addons_logo">%1$s logo</string>
+  <string name="addons_install_failed">Couldn\'t install. Check your connection and try again.</string>
+  <!-- What an addon provides. %1$s is a list such as "Catalogs, Information &amp; Sources". -->
+  <string name="addons_provides">What it provides: %1$s</string>
+  <!-- Joins the last two items of a list, such as "Movies &amp; Series". -->
+  <string name="list_pair">%1$s &amp; %2$s</string>
+
+  <!-- Dialog to add an addon from its link. -->
+  <string name="addons_add_body">Paste the link to the addon\'s manifest. Links that start with stremio:// work too.</string>
+  <string name="addons_add_continue">Continue</string>
+  <string name="addons_checking">Checking…</string>
+  <!-- Confirmation before installing. %1$s is the addon name. -->
+  <string name="addons_install_title">Install %1$s?</string>
+  <!-- Shown when an addon changed between the moment the user looked at it and the install. -->
+  <string name="addons_install_changed">This addon changed since you looked at it. Check what it provides now before installing it.</string>
+  <string name="addons_install_privacy">Addons can see which titles you browse and watch. Install only addons you trust.</string>
+  <string name="addons_install_needs_setup">It needs to be set up on its configuration page before it works.</string>
+  <!-- %1$s is the name of the installed addon that the new link replaces. -->
+  <string name="addons_install_replaces">It replaces the %1$s you have installed, in the same place in the list.</string>
+  <!-- %1$s is the addon name. -->
+  <string name="addons_install_refreshes">%1$s is already installed. Installing it again updates it.</string>
+
+  <!-- Sharing an addon\'s link. %1$s is the addon name. -->
+  <string name="addons_share_title">Share %1$s</string>
+  <string name="addons_share_body">Anyone with this link can install the addon.</string>
+  <string name="addons_share_tv_body">Scan the code with your phone\'s camera to get the link.</string>
+  <string name="addons_copy_link">Copy link</string>
+  <!-- Replaces "Copy link" on the button once the link is on the clipboard. -->
+  <string name="addons_copied">Copied</string>
+  <!-- Name of the clipboard entry holding a copied link. -->
+  <string name="addons_clip_label">Addon link</string>
+  <string name="addons_share_private_title">This link includes your settings</string>
+  <string name="addons_share_private_body">Settings can contain private keys, such as your debrid account\'s. Anyone with the link can use them, so share it only with people you trust.</string>
+  <string name="addons_share_private_confirm">Show link</string>
+  <string name="addons_qr_description">QR code with the addon\'s link</string>
+  <string name="addons_qr_too_long">This link is too long for a QR code.</string>
+
+  <!-- Configuring an addon on its own web page. %1$s is the addon name. -->
+  <string name="addons_configure_title">Configure %1$s</string>
+  <string name="addons_configure_body">Its settings page opens in your browser. When you finish, copy the install link the page gives you and add it here. An installed addon keeps its place in the list.</string>
+  <string name="addons_configure_tv_body">Scan the code with your phone\'s camera to open its settings page. When you finish, add the install link the page gives you here. An installed addon keeps its place in the list.</string>
+  <string name="addons_configure_open">Open settings page</string>
+  <string name="addons_configure_add_link">Add new link</string>
+  <string name="addons_configure_private">The page\'s link includes your current settings, which may contain private keys.</string>
+  <string name="addons_configure_no_browser">No browser could open the page. Scan the code with your phone instead.</string>
+  <string name="addons_configure_qr_description">QR code with the addon\'s settings page</string>
+
+  <!-- Warnings before turning off or removing the only addon with information on movies and series. %1$s is the addon name. -->
+  <string name="addons_disable_title">Turn off %1$s?</string>
+  <string name="addons_meta_warning">It\'s the only addon that gives information about movies and series. Without it, titles won\'t open and Home may be empty.</string>
+  <string name="addons_remove_meta_body">It\'s the only addon that gives information about movies and series. Without it, titles won\'t open and Home may be empty. You can install it again from Discover.</string>
+  <string name="addons_turn_off">Turn off</string>
 
   <!-- Profile screen, opened from the avatar. -->
   <string name="profile_title">Profile</string>

@@ -3,12 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.crash
 
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
-import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.net.Uri
 import android.os.Build
 import android.os.Process
 import androidx.annotation.RequiresApi
@@ -158,55 +153,6 @@ private object ExitReasons {
                 ?: return null
         val qualified = frame.substringBefore('(')
         return "${qualified.substringBeforeLast('.').substringAfterLast('.')}.${qualified.substringAfterLast('.')}"
-    }
-}
-
-internal actual fun copyToClipboard(
-    context: PlatformContext,
-    label: String,
-    text: String,
-) {
-    runCatching {
-        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-    }
-}
-
-internal actual fun canShareText(context: PlatformContext): Boolean = true
-
-internal actual fun shareText(
-    context: PlatformContext,
-    subject: String,
-    text: String,
-): Boolean {
-    val send =
-        Intent(Intent.ACTION_SEND)
-            .setType("text/plain")
-            .putExtra(Intent.EXTRA_SUBJECT, subject)
-            .putExtra(Intent.EXTRA_TEXT, text)
-    return try {
-        context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        true
-    } catch (_: ActivityNotFoundException) {
-        false
-    }
-}
-
-/** Only HTTPS links, and only to apps that open web links (CATEGORY_BROWSABLE). */
-internal actual fun openWebPage(
-    context: PlatformContext,
-    url: String,
-): Boolean {
-    val uri = Uri.parse(url)
-    if (uri.scheme != "https") return false
-    val intent =
-        Intent(Intent.ACTION_VIEW, uri)
-            .addCategory(Intent.CATEGORY_BROWSABLE)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    return try {
-        context.startActivity(intent)
-        true
-    } catch (_: ActivityNotFoundException) {
-        false
     }
 }
 

@@ -13,6 +13,7 @@ stremionow-protocol.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true

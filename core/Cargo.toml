@@ -36,6 +36,8 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "http2", "charset", "json", "stream"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 webpki-roots = "1.0.12"
+# Already in the tree as rustls's crypto provider; used directly for SHA-256 manifest fingerprints.
+ring = { version = "0.17.14", default-features = false }
 rusqlite = { version = "0.42.0", features = ["bundled"] }
 log = "0.4.35"
 tempfile = "3.27.0"
@@ -56,7 +58,6 @@ getrandom = "0.4.3"
 # Serving to other devices (ADR 0008).
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
-ring = "0.17.14"
 spake2 = "0.4.0"
 mdns-sd = "0.21.7"
 if-addrs = "0.15.0"

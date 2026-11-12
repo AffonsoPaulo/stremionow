@@ -28,6 +28,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -73,8 +75,9 @@ fun SnButton(
         modifier =
             modifier
                 .heightIn(min = SnSize.controlLg)
-                .alpha(if (enabled) 1f else 0.45f)
+                // The ring stays at full strength on a dimmed (disabled) button.
                 .snClickable(Pill, enabled = enabled, onClick = onClick)
+                .alpha(if (enabled) 1f else 0.45f)
                 .background(background, Pill)
                 .padding(horizontal = SnSpacing.space6),
         verticalAlignment = Alignment.CenterVertically,
@@ -112,9 +115,9 @@ fun SnIconButton(
         modifier =
             modifier
                 .size(SnSize.controlMd)
-                .alpha(if (enabled) 1f else 0.45f)
                 .semantics { contentDescription = label }
                 .snClickable(Pill, enabled = enabled, onClick = onClick)
+                .alpha(if (enabled) 1f else 0.45f)
                 .background(background, Pill),
         contentAlignment = Alignment.Center,
     ) {
@@ -175,18 +178,28 @@ fun <T> SnChipRow(
     }
 }
 
-/** Underlined tabs for sections of one screen. */
+/**
+ * Underlined tabs for sections of one screen. [selectedFocusRequester] reaches the selected
+ * tab, for a screen that starts there on TV.
+ */
 @Composable
 fun SnTabs(
     tabs: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    selectedFocusRequester: FocusRequester? = null,
 ) {
     Column(modifier) {
-        // Scrolls when translated labels do not fit, instead of squeezing them.
+        // Scrolls when translated labels do not fit, instead of squeezing them. The scroll clips
+        // at its sides, so it leaves room for the focus ring there; the offset keeps the labels
+        // where they were.
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            modifier =
+                Modifier
+                    .offset(x = -FocusRingSpace)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = FocusRingSpace),
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
         ) {
             tabs.forEachIndexed { index, title ->
@@ -196,7 +209,13 @@ fun SnTabs(
                         Modifier
                             // The indicator below takes the label's width, not the whole row.
                             .width(IntrinsicSize.Max)
-                            .semantics { this.selected = selected }
+                            .then(
+                                if (selected && selectedFocusRequester != null) {
+                                    Modifier.focusRequester(selectedFocusRequester)
+                                } else {
+                                    Modifier
+                                },
+                            ).semantics { this.selected = selected }
                             .snClickable(RoundedCornerShape(SnRadius.radiusSm), role = Role.Tab) { onSelect(index) }
                             .padding(horizontal = SnSpacing.space4),
                     horizontalAlignment = Alignment.CenterHorizontally,

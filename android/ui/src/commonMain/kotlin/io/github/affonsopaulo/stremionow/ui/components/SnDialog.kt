@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -71,15 +72,19 @@ fun SnDialog(
  * The panel every dialog shares: a raised surface with [title] on top and [content] below.
  * Back and a tap outside call [onDismiss]. [wide] gives the panel most of the screen, for
  * long content such as a report; its content should then scroll inside a weighted child.
+ * [maxWidth] widens a regular panel, for content side by side such as a QR code and its text.
  */
 @Composable
 fun SnDialogFrame(
     title: String,
     onDismiss: () -> Unit,
     wide: Boolean = false,
+    maxWidth: Dp = 440.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = !wide)) {
+    // The platform's default width would cap a widened panel.
+    val platformWidth = !wide && maxWidth <= 440.dp
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = platformWidth)) {
         val shape = RoundedCornerShape(SnRadius.radiusXl)
         Column(
             modifier =
@@ -90,8 +95,13 @@ fun SnDialogFrame(
                             .widthIn(max = 880.dp)
                             .fillMaxWidth()
                             .fillMaxHeight()
+                    } else if (platformWidth) {
+                        Modifier.widthIn(max = maxWidth).fillMaxWidth()
                     } else {
-                        Modifier.widthIn(max = 440.dp).fillMaxWidth()
+                        Modifier
+                            .padding(horizontal = SnLayout.gutter)
+                            .widthIn(max = maxWidth)
+                            .fillMaxWidth()
                     }
                 ).semantics { paneTitle = title }
                     .background(SnColors.surfaceRaised, shape)

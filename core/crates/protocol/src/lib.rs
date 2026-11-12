@@ -5,10 +5,12 @@
 //! Addons are loosely written, so every optional field tolerates being absent or `null`, and
 //! unknown fields are ignored.
 
+mod addon_catalog;
 mod manifest;
 mod resources;
 mod transport;
 
+pub use addon_catalog::{AddonCatalogResponse, AddonDescriptor};
 pub use manifest::{CatalogDescriptor, ExtraProperty, Manifest, ResourceDescriptor};
 pub use resources::{
     CatalogResponse, MetaDetail, MetaPreview, MetaResponse, Stream, StreamBehaviorHints,

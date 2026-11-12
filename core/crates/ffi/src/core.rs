@@ -8,14 +8,20 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use futures::{StreamExt, stream};
 use serde::de::DeserializeOwned;
-use stremionow_addons::{AddonClient, AddonError, InstalledAddon};
+use stremionow_addons::{
+    AddonClient, AddonError, AddonList, DISCOVER_SOURCE, InstalledAddon, discoverable,
+    manifest_fingerprint,
+};
 use stremionow_library::{LibraryEntry, Store};
 use stremionow_markers::AniSkip;
-use stremionow_protocol::{AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse};
+use stremionow_protocol::{
+    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse,
+};
 
 use crate::account::Account;
 use crate::records::{
-    AddonInfo, CatalogInfo, CatalogRow, CoreError, LibraryItem, MetaDetails, MetaItem,
+    AddonInfo, AddonPreview, CatalogAddon, CatalogInfo, CatalogRow, CoreError, LibraryItem,
+    MetaDetails, MetaItem,
 };
 use crate::skips;
 use crate::streaming::Streaming;
@@ -45,6 +51,11 @@ const ADDON_TIMEOUT: Duration = Duration::from_secs(15);
 const CATALOG_FRESHNESS: Duration = Duration::from_secs(30 * 60);
 /// Title details younger than this are served from the cache.
 const META_FRESHNESS: Duration = Duration::from_secs(6 * 60 * 60);
+/// Discover's addon lists younger than this are served from the cache. The lists change
+/// rarely, so a day keeps the screen instant without going stale.
+const DISCOVER_FRESHNESS: Duration = Duration::from_secs(24 * 60 * 60);
+/// Previewed manifests kept for the user to confirm; more are never on screen at once.
+const MAX_PREVIEWS: usize = 8;
 /// Cache entries older than this are deleted on startup.
 const CACHE_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 /// Maximum number of home rows, to keep the first screen fast.
@@ -60,6 +71,8 @@ pub struct StremioCore {
     pub(crate) streaming: Streaming,
     pub(crate) account: Account,
     pub(crate) aniskip: AniSkip,
+    /// Manifests downloaded for the user to confirm, oldest first.
+    previews: Mutex<Vec<InstalledAddon>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -120,12 +133,71 @@ impl StremioCore {
             .collect())
     }
 
-    /// Installs the addon whose manifest is at `url`, or refreshes it if already installed.
-    pub async fn install_addon(&self, url: String) -> Result<AddonInfo, CoreError> {
+    /// Downloads the manifest at `url` without installing it, so the user can see what the
+    /// addon provides first, and whether it would replace one they have.
+    /// The manifest is kept for a while, so installing it after the user confirms installs
+    /// exactly what they saw (see [`StremioCore::install_addon`]).
+    pub async fn preview_addon(&self, url: String) -> Result<AddonPreview, CoreError> {
         let addon = self.client.install(&url).await?;
-        let info = self.save_addon(&addon)?;
+        let preview = self.describe_preview(&addon)?;
+        self.keep_preview(addon)?;
+        Ok(preview)
+    }
+
+    /// Installs the addon at `url` that the user confirmed, whose [`AddonInfo::fingerprint`] is
+    /// `confirmed`: from a preview (installed as previewed, without asking the addon again) or
+    /// from a list of addons to discover (asked again, and installed only if it still does
+    /// what the list said). When the addon now differs from what was confirmed, nothing is
+    /// installed and the call fails with [`CoreError::AddonChanged`]; the fresh manifest is
+    /// kept, so a [`StremioCore::preview_addon`] to show it again and an install of that
+    /// preview need no further surprise.
+    ///
+    /// An addon already installed with the same id, at this address or another one (it was
+    /// configured again), is replaced in its place, keeping its priority and enabled state,
+    /// so the addon is never listed twice.
+    pub async fn install_addon(
+        &self,
+        url: String,
+        confirmed: String,
+    ) -> Result<AddonInfo, CoreError> {
+        let manifest_url = AddonUrl::parse(&url)
+            .map_err(AddonError::from)?
+            .manifest_url()
+            .to_owned();
+        let addon = match self.take_preview(&manifest_url, &confirmed)? {
+            Some(previewed) => previewed,
+            None => {
+                let fetched = self.client.install(&url).await?;
+                if manifest_fingerprint(&fetched.manifest) != confirmed {
+                    self.keep_preview(fetched)?;
+                    return Err(CoreError::AddonChanged);
+                }
+                fetched
+            }
+        };
+        let json = manifest_json(&addon)?;
+        let new_url = addon.url.manifest_url();
+        let old_url = self
+            .same_addon(&addon)?
+            .map(|(installed, _)| installed.url.manifest_url().to_owned());
+        let enabled = {
+            let mut store = self.store()?;
+            store.replace_addon(old_url.as_deref().unwrap_or(new_url), new_url, &json)?;
+            store
+                .addons()?
+                .into_iter()
+                .find(|a| a.manifest_url == new_url)
+                .is_none_or(|a| a.enabled)
+        };
         self.addons_changed()?;
-        Ok(info)
+        Ok(AddonInfo::new(&addon, enabled))
+    }
+
+    /// Addons to discover from Stremio's official and community lists, official first, each
+    /// once. The lists are cached for a while and served from the cache when offline; the
+    /// call fails only when neither list can be had.
+    pub async fn discover_addons(&self) -> Result<Vec<CatalogAddon>, CoreError> {
+        self.discover_addons_from(DISCOVER_SOURCE).await
     }
 
     pub fn remove_addon(&self, manifest_url: String) -> Result<(), CoreError> {
@@ -398,14 +470,94 @@ impl StremioCore {
             streaming: Streaming::new(directory.join("streams"))?,
             account,
             aniskip,
+            previews: Mutex::new(Vec::new()),
         }))
+    }
+
+    /// Discover's lists, from the addon at `source`; tests point it at a fake server.
+    async fn discover_addons_from(&self, source: &str) -> Result<Vec<CatalogAddon>, CoreError> {
+        let source = AddonUrl::parse(source).map_err(AddonError::from)?;
+        let official_url = AddonList::Official.url(&source);
+        let community_url = AddonList::Community.url(&source);
+        let (official, community) = futures::future::join(
+            self.cached_json::<AddonCatalogResponse>(&official_url, DISCOVER_FRESHNESS),
+            self.cached_json::<AddonCatalogResponse>(&community_url, DISCOVER_FRESHNESS),
+        )
+        .await;
+        let (official, community) = match (official, community) {
+            (Err(error), Err(_)) => return Err(error),
+            (official, community) => (official.unwrap_or_default(), community.unwrap_or_default()),
+        };
+        Ok(discoverable(official, community)
+            .iter()
+            .map(|entry| CatalogAddon {
+                addon: AddonInfo::new(&entry.addon, false),
+                official: entry.official,
+            })
+            .collect())
+    }
+
+    fn describe_preview(&self, addon: &InstalledAddon) -> Result<AddonPreview, CoreError> {
+        let replaces = self
+            .same_addon(addon)?
+            .map(|(installed, enabled)| AddonInfo::new(&installed, enabled));
+        Ok(AddonPreview {
+            addon: AddonInfo::new(addon, true),
+            replaces,
+        })
+    }
+
+    /// Remembers a downloaded manifest the user may confirm, replacing an older one from the
+    /// same address and forgetting the oldest beyond [`MAX_PREVIEWS`].
+    fn keep_preview(&self, addon: InstalledAddon) -> Result<(), CoreError> {
+        let mut previews = self.previews()?;
+        previews.retain(|kept| kept.url != addon.url);
+        previews.push(addon);
+        let excess = previews.len().saturating_sub(MAX_PREVIEWS);
+        previews.drain(..excess);
+        Ok(())
+    }
+
+    /// The previewed manifest from `manifest_url` if it is the one the user confirmed.
+    fn take_preview(
+        &self,
+        manifest_url: &str,
+        confirmed: &str,
+    ) -> Result<Option<InstalledAddon>, CoreError> {
+        let mut previews = self.previews()?;
+        let position = previews.iter().position(|kept| {
+            kept.url.manifest_url() == manifest_url
+                && manifest_fingerprint(&kept.manifest) == confirmed
+        });
+        Ok(position.map(|index| previews.remove(index)))
+    }
+
+    fn previews(&self) -> Result<MutexGuard<'_, Vec<InstalledAddon>>, CoreError> {
+        self.previews.lock().map_err(|_| CoreError::Storage {
+            reason: "the preview lock was poisoned".into(),
+        })
+    }
+
+    /// The installed addon with the same manifest id as `addon`, with its enabled flag.
+    fn same_addon(
+        &self,
+        addon: &InstalledAddon,
+    ) -> Result<Option<(InstalledAddon, bool)>, CoreError> {
+        let id = &addon.manifest.id;
+        let installed = self.installed()?;
+        // The same address first, in case an older copy shares the id under another one.
+        let exact = installed
+            .iter()
+            .position(|(a, _)| a.url == addon.url && &a.manifest.id == id);
+        let any = installed.iter().position(|(a, _)| &a.manifest.id == id);
+        Ok(exact
+            .or(any)
+            .and_then(|index| installed.into_iter().nth(index)))
     }
 
     /// Saves a downloaded addon, keeping its position and enabled state if it was installed.
     fn save_addon(&self, addon: &InstalledAddon) -> Result<AddonInfo, CoreError> {
-        let json = serde_json::to_string(&addon.manifest).map_err(|e| CoreError::InvalidAddon {
-            reason: e.to_string(),
-        })?;
+        let json = manifest_json(addon)?;
         let store = self.store()?;
         store.upsert_addon(addon.url.manifest_url(), &json)?;
         let enabled = store
@@ -496,6 +648,13 @@ fn defaults_to_install(installed_version: u32, present: &[String]) -> Vec<&'stat
         .collect()
 }
 
+/// The manifest as stored in the database.
+fn manifest_json(addon: &InstalledAddon) -> Result<String, CoreError> {
+    serde_json::to_string(&addon.manifest).map_err(|e| CoreError::InvalidAddon {
+        reason: e.to_string(),
+    })
+}
+
 /// Removes repeated ids, keeping the first occurrence.
 fn dedupe(items: impl IntoIterator<Item = MetaItem>) -> Vec<MetaItem> {
     let mut seen = std::collections::HashSet::new();
@@ -540,6 +699,12 @@ mod tests {
         server
     }
 
+    /// Installs the addon at `url` as the app does: preview, then install what was previewed.
+    async fn install(core: &StremioCore, url: String) -> Result<AddonInfo, CoreError> {
+        let preview = core.preview_addon(url.clone()).await?;
+        core.install_addon(url, preview.addon.fingerprint).await
+    }
+
     fn core() -> (Arc<StremioCore>, tempfile::TempDir) {
         let directory = tempfile::tempdir().expect("temp dir");
         let core = StremioCore::new(directory.path().to_string_lossy().into_owned()).expect("core");
@@ -562,7 +727,7 @@ mod tests {
             .await;
 
         let (core, _dir) = core();
-        core.install_addon(format!("{}/manifest.json", server.uri()))
+        install(&core, format!("{}/manifest.json", server.uri()))
             .await
             .expect("installs");
         let rows = core.home().await.expect("home");
@@ -602,7 +767,7 @@ mod tests {
 
         let (core, _dir) = core();
         for server in [&bad, &good] {
-            core.install_addon(format!("{}/manifest.json", server.uri()))
+            install(&core, format!("{}/manifest.json", server.uri()))
                 .await
                 .expect("installs");
         }
@@ -615,8 +780,7 @@ mod tests {
     async fn disabled_and_removed_addons_are_ignored() {
         let server = addon_server("A").await;
         let (core, _dir) = core();
-        let info = core
-            .install_addon(format!("{}/manifest.json", server.uri()))
+        let info = install(&core, format!("{}/manifest.json", server.uri()))
             .await
             .expect("installs");
         core.set_addon_enabled(info.manifest_url.clone(), false)
@@ -641,7 +805,7 @@ mod tests {
             .mount(&server)
             .await;
         let (core, _dir) = core();
-        core.install_addon(format!("{}/manifest.json", server.uri()))
+        install(&core, format!("{}/manifest.json", server.uri()))
             .await
             .expect("installs");
         assert!(core.search("   ".into()).await.expect("blank").is_empty());
@@ -662,7 +826,7 @@ mod tests {
             .mount(&server)
             .await;
         let (core, _dir) = core();
-        core.install_addon(format!("{}/manifest.json", server.uri()))
+        install(&core, format!("{}/manifest.json", server.uri()))
             .await
             .expect("installs");
         let catalogs = core.search_catalogs().expect("lists");
@@ -721,10 +885,271 @@ mod tests {
         assert!(core.library().expect("lists").is_empty());
     }
 
+    /// A server for Discover's lists, answering the official and community lists.
+    async fn list_server(official: ResponseTemplate, community: ResponseTemplate) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/addon_catalog/all/official.json"))
+            .respond_with(official)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/addon_catalog/all/community.json"))
+            .respond_with(community)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn entry(url: &str, id: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut manifest = serde_json::json!({"id": id, "version": "1.0.0", "name": id});
+        if let (Some(target), Some(fields)) = (manifest.as_object_mut(), extra.as_object()) {
+            target.extend(fields.clone());
+        }
+        serde_json::json!({"transportUrl": url, "transportName": "http", "manifest": manifest})
+    }
+
+    fn list(entries: Vec<serde_json::Value>) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "addons": entries }))
+    }
+
+    #[tokio::test]
+    async fn discovers_addons_and_serves_the_lists_from_the_cache() {
+        let none = serde_json::json!({});
+        let server = list_server(
+            list(vec![
+                entry(
+                    "https://cinemeta.example/manifest.json",
+                    "cinemeta",
+                    none.clone(),
+                ),
+                entry(
+                    "http://127.0.0.1:11470/local-addon/manifest.json",
+                    "local",
+                    none.clone(),
+                ),
+            ]),
+            list(vec![
+                entry(
+                    "https://debrid.example/manifest.json",
+                    "debrid",
+                    serde_json::json!({
+                        "types": ["movie", "anime"], "logo": "https://debrid.example/logo.png",
+                        "behaviorHints": {"configurable": true, "configurationRequired": true}
+                    }),
+                ),
+                entry("https://cinemeta.example/manifest.json", "cinemeta", none),
+                serde_json::json!({"transportUrl": "https://broken.example/manifest.json"}),
+            ]),
+        )
+        .await;
+        let (core, _dir) = core();
+        let source = format!("{}/manifest.json", server.uri());
+        let found = core.discover_addons_from(&source).await.expect("lists");
+        let ids: Vec<_> = found
+            .iter()
+            .map(|a| (a.addon.id.as_str(), a.official))
+            .collect();
+        assert_eq!(ids, [("cinemeta", true), ("debrid", false)]);
+        let debrid = &found[1].addon;
+        assert_eq!(debrid.types, ["movie", "anime"]);
+        assert!(debrid.configuration_required);
+        assert_eq!(
+            debrid.configure_url.as_deref(),
+            Some("https://debrid.example/configure")
+        );
+
+        drop(server);
+        let cached = core.discover_addons_from(&source).await.expect("cached");
+        assert_eq!(cached, found);
+    }
+
+    #[tokio::test]
+    async fn discover_keeps_the_list_that_answers() {
+        let server = list_server(
+            ResponseTemplate::new(503),
+            list(vec![entry(
+                "https://a.example/manifest.json",
+                "a",
+                serde_json::json!({}),
+            )]),
+        )
+        .await;
+        let (core, _dir) = core();
+        let found = core
+            .discover_addons_from(&format!("{}/manifest.json", server.uri()))
+            .await
+            .expect("partial");
+        assert_eq!(found.len(), 1);
+        assert!(!found[0].official);
+    }
+
+    #[tokio::test]
+    async fn discover_fails_when_no_list_can_be_read() {
+        let (core, _dir) = core();
+        let down = list_server(ResponseTemplate::new(500), ResponseTemplate::new(404)).await;
+        assert!(matches!(
+            core.discover_addons_from(&format!("{}/manifest.json", down.uri()))
+                .await,
+            Err(CoreError::Network { .. })
+        ));
+        let garbage = list_server(
+            ResponseTemplate::new(200).set_body_string("<html>"),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([1, 2])),
+        )
+        .await;
+        assert!(matches!(
+            core.discover_addons_from(&format!("{}/manifest.json", garbage.uri()))
+                .await,
+            Err(CoreError::InvalidAddon { .. })
+        ));
+        let empty = list_server(list(vec![]), list(vec![])).await;
+        assert!(
+            core.discover_addons_from(&format!("{}/manifest.json", empty.uri()))
+                .await
+                .expect("empty lists")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn previews_and_replaces_a_reconfigured_addon_in_place() {
+        let first = addon_server("A").await;
+        let other = addon_server("B").await;
+        let reconfigured = addon_server("A").await;
+        let (core, _dir) = core();
+        let first_url = format!("{}/manifest.json", first.uri());
+        let other_url = format!("{}/manifest.json", other.uri());
+        install(&core, first_url.clone()).await.expect("installs");
+        install(&core, other_url.clone()).await.expect("installs");
+        core.set_addon_enabled(first_url.clone(), false)
+            .expect("disables");
+
+        let new_url = format!("{}/manifest.json", reconfigured.uri());
+        let preview = core.preview_addon(new_url.clone()).await.expect("previews");
+        assert_eq!(preview.addon.id, "test.A");
+        let replaces = preview.replaces.expect("same id is installed");
+        assert_eq!(replaces.manifest_url, first_url);
+        assert_eq!(
+            core.addons().expect("lists").len(),
+            2,
+            "preview installs nothing"
+        );
+
+        let installed = core
+            .install_addon(new_url.clone(), preview.addon.fingerprint.clone())
+            .await
+            .expect("replaces");
+        assert!(!installed.enabled, "keeps the enabled state");
+        let urls: Vec<_> = core
+            .addons()
+            .expect("lists")
+            .into_iter()
+            .map(|a| a.manifest_url)
+            .collect();
+        assert_eq!(urls, [new_url.clone(), other_url]);
+
+        let again = core.preview_addon(new_url.clone()).await.expect("previews");
+        assert_eq!(
+            again.replaces.map(|a| a.manifest_url),
+            Some(new_url),
+            "the same address only refreshes"
+        );
+        let unrelated = addon_server("C").await;
+        let fresh = core
+            .preview_addon(format!("{}/manifest.json", unrelated.uri()))
+            .await
+            .expect("previews");
+        assert!(fresh.replaces.is_none());
+    }
+
+    /// Serves a manifest with `resources` at /manifest.json.
+    async fn serve_manifest(server: &MockServer, resources: serde_json::Value) {
+        server.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test.shifty", "version": "1.0.0", "name": "Shifty",
+                "resources": resources, "types": ["movie"]
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn installs_exactly_the_previewed_manifest() {
+        let server = MockServer::start().await;
+        serve_manifest(&server, serde_json::json!(["subtitles"])).await;
+        let (core, _dir) = core();
+        let url = format!("{}/manifest.json", server.uri());
+        let preview = core.preview_addon(url.clone()).await.expect("previews");
+
+        // The addon changes its mind between the confirmation and the install.
+        serve_manifest(&server, serde_json::json!(["subtitles", "stream", "meta"])).await;
+        let installed = core
+            .install_addon(url.clone(), preview.addon.fingerprint.clone())
+            .await
+            .expect("installs");
+        assert!(installed.provides_subtitles);
+        assert!(
+            !installed.provides_streams && !installed.provides_metadata,
+            "what was confirmed, not what the addon serves now"
+        );
+        assert!(
+            !core.addons().expect("lists")[0].provides_streams,
+            "and that is what is stored"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_an_addon_that_changed_since_it_was_listed() {
+        let server = MockServer::start().await;
+        serve_manifest(&server, serde_json::json!(["stream"])).await;
+        let (core, _dir) = core();
+        let url = format!("{}/manifest.json", server.uri());
+        // What a list showed, without a preview: the addon is asked again at install.
+        let listed = core
+            .client
+            .install(&url)
+            .await
+            .map(|addon| AddonInfo::new(&addon, false))
+            .expect("fetches");
+        let installed = core
+            .install_addon(url.clone(), listed.fingerprint.clone())
+            .await
+            .expect("unchanged, so it installs");
+        assert!(installed.provides_streams);
+        core.remove_addon(installed.manifest_url).expect("removes");
+
+        serve_manifest(&server, serde_json::json!(["stream", "meta"])).await;
+        let result = core.install_addon(url.clone(), listed.fingerprint).await;
+        assert!(matches!(result, Err(CoreError::AddonChanged)), "{result:?}");
+        assert!(
+            core.addons().expect("lists").is_empty(),
+            "nothing installed"
+        );
+
+        // Shown again and confirmed, the new manifest installs as shown.
+        let again = core.preview_addon(url.clone()).await.expect("previews");
+        assert!(again.addon.provides_metadata);
+        core.install_addon(url.clone(), again.addon.fingerprint)
+            .await
+            .expect("installs");
+        assert!(
+            matches!(
+                core.install_addon(url, "not a fingerprint".into()).await,
+                Err(CoreError::AddonChanged)
+            ),
+            "an install nobody confirmed is refused"
+        );
+    }
+
     #[tokio::test]
     async fn rejects_invalid_addon_urls() {
         let (core, _dir) = core();
-        let result = core.install_addon("file:///etc/passwd".into()).await;
+        let result = core
+            .install_addon("file:///etc/passwd".into(), String::new())
+            .await;
         assert!(matches!(result, Err(CoreError::InvalidAddon { .. })));
     }
 }

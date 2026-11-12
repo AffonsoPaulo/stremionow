@@ -73,6 +73,12 @@ cd desktop
 
 It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux).
 
+## Privacy
+
+StremioNow has no server of its own. It talks only to the addons you install and to what they point to (artwork, debrid services, torrent peers), and, if you sign in, to your Stremio account.
+
+**Crash reports** are opt-in and never sent on their own. When the app closes unexpectedly, it saves a report on the device: the app version, the operating system and its version, the device type (phone, tablet, TV, desktop), the processor architecture, the interface language, the error and where it happened, and the app's last 50 warnings. Before the report is saved, addresses lose everything but their host (debrid and addon keys live in the rest), and keys, tokens, email addresses, IP addresses and file paths in your home folder are removed. On the next launch the app asks whether to send it: **View report** shows exactly what it holds, and **Send report** opens a pre-filled issue on GitHub, which you review and submit from your own account (on a TV, a QR code opens it on your phone). **Don't send** deletes it. To stop saving reports altogether, choose **Never** in Settings › Privacy › Crash reports. Details are in [ADR 0007](docs/adr/0007-crash-reports.md).
+
 ## Languages
 
 The interface ships in English and Brazilian Portuguese. Translations are welcome; see [`l10n/README.md`](l10n/README.md).

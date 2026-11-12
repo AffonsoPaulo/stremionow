@@ -3,6 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.platform
 
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
+import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import kotlinx.coroutines.launch
 import java.awt.Desktop
@@ -23,6 +24,7 @@ internal actual fun logWarning(
     error: Throwable?,
 ) {
     log.log(System.Logger.Level.WARNING, message, error)
+    RecentLog.add('W', message, error)
 }
 
 /** Web pages only: links come from addons, and other schemes could start any program. */

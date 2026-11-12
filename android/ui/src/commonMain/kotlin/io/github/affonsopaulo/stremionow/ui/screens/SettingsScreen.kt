@@ -25,6 +25,7 @@ import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
+import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -59,7 +60,7 @@ class SettingsViewModel(
     }
 }
 
-/** Playback and download preferences. */
+/** Playback, download and privacy preferences. */
 @Composable
 fun SettingsScreen() {
     val context = LocalPlatformContext.current
@@ -145,6 +146,36 @@ fun SettingsScreen() {
                     )
                 }
             }
+        }
+        item { PrivacySection() }
+    }
+}
+
+/**
+ * Crash reports. The choice lives with the reports rather than in the core's database, so a
+ * crash while the core opens still knows it.
+ */
+@Composable
+private fun PrivacySection() {
+    val mode by CrashReports.mode.collectAsStateWithLifecycle()
+    val ask = stringResource(Res.string.settings_crash_ask)
+    val never = stringResource(Res.string.settings_crash_never)
+    Section(stringResource(Res.string.settings_privacy)) {
+        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+            BasicText(
+                stringResource(Res.string.settings_crash_reports),
+                style = SnTypography.bodyLg.copy(color = SnColors.fg),
+            )
+            BasicText(
+                stringResource(Res.string.settings_crash_reports_body),
+                style = SnTypography.body.copy(color = SnColors.fgMuted),
+            )
+            SnChipRow(
+                options = CrashReports.Mode.entries,
+                selected = mode,
+                label = { if (it == CrashReports.Mode.Ask) ask else never },
+                onSelect = CrashReports::setMode,
+            )
         }
     }
 }

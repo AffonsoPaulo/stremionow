@@ -9,6 +9,7 @@
 
 mod account;
 mod core;
+mod panics;
 mod playback;
 mod records;
 mod settings;
@@ -16,6 +17,9 @@ mod skips;
 mod streaming;
 
 pub use crate::core::StremioCore;
+pub use crate::panics::{
+    PanicDetails, PanicListener, TestCrash, set_panic_listener, trigger_test_crash,
+};
 pub use crate::records::*;
 
 uniffi::setup_scaffolding!();

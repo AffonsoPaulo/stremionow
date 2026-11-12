@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Crash reports sent from the app (docs/adr/0007-crash-reports.md). The app fills the fields
+# below through the new-issue link's query parameters, one per field id: keep the ids stable.
+name: Crash report
+description: Send a crash report that StremioNow saved on your device.
+title: "Crash: "
+labels: ["crash"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        StremioNow filled in this form from a report saved on your device. Addresses, keys, email addresses and personal file paths were removed before the report reached this page.
+
+        **This issue will be public.** Read the report before you submit it, and delete anything you would rather not share.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What were you doing?
+      description: Optional. What you did just before the problem, if you remember.
+      placeholder: For example, "I opened a series and chose the second episode."
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: App version
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, device type and ABI.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Crash report
+      description: If the report says it was shortened, paste the full one here (in the app, View report, then Copy report).
+      render: text
+    validations:
+      required: true

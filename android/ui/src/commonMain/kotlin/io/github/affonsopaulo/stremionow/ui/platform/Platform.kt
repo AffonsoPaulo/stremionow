@@ -13,8 +13,8 @@ expect abstract class PlatformContext
 expect val LocalPlatformContext: ProvidableCompositionLocal<PlatformContext>
 
 /**
- * Logs a warning under the app's tag. Never put stream or addon addresses in [message]: they
- * can carry debrid keys.
+ * Logs a warning under the app's tag, and keeps it for crash reports (redacted before they are
+ * written). Never put stream or addon addresses in [message]: they can carry debrid keys.
  */
 internal expect fun logWarning(
     message: String,

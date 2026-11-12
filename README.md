@@ -13,6 +13,7 @@ StremioNow does not host or provide any content. It plays what the addons you in
 - **Picks the right source for you**: your first-run preferences rank the sources; switching is always one click away, even during playback.
 - **Built for the remote**: full D-pad navigation with a visible focus everywhere on TV.
 - **Your choice of account**: use your Stremio account to sync addons, library and progress, or keep everything on the device.
+- **One device torrents for the others**: turn on "Serve to other devices" on a computer, and a weak TV or phone on the same home network plays torrents through it. Pairing takes a six-digit code, and devices only talk to each other over encrypted, pinned connections ([ADR 0008](docs/adr/0008-serve-to-other-devices.md)).
 
 ## Architecture
 
@@ -21,7 +22,7 @@ StremioNow does not host or provide any content. It plays what the addons you in
 | Android (phone, Android TV, Fire TV) | Kotlin, Jetpack Compose, Compose for TV |
 | Desktop (Windows, macOS, Linux) | Compose Multiplatform over a native mpv window ([ADR 0005](docs/adr/0005-desktop-ui.md)) |
 | Player | libmpv |
-| Core | Rust: addons, Stremio account sync, library and progress, source ranking, torrent streaming (librqbit) behind a local HTTP server |
+| Core | Rust: addons, Stremio account sync, library and progress, source ranking, torrent streaming (librqbit) behind a local HTTP server, serving torrents to paired devices on the home network |
 | Bridge | UniFFI (Kotlin) |
 
 See [`docs/adr`](docs/adr) for the reasoning behind each decision.
@@ -52,6 +53,12 @@ Core tests:
 ```
 cd core
 cargo test --workspace
+```
+
+To try serving to other devices without the app, run the headless server from `core/` and pair a device with the code it prints (by default it listens on loopback, which the Android emulator reaches as `10.0.2.2`; add `--lan` to serve the home network):
+
+```
+cargo run -p stremionow-torrent --features dev-loopback --example serve
 ```
 
 Android apps (the Gradle build compiles the core and generates its Kotlin bindings):

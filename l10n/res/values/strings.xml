@@ -99,7 +99,7 @@
 
   <!-- Details screen. -->
   <string name="details_tab_episodes">Episodes</string>
-  <string name="details_tab_related">You may also like</string>
+  <string name="details_tab_related">More like this</string>
   <string name="details_tab_details">Details</string>
   <!-- Season selector. %1$d is the season number. -->
   <string name="details_season">Season %1$d</string>

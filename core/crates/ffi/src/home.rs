@@ -50,6 +50,10 @@ const PERSONAL_ROW_ITEMS: usize = 20;
 const MIN_ROW_ITEMS: usize = 4;
 /// Titles the hero rotates through.
 const HERO_PICKS: usize = 5;
+/// Titles in a details page's "More like this" row.
+const SIMILAR_TITLES: usize = 20;
+/// History entries read to leave watched titles out of "More like this".
+const SIMILAR_EXCLUSION_READ: usize = 1_000;
 /// A home worked out this recently is shown again as is, while the history is unchanged.
 const REUSE_FOR: Duration = Duration::from_secs(10 * 60);
 
@@ -113,6 +117,63 @@ pub(crate) struct RecentHome {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl StremioCore {
+    /// Titles like the given one, for its details page, best first: scored as the home's
+    /// "Because you watched" rows are, by genres, era, director and cast (see
+    /// `docs/adr/0011-home-curation.md`), without the title itself and titles the user has
+    /// watched or started. A handful of cached catalog requests to the installed addons.
+    pub async fn similar_titles(
+        &self,
+        kind: String,
+        id: String,
+    ) -> Result<Vec<MetaItem>, CoreError> {
+        let addons = self.enabled()?;
+        let seed = self
+            .home_meta(&addons, &kind, &id, Fetch::Network)
+            .await
+            .ok_or(CoreError::NotFound)?;
+        let known: HashSet<String> = {
+            let store = self.store()?;
+            let mut known: HashSet<String> = store
+                .watched_titles(SIMILAR_EXCLUSION_READ)?
+                .into_iter()
+                .map(|w| w.id)
+                .collect();
+            known.extend(
+                store
+                    .progress_list(SIMILAR_EXCLUSION_READ)?
+                    .into_iter()
+                    .map(|p| p.id),
+            );
+            known
+        };
+        let lists: Vec<(FoundBy, Vec<MetaDetail>)> = stream::iter(seed_sources(&addons, &seed))
+            .map(|source| async move {
+                let metas = self
+                    .cached_or_fetched::<RichCatalog>(
+                        &source.url,
+                        CATALOG_FRESHNESS,
+                        Fetch::Network,
+                    )
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|catalog| catalog.metas)
+                    .unwrap_or_default();
+                (source.found_by, metas)
+            })
+            .buffered(CONCURRENCY)
+            .collect()
+            .await;
+        Ok(rank_like(
+            &seed,
+            lists
+                .iter()
+                .map(|(found_by, metas)| (*found_by, metas.as_slice())),
+            &|candidate: &str| known.contains(candidate),
+            SIMILAR_TITLES,
+        ))
+    }
+
     /// Works out the home screen, handing each stage to `listener` as it is ready: first what
     /// the response cache holds, then rows refreshed from the addons, and last the personal
     /// recommendations. Returns the finished home, which `listener` also receives. Fails only
@@ -1411,6 +1472,33 @@ mod tests {
         assert!(matches!(
             core.home_feed(listener().0).await,
             Err(CoreError::Network { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn suggests_titles_like_one_without_what_was_watched() {
+        let server = cinemeta().await;
+        let (core, _dir) = core_with(&server).await;
+        core.store()
+            .expect("store")
+            .mark_watched("ttromero", "ttromero", now_millis())
+            .expect("marks");
+        let similar = core
+            .similar_titles("movie".into(), "tt0063350".into())
+            .await
+            .expect("similar");
+        let ids: Vec<_> = similar.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids.len(), SIMILAR_TITLES);
+        assert!(!ids.contains(&"tt0063350") && !ids.contains(&"ttromero"));
+        assert_eq!(ids[0], "ttsearch", "found by its director's name");
+        assert!(
+            ids[1].starts_with("ttc"),
+            "then classics of the same genres and era"
+        );
+        assert!(matches!(
+            core.similar_titles("movie".into(), "ttmissing".into())
+                .await,
+            Err(CoreError::NotFound)
         ));
     }
 

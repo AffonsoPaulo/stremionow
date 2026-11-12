@@ -72,7 +72,7 @@
   <string name="search_see_all_label">Ver tudo em %1$s</string>
 
   <string name="details_tab_episodes">Episódios</string>
-  <string name="details_tab_related">Você também pode gostar</string>
+  <string name="details_tab_related">Títulos parecidos</string>
   <string name="details_tab_details">Detalhes</string>
   <string name="details_season">Temporada %1$d</string>
   <string name="details_specials">Especiais</string>

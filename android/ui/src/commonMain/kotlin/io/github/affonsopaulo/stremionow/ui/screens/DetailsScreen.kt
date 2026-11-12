@@ -133,17 +133,15 @@ class DetailsViewModel(
         }
     }
 
-    /** Titles from the same catalog type and main genre, a simple stand-in for recommendations. */
+    /**
+     * Titles like this one, scored by the core on genres, era, director and cast, without the
+     * ones the user has watched. A row of suggestions: on failure it simply stays empty.
+     */
     private suspend fun loadRelated(item: MetaItem) {
-        val genre = item.genres.firstOrNull() ?: return
-        val catalog =
-            runCatching { io { core.catalogs(kind) } }.getOrDefault(emptyList()).firstOrNull { genre in it.genres }
-                ?: return
         mutableRelated.value =
-            runCatching { core.catalogPage(catalog, genre, 0u) }
+            runCatching { core.similarTitles(item.kind, item.id) }
+                .onFailure { logWarning("Could not find titles like ${item.kind}/${item.id}", it) }
                 .getOrDefault(emptyList())
-                .filter { it.id != item.id }
-                .take(20)
     }
 }
 

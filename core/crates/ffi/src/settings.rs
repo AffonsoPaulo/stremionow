@@ -10,6 +10,7 @@ const SUBTITLE_LANGUAGE: &str = "subtitle_language";
 const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
+const SERVE_TO_DEVICES: &str = "serve_to_devices";
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
 const DEFAULT_TORRENT_CACHE_MB: u32 = 2048;
@@ -29,6 +30,8 @@ pub struct AppSettings {
     pub max_resolution: u32,
     /// The first-run setup has been completed.
     pub onboarded: bool,
+    /// Serve torrents to other devices on the home network while the app runs (ADR 0008).
+    pub serve_to_devices: bool,
 }
 
 impl Default for AppSettings {
@@ -40,6 +43,7 @@ impl Default for AppSettings {
             subtitle_language: String::new(),
             max_resolution: 0,
             onboarded: false,
+            serve_to_devices: false,
         }
     }
 }
@@ -69,6 +73,9 @@ impl StremioCore {
                 .and_then(|value| value.parse().ok())
                 .map_or(defaults.max_resolution, clamp_resolution),
             onboarded: store.setting(ONBOARDED)?.is_some_and(|value| value == "1"),
+            serve_to_devices: store
+                .setting(SERVE_TO_DEVICES)?
+                .is_some_and(|value| value == "1"),
         })
     }
 
@@ -93,6 +100,13 @@ impl StremioCore {
             &clamp_resolution(settings.max_resolution).to_string(),
         )?;
         store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
+        store.set_setting(
+            SERVE_TO_DEVICES,
+            if settings.serve_to_devices { "1" } else { "0" },
+        )?;
+        drop(store);
+        // "Only on Wi-Fi" may have changed.
+        self.apply_network_policy();
         Ok(())
     }
 
@@ -143,6 +157,7 @@ mod tests {
             subtitle_language: "../etc".into(),
             max_resolution: 1081,
             onboarded: true,
+            serve_to_devices: true,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -155,5 +170,6 @@ mod tests {
         assert_eq!(saved.subtitle_language, "", "junk is dropped");
         assert_eq!(saved.max_resolution, 0, "unknown limits mean no limit");
         assert!(saved.onboarded);
+        assert!(saved.serve_to_devices);
     }
 }

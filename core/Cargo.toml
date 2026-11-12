@@ -53,6 +53,12 @@ http-body-util = "0.1.5"
 bytes = "1.12.1"
 tokio-util = { version = "0.7.20", features = ["io"] }
 getrandom = "0.4.3"
+# Serving to other devices (ADR 0008).
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
+ring = "0.17.14"
+spake2 = "0.4.0"
+if-addrs = "0.15.0"
 
 [profile.release]
 lto = "thin"

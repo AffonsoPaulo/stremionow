@@ -23,6 +23,12 @@ pub enum TorrentError {
     /// being added.
     #[error("the torrent was stopped")]
     Stopped,
+    /// An address for serving to other devices is not on the home network.
+    #[error("the address is not on the local network")]
+    NotLocalNetwork,
+    /// Serving to other devices needs a home-network connection, and there is none.
+    #[error("this device is not connected to a local network")]
+    NoLocalNetwork,
     /// The torrent engine failed.
     #[error("torrent engine error: {0}")]
     Engine(String),

@@ -119,7 +119,7 @@ impl Proxy {
 }
 
 /// The source's status, selected headers and, unless `head_only`, its streamed body.
-fn relay(upstream: reqwest::Response, head_only: bool) -> Response<Body> {
+pub(crate) fn relay(upstream: reqwest::Response, head_only: bool) -> Response<Body> {
     let status = upstream.status();
     let headers: Vec<_> = FORWARDED_HEADERS
         .iter()

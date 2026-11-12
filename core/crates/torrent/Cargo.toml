@@ -27,6 +27,22 @@ percent-encoding.workspace = true
 getrandom.workspace = true
 thiserror.workspace = true
 log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio-rustls.workspace = true
+rcgen.workspace = true
+ring.workspace = true
+spake2.workspace = true
+if-addrs.workspace = true
+
+[features]
+# Lets `StreamServer::serve_loopback` listen on 127.0.0.1, for the emulator harness
+# (`examples/serve.rs`). The apps never enable it.
+dev-loopback = []
+
+[[example]]
+name = "serve"
+required-features = ["dev-loopback"]
 
 [dev-dependencies]
 tempfile.workspace = true

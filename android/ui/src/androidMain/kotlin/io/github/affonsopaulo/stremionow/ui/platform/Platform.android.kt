@@ -37,3 +37,5 @@ internal actual fun openExternalLink(
 
 internal actual fun appVersion(context: PlatformContext): String? =
     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
+
+internal actual fun displaySwitchingSupported(): Boolean = false

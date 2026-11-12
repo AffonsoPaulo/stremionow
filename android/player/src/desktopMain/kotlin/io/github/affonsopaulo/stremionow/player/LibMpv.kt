@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.player
 
+import com.sun.jna.Callback
 import com.sun.jna.Library
+import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
+import com.sun.jna.ptr.PointerByReference
 
 /**
  * The parts of libmpv's client API (`mpv/client.h`, API 2.x) that the player uses, bound through
@@ -13,6 +16,9 @@ import com.sun.jna.Structure
  */
 @Suppress("FunctionName", "ktlint:standard:function-naming")
 internal interface LibMpv : Library {
+    /** `MPV_CLIENT_API_VERSION` of the loaded library: major version in the upper 16 bits. */
+    fun mpv_client_api_version(): NativeLong
+
     fun mpv_error_string(error: Int): String
 
     fun mpv_create(): Pointer?
@@ -66,6 +72,43 @@ internal interface LibMpv : Library {
     ): Pointer
 
     fun mpv_wakeup(handle: Pointer)
+
+    // Render API (`mpv/render.h`, `mpv/render_gl.h`), used where mpv cannot draw into a window
+    // of its own (macOS). `params` are arrays of `mpv_render_param`, ended by type 0.
+
+    fun mpv_render_context_create(
+        result: PointerByReference,
+        handle: Pointer,
+        params: Pointer,
+    ): Int
+
+    fun mpv_render_context_set_update_callback(
+        context: Pointer,
+        callback: MpvRenderUpdateCallback?,
+        callbackContext: Pointer?,
+    )
+
+    fun mpv_render_context_render(
+        context: Pointer,
+        params: Pointer,
+    ): Int
+
+    fun mpv_render_context_report_swap(context: Pointer)
+
+    fun mpv_render_context_free(context: Pointer)
+}
+
+/** `mpv_render_update_fn`: a new frame is due. Runs on an mpv thread; must not call mpv. */
+internal fun interface MpvRenderUpdateCallback : Callback {
+    fun invoke(context: Pointer?)
+}
+
+/** `get_proc_address` of `mpv_opengl_init_params`: the address of an OpenGL function. */
+internal fun interface MpvGetProcAddress : Callback {
+    fun invoke(
+        context: Pointer?,
+        name: String,
+    ): Pointer?
 }
 
 /** `mpv_event`. */
@@ -150,4 +193,11 @@ internal object MpvConstants {
     const val FORMAT_DOUBLE = 5
 
     const val END_FILE_REASON_ERROR = 4
+
+    const val RENDER_PARAM_INVALID = 0
+    const val RENDER_PARAM_API_TYPE = 1
+    const val RENDER_PARAM_OPENGL_INIT_PARAMS = 2
+    const val RENDER_PARAM_OPENGL_FBO = 3
+    const val RENDER_PARAM_FLIP_Y = 4
+    const val RENDER_API_TYPE_OPENGL = "opengl"
 }

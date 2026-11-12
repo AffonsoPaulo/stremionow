@@ -40,7 +40,7 @@ Options considered for the structure:
 | --- | --- | --- |
 | `PlatformContext`, `LocalPlatformContext` | `Context`, `LocalContext` | One process-wide instance |
 | Core data folder (`coreDataDirectory`) | `noBackupFilesDir/core` | `%APPDATA%\StremioNow`, `~/Library/Application Support/StremioNow` or `$XDG_DATA_HOME/stremionow` (default `~/.local/share/stremionow`), then `core` |
-| `SecureStore` (`PlatformSecretStore`) | Android Keystore | Windows DPAPI (current user, app entropy). On macOS and Linux it does not store at all, so a session lasts until the app closes; Keychain and libsecret are still to do |
+| `SecureStore` (`PlatformSecretStore`) | Android Keystore | Windows DPAPI (current user, app entropy); macOS login keychain (generic passwords, service `StremioNow`, through Security.framework); Linux Secret Service through libsecret. Where the store is missing or refuses (no libsecret or Secret Service, a locked or denied keychain) nothing is kept and the session lasts until the app closes; the first failure is logged once. Never plain text |
 | `Connectivity.onMobileData` | `ConnectivityManager` | Always false: no portable way to tell, so never block |
 | `rememberLocalNetworkAccess` | Android 17 permission request | No permission needed |
 | `openExternalLink` | `ACTION_VIEW` intent | `Desktop.browse`, http(s) only |
@@ -52,6 +52,7 @@ Options considered for the structure:
 | `SnFontFamilies` | Font resources | The same font files, copied to the classpath at build time |
 | `stringResource`, `pluralStringResource` | Android resources | Generated tables (ADR 0003) |
 | `PlayerScreen` | Full-screen player in the activity | Two-window player over the app window's position |
+| `displaySwitchingSupported` | False: the system handles HDR, and the surface's frame rate feeds "Match content frame rate" | True on Windows: Settings shows HDR and refresh rate switching (ADR 0005) |
 
 Media sessions and Watch Next stay in Android code. `LifecycleEventEffect`, `collectAsStateWithLifecycle`, `viewModel` and navigation are already multiplatform.
 
@@ -61,7 +62,7 @@ Media sessions and Watch Next stay in Android code. `LifecycleEventEffect`, `col
 
 **Feedback.** `snClickable` reads `LocalSnFeedback`. Android keeps the defaults: focus rings always show, and there is no hover. The desktop shows focus rings only after keyboard input (clicks focus what they hit), and highlights what the mouse points at.
 
-**Builds and CI.** AGP's multiplatform library has a single variant. The convention plugin therefore registers `lintDebug`, `testDebugUnitTest` and `assembleDebug` as aliases of the modules' Android lint, host-test and assemble tasks. The existing command (`./gradlew lintDebug testDebugUnitTest assembleDebug`) still covers every module. CI adds a desktop job on Windows that compiles the app and runs the shared modules' desktop tests.
+**Builds and CI.** AGP's multiplatform library has a single variant. The convention plugin therefore registers `lintDebug`, `testDebugUnitTest` and `assembleDebug` as aliases of the modules' Android lint, host-test and assemble tasks. The existing command (`./gradlew lintDebug testDebugUnitTest assembleDebug`) still covers every module. CI's desktop job runs on Windows, macOS and Linux: it compiles the app, runs the shared modules' desktop tests, round-trips a secret through each system's store (on Linux inside a private D-Bus session with GNOME Keyring) and starts the app with `--smoke-test`, which composes the window and plays a generated test pattern through libmpv in the player's window (on Linux under `xvfb-run`). Formatting is checked once, on Linux.
 
 ## Consequences
 
@@ -70,4 +71,5 @@ Media sessions and Watch Next stay in Android code. `LifecycleEventEffect`, `col
 - Shared code may use JVM APIs freely; any non-JVM target would need that undone first.
 - Lint now analyzes the generated UniFFI bindings, because they are an ordinary source folder. `core-bridge/lint.xml` silences `NewApi` there, since the bindings check for `java.lang.ref.Cleaner` at run time.
 - Changes to shared code are checked by both the Android and the desktop CI jobs.
-- Secrets are not kept on macOS and Linux until a Keychain or libsecret store exists.
+- Secrets are kept by the system's store on every desktop; a desktop without one (no Secret Service on a bare Linux window manager) signs in for the session only.
+- `PlaybackState.video` (`VideoFormat`: HDR or not, frame rate) is shared; both players fill it from mpv, after checking the values.

@@ -5,7 +5,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.awt.ComposeDialog
 import androidx.compose.ui.awt.SwingDialog
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -14,15 +16,21 @@ import io.github.affonsopaulo.stremionow.player.MpvPlayer
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.DisplayChoices
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
+import io.github.affonsopaulo.stremionow.ui.desktop.MediaKeys
 import io.github.affonsopaulo.stremionow.ui.desktop.OverlayState
 import io.github.affonsopaulo.stremionow.ui.desktop.PlayerOverlay
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.VideoWindow
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowPair
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowedPlayer
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import io.github.affonsopaulo.stremionow.ui.desktop.handleMediaCommand
 import io.github.affonsopaulo.stremionow.ui.desktop.handlePlayerShortcut
+import io.github.affonsopaulo.stremionow.ui.desktop.playerBack
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
+import kotlinx.coroutines.launch
 import java.awt.Dialog
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
@@ -55,10 +63,24 @@ actual fun PlayerScreen(
                     title = "${selection.details.item.name} – StremioNow",
                     bounds = host.playerBounds(),
                     icons = host.icons,
-                ) { handle -> MpvPlayer.create(handle, host.caBundle, options.copy(verboseLogs = host.verboseLogs)) }
+                ) { canvas ->
+                    MpvPlayer.create(
+                        canvas = canvas,
+                        libraryDirectory = host.nativeLibraries,
+                        caFile = host.caBundle,
+                        options = options.copy(verboseLogs = host.verboseLogs),
+                    )
+                }
             }
         }
     val player = viewModel.player
+    // HDR and refresh rate changes for this player, put back when it goes (Windows only).
+    val display = remember(player) { DesktopDisplays.session(AppGraph.core(context), selection.details.item.id) }
+    // One instance per player: the overlay restarts its display check when this changes.
+    val displayChoices =
+        remember(display) {
+            display?.let { DisplayChoices(it, player.video.frame) { on -> player.mpv?.setColorspaceHint(on) } }
+        }
     val state = remember { OverlayState() }
     val leave = remember(player) { Leave() }
     val overlay = remember(player) { createOverlay(player.video, onCloseRequest = leave::back) }
@@ -66,36 +88,52 @@ actual fun PlayerScreen(
     SideEffect {
         leave.onBack = onBack
         leave.restore = {
+            player.mpv?.setColorspaceHint(false)
+            display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
             host.comeBack(if (pair.isFullScreen) null else player.video.frame.bounds)
             player.video.hide()
         }
     }
 
     // Also when the app closes with the player open: never leave the video window behind.
-    DisposableEffect(player) { onDispose { player.video.hide() } }
+    DisposableEffect(player) {
+        onDispose {
+            display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
+            player.video.hide()
+        }
+    }
 
+    val next = viewModel.selection.nextEpisode
+    val playNext: (() -> Unit)? = next?.let { episode -> { leave.to { onOpenEpisode(episode) } } }
+    val currentPlayNext by rememberUpdatedState(playNext)
     val input = remember { DesktopInput() }
     SwingDialog(
         create = { overlay },
         dispose = ComposeDialog::dispose,
         onPreviewKeyEvent = { event ->
             input.onPreviewKeyEvent(event)
-            handlePlayerShortcut(event, player, pair, state, onBack = leave::back)
+            handlePlayerShortcut(event, player, pair, state, onBack = leave::back, onNext = currentPlayNext)
         },
     ) {
         DisposableEffect(pair) {
             pair.attach()
+            val mediaKeys =
+                MediaKeys.install(overlay) { command -> handleMediaCommand(command, player, state, currentPlayNext) }
             // Hand the foreground to the player before the app's window steps aside: hiding the
             // active window first lets the system activate whatever comes next, often another app.
             player.video.frame.toFront()
             host.stepAside()
-            onDispose(pair::close)
+            onDispose {
+                mediaKeys.close()
+                pair.close()
+            }
         }
-        ProvideDesktopInput(input) {
+        ProvideDesktopInput(input, onBack = { playerBack(pair, state, leave::back) }) {
             PlayerOverlay(
                 viewModel = viewModel,
                 pair = pair,
                 state = state,
+                display = displayChoices,
                 onBack = leave::back,
                 onChangeSource = { leave.to(onChangeSource) },
                 onOpenEpisode = { episode -> leave.to { onOpenEpisode(episode) } },

@@ -20,7 +20,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.AppSettings
+import io.github.affonsopaulo.stremionow.core.DisplaySwitch
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.ui.components.SnButton
+import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
@@ -28,9 +31,11 @@ import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
+import io.github.affonsopaulo.stremionow.ui.platform.displaySwitchingSupported
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
@@ -45,9 +50,22 @@ class SettingsViewModel(
     private val mutableSettings = MutableStateFlow<AppSettings?>(null)
     val settings = mutableSettings.asStateFlow()
     val cacheChoices: List<UInt> = core.torrentCacheChoices()
+    private val mutableHdrTitles = MutableStateFlow(0)
+
+    /** Titles the user turned HDR on for ("Only for this title"). */
+    val hdrTitles = mutableHdrTitles.asStateFlow()
 
     init {
-        viewModelScope.launch { mutableSettings.value = runCatching { io { core.settings() } }.getOrNull() }
+        viewModelScope.launch {
+            mutableSettings.value = runCatching { io { core.settings() } }.getOrNull()
+            mutableHdrTitles.value = runCatching { io { core.hdrTitleCount().toInt() } }.getOrDefault(0)
+        }
+    }
+
+    /** Forgets the titles HDR was turned on for. */
+    fun forgetHdrTitles() {
+        mutableHdrTitles.value = 0
+        viewModelScope.launch { runCatching { io { core.clearHdrTitles() } } }
     }
 
     /** Applies a change at once; there is no Save button to forget. */
@@ -120,6 +138,17 @@ fun SettingsScreen() {
                 )
             }
         }
+        if (displaySwitchingSupported()) {
+            item {
+                val hdrTitles by viewModel.hdrTitles.collectAsStateWithLifecycle()
+                DisplaySection(
+                    settings = current,
+                    hdrTitles = hdrTitles,
+                    onChange = viewModel::update,
+                    onForgetHdrTitles = viewModel::forgetHdrTitles,
+                )
+            }
+        }
         item {
             Section(stringResource(Res.string.settings_torrents)) {
                 SwitchRow(
@@ -174,6 +203,78 @@ private fun PrivacySection() {
                 selected = mode,
                 label = { if (it == CrashReports.Mode.Ask) ask else never },
                 onSelect = CrashReports::setMode,
+            )
+        }
+    }
+}
+
+/** HDR and refresh rate switching, where the app can change the display (Windows). */
+@Composable
+private fun DisplaySection(
+    settings: AppSettings,
+    hdrTitles: Int,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+    onForgetHdrTitles: () -> Unit,
+) {
+    Section(stringResource(Res.string.settings_display)) {
+        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+            BasicText(stringResource(Res.string.settings_hdr), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+            BasicText(
+                stringResource(Res.string.settings_hdr_body),
+                style = SnTypography.body.copy(color = SnColors.fgMuted),
+            )
+            SnChipRow(
+                options = listOf(DisplaySwitch.ASK, DisplaySwitch.ALWAYS, DisplaySwitch.NEVER),
+                selected = settings.hdr,
+                label = {
+                    stringResource(
+                        when (it) {
+                            DisplaySwitch.ASK -> Res.string.settings_switch_ask
+                            DisplaySwitch.ALWAYS -> Res.string.settings_switch_always
+                            DisplaySwitch.NEVER -> Res.string.settings_switch_never
+                        },
+                    )
+                },
+                onSelect = { choice -> onChange { it.copy(hdr = choice) } },
+            )
+            if (hdrTitles > 0) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                ) {
+                    BasicText(
+                        pluralStringResource(Res.plurals.settings_hdr_titles, hdrTitles, hdrTitles),
+                        modifier = Modifier.weight(1f),
+                        style = SnTypography.body.copy(color = SnColors.fgSecondary),
+                    )
+                    SnButton(
+                        stringResource(Res.string.settings_hdr_forget),
+                        onForgetHdrTitles,
+                        style = SnButtonStyle.Secondary,
+                    )
+                }
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+                BasicText(
+                    stringResource(Res.string.settings_refresh),
+                    style = SnTypography.bodyLg.copy(color = SnColors.fg),
+                )
+                BasicText(
+                    stringResource(Res.string.settings_refresh_body),
+                    style = SnTypography.body.copy(color = SnColors.fgMuted),
+                )
+            }
+            SnSwitch(
+                checked = settings.matchRefreshRate,
+                label = stringResource(Res.string.settings_refresh),
+                onText = stringResource(Res.string.state_on),
+                offText = stringResource(Res.string.state_off),
+                onToggle = { onChange { it.copy(matchRefreshRate = !it.matchRefreshRate) } },
             )
         }
     }

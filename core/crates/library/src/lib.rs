@@ -156,6 +156,30 @@ impl Store {
         Ok(())
     }
 
+    /// Number of settings whose key starts with `prefix`.
+    pub fn count_settings_with_prefix(&self, prefix: &str) -> Result<u32, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT COUNT(*) FROM settings WHERE substr(key, 1, length(?1)) = ?1",
+            [prefix],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Removes every setting whose key starts with `prefix`; returns how many there were.
+    pub fn delete_settings_with_prefix(&self, prefix: &str) -> Result<u32, StoreError> {
+        let removed = self.connection.execute(
+            "DELETE FROM settings WHERE substr(key, 1, length(?1)) = ?1",
+            [prefix],
+        )?;
+        Ok(u32::try_from(removed).unwrap_or(u32::MAX))
+    }
+
+    pub fn delete_setting(&self, key: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     // Addons
 
     /// Installed addons in display order.

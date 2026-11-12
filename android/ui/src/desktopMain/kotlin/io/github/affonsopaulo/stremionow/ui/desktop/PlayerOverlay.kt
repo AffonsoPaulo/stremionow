@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,11 +52,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.PlaybackState
+import io.github.affonsopaulo.stremionow.player.PlayerError
+import io.github.affonsopaulo.stremionow.player.VideoFormat
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
+import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
@@ -62,10 +68,14 @@ import io.github.affonsopaulo.stremionow.ui.components.SnSeekBar
 import io.github.affonsopaulo.stremionow.ui.components.formatPlaybackTime
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DisplaySession
+import io.github.affonsopaulo.stremionow.ui.desktop.display.HdrChoice
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.screens.CONTROLS_TIMEOUT_MS
 import io.github.affonsopaulo.stremionow.ui.screens.EpisodesList
+import io.github.affonsopaulo.stremionow.ui.screens.HdrPrompt
 import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
@@ -80,10 +90,15 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.Cursor
 import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
+
+/** Height kept clear of the bottom controls (timeline and buttons) for prompts above them. */
+private val CONTROLS_CLEARANCE = 128.dp
 
 /** Step of the ±10 s buttons and of the arrow keys. */
 private const val SEEK_STEP_SECONDS = 10.0
@@ -105,6 +120,9 @@ internal class OverlayState {
 
     var scrubSeconds by mutableStateOf<Double?>(null)
 
+    /** The HDR question is showing. */
+    var isAskingHdr by mutableStateOf(false)
+
     fun poke() {
         areControlsVisible = true
         lastActivity = System.nanoTime()
@@ -116,8 +134,9 @@ internal class OverlayState {
 }
 
 /**
- * Space, K, Left, Right, J, L, F and Esc, wherever the focus is in the overlay. Esc leaves full
- * screen first, then closes a panel, then leaves the player through [onBack].
+ * Space, K, Left, Right, J, L, F, N and Esc, wherever the focus is in the overlay. Esc (and the
+ * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
+ * [onNext], when there is one.
  */
 internal fun handlePlayerShortcut(
     event: KeyEvent,
@@ -125,6 +144,7 @@ internal fun handlePlayerShortcut(
     pair: WindowPair,
     state: OverlayState,
     onBack: () -> Unit,
+    onNext: (() -> Unit)?,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
     when (event.key) {
@@ -144,12 +164,12 @@ internal fun handlePlayerShortcut(
             pair.toggleFullScreen()
         }
 
+        Key.N -> {
+            onNext?.invoke() ?: return false
+        }
+
         Key.Escape -> {
-            when {
-                pair.isFullScreen -> pair.exitFullScreen()
-                state.panel != null -> state.panel = null
-                else -> onBack()
-            }
+            playerBack(pair, state, onBack)
         }
 
         // Compose moves the focus; the controls only need to be showing.
@@ -166,6 +186,42 @@ internal fun handlePlayerShortcut(
     return true
 }
 
+/** One step back: out of full screen, then out of an open panel, then out of the player. */
+internal fun playerBack(
+    pair: WindowPair,
+    state: OverlayState,
+    onBack: () -> Unit,
+) {
+    when {
+        // Dismissing the HDR prompt changes nothing, as when it times out.
+        state.isAskingHdr -> state.isAskingHdr = false
+
+        pair.isFullScreen -> pair.exitFullScreen()
+
+        state.panel != null -> state.panel = null
+
+        else -> onBack()
+    }
+    state.poke()
+}
+
+/** Media keys and buttons (see [MediaKeys]): play and pause, next episode, back to the start. */
+internal fun handleMediaCommand(
+    command: MediaCommand,
+    player: VideoPlayer,
+    state: OverlayState,
+    onNext: (() -> Unit)?,
+) {
+    when (command) {
+        MediaCommand.PlayPause -> player.togglePause()
+        MediaCommand.Play -> player.play()
+        MediaCommand.Pause, MediaCommand.Stop -> player.pause()
+        MediaCommand.Next -> onNext?.invoke()
+        MediaCommand.Previous -> player.seekTo(0.0)
+    }
+    state.poke()
+}
+
 /**
  * The player's interface, drawn over the video in a transparent window: back, title and minimize
  * at the top, play/pause and ±10 s in the center, the timeline and the tracks, episodes, change
@@ -178,6 +234,7 @@ internal fun PlayerOverlay(
     viewModel: PlayerViewModel<VideoPlayer>,
     pair: WindowPair,
     state: OverlayState,
+    display: DisplayChoices?,
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
     onOpenEpisode: (Episode) -> Unit,
@@ -196,6 +253,14 @@ internal fun PlayerOverlay(
     )
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
+
+    // Once the first frame tells what the video is: match the display, or ask about HDR. Playback
+    // goes on meanwhile, so the question never delays the start.
+    val video = playback.video
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(video, display) {
+        if (video != null && display != null) state.isAskingHdr = display.onVideo(video)
+    }
 
     LaunchedEffect(state.lastActivity, playback.isPaused, state.scrubSeconds, state.panel) {
         if (!playback.isPaused && state.scrubSeconds == null && state.panel == null) {
@@ -265,8 +330,27 @@ internal fun PlayerOverlay(
             )
         }
 
-        if (failed) {
+        if (playback.error == PlayerError.PlayerUnavailable) {
+            PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (failed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (state.isAskingHdr && display != null) {
+            val answer = { choice: HdrChoice ->
+                state.isAskingHdr = false
+                scope.launch { display.answer(choice) }
+                Unit
+            }
+            HdrPrompt(
+                onTurnOn = { answer(HdrChoice.OnlyThisTitle) },
+                onAlways = { answer(HdrChoice.Always) },
+                onTimeout = { answer(HdrChoice.NotNow) },
+                // Above the timeline and buttons while they show, in the corner otherwise.
+                modifier =
+                    Modifier.align(Alignment.BottomEnd).padding(
+                        end = SnSpacing.space8,
+                        bottom = if (state.areControlsVisible) CONTROLS_CLEARANCE else SnSpacing.space8,
+                    ),
+            )
         } else if (playback.isLoaded) {
             PlaybackPrompts(
                 state = playback,
@@ -305,6 +389,58 @@ internal fun PlayerOverlay(
         if (!pair.isFullScreen) {
             for (edge in ResizeEdge.entries) ResizeHandle(edge, pair)
         }
+    }
+}
+
+/**
+ * The player's link to [DisplaySession]: runs its blocking calls on the display queue, finds the
+ * monitor the [video] window is on and tells mpv, through [onHdr], whether it may output HDR.
+ */
+internal class DisplayChoices(
+    private val session: DisplaySession,
+    private val video: java.awt.Window,
+    private val onHdr: (Boolean) -> Unit,
+) {
+    /** See [DisplaySession.onVideo]; true when the user should be asked about HDR. */
+    suspend fun onVideo(format: VideoFormat): Boolean {
+        val target =
+            DesktopDisplays.control?.let { control ->
+                withContext(DesktopDisplays.dispatcher) { control.displayOf(video) }
+            }
+        val ask = withContext(DesktopDisplays.dispatcher) { session.onVideo(format, target) }
+        applyHdr()
+        return ask
+    }
+
+    suspend fun answer(choice: HdrChoice) {
+        withContext(DesktopDisplays.dispatcher) { session.answer(choice) }
+        applyHdr()
+    }
+
+    private fun applyHdr() = onHdr(session.isHdrActive)
+}
+
+/** libmpv could not be loaded: say so, and offer the way back (another source would not help). */
+@Composable
+private fun PlayerUnavailable(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.widthIn(max = 480.dp).padding(SnSpacing.space6),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+    ) {
+        BasicText(
+            stringResource(Res.string.player_unavailable_title),
+            modifier = Modifier.semantics { heading() },
+            style = SnTypography.headingMd.copy(color = SnColors.fg, textAlign = TextAlign.Center),
+        )
+        BasicText(
+            stringResource(Res.string.player_unavailable_body),
+            style = SnTypography.body.copy(color = SnColors.fgSecondary, textAlign = TextAlign.Center),
+        )
+        SnButton(stringResource(Res.string.nav_back), onBack)
     }
 }
 
@@ -374,7 +510,10 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
         ) {
-            SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onBack)
+            val backLabel = stringResource(Res.string.nav_back)
+            WithTooltip(backLabel, stringResource(Res.string.player_key_escape), TooltipSide.Below) {
+                SnIconButton(SnIcons.ChevronLeft, backLabel, onBack)
+            }
             Column(Modifier.weight(1f)) {
                 BasicText(
                     selection.details.item.name,
@@ -395,7 +534,10 @@ private fun Controls(
                     BasicText(label, style = SnTypography.body.copy(color = SnColors.fgSecondary), maxLines = 1)
                 }
             }
-            SnIconButton(SnIcons.Minus, stringResource(Res.string.player_minimize), onMinimize)
+            val minimizeLabel = stringResource(Res.string.player_minimize)
+            WithTooltip(minimizeLabel, side = TooltipSide.Below) {
+                SnIconButton(SnIcons.Minus, minimizeLabel, onMinimize)
+            }
         }
 
         Row(
@@ -403,28 +545,32 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space10),
         ) {
-            SnIconButton(SnIcons.Back10, stringResource(Res.string.player_back10), { onSeekBy(-SEEK_STEP_SECONDS) })
-            val playLabel = stringResource(if (playback.isPaused) Res.string.player_play else Res.string.player_pause)
-            Box(
-                Modifier
-                    .size(72.dp)
-                    .semantics { contentDescription = playLabel }
-                    .snClickable(RoundedCornerShape(SnRadius.radiusFull), onClick = onTogglePause)
-                    .background(SnColors.overlayLight, RoundedCornerShape(SnRadius.radiusFull)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    if (playback.isPaused) SnIcons.Play else SnIcons.Pause,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp),
-                    colorFilter = ColorFilter.tint(SnColors.fg),
-                )
+            val back10Label = stringResource(Res.string.player_back10)
+            WithTooltip(back10Label, stringResource(Res.string.player_key_left)) {
+                SnIconButton(SnIcons.Back10, back10Label, { onSeekBy(-SEEK_STEP_SECONDS) })
             }
-            SnIconButton(
-                SnIcons.Forward10,
-                stringResource(Res.string.player_forward10),
-                { onSeekBy(SEEK_STEP_SECONDS) },
-            )
+            val playLabel = stringResource(if (playback.isPaused) Res.string.player_play else Res.string.player_pause)
+            WithTooltip(playLabel, stringResource(Res.string.player_key_space)) {
+                Box(
+                    Modifier
+                        .size(72.dp)
+                        .semantics { contentDescription = playLabel }
+                        .snClickable(RoundedCornerShape(SnRadius.radiusFull), onClick = onTogglePause)
+                        .background(SnColors.overlayLight, RoundedCornerShape(SnRadius.radiusFull)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        if (playback.isPaused) SnIcons.Play else SnIcons.Pause,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        colorFilter = ColorFilter.tint(SnColors.fg),
+                    )
+                }
+            }
+            val forward10Label = stringResource(Res.string.player_forward10)
+            WithTooltip(forward10Label, stringResource(Res.string.player_key_right)) {
+                SnIconButton(SnIcons.Forward10, forward10Label, { onSeekBy(SEEK_STEP_SECONDS) })
+            }
         }
 
         Column(
@@ -454,21 +600,32 @@ private fun Controls(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
-                SnIconButton(SnIcons.Subtitles, stringResource(Res.string.player_tracks), onTracks)
+                val tracksLabel = stringResource(Res.string.player_tracks)
+                WithTooltip(tracksLabel) { SnIconButton(SnIcons.Subtitles, tracksLabel, onTracks) }
                 if (selection.details.episodes.isNotEmpty()) {
-                    SnIconButton(SnIcons.Episodes, stringResource(Res.string.player_episodes), onEpisodes)
+                    val episodesLabel = stringResource(Res.string.player_episodes)
+                    WithTooltip(episodesLabel) { SnIconButton(SnIcons.Episodes, episodesLabel, onEpisodes) }
                 }
-                SnIconButton(SnIcons.Layers, stringResource(Res.string.player_change_source), onChangeSource)
+                val sourceLabel = stringResource(Res.string.player_change_source)
+                WithTooltip(sourceLabel) { SnIconButton(SnIcons.Layers, sourceLabel, onChangeSource) }
                 Box(Modifier.weight(1f))
-                if (hasNext) SnIconButton(SnIcons.Next, stringResource(Res.string.player_next), onNext)
-                SnIconButton(
-                    icon = if (isFullScreen) SnIcons.ExitFullScreen else SnIcons.FullScreen,
-                    label =
-                        stringResource(
-                            if (isFullScreen) Res.string.player_exit_full_screen else Res.string.player_full_screen,
-                        ),
-                    onClick = onToggleFullScreen,
-                )
+                if (hasNext) {
+                    val nextLabel = stringResource(Res.string.player_next)
+                    WithTooltip(nextLabel, stringResource(Res.string.player_key_next)) {
+                        SnIconButton(SnIcons.Next, nextLabel, onNext)
+                    }
+                }
+                val fullScreenLabel =
+                    stringResource(
+                        if (isFullScreen) Res.string.player_exit_full_screen else Res.string.player_full_screen,
+                    )
+                WithTooltip(fullScreenLabel, stringResource(Res.string.player_key_full_screen)) {
+                    SnIconButton(
+                        icon = if (isFullScreen) SnIcons.ExitFullScreen else SnIcons.FullScreen,
+                        label = fullScreenLabel,
+                        onClick = onToggleFullScreen,
+                    )
+                }
             }
         }
     }

@@ -25,6 +25,8 @@ class DesktopHost(
     val icons: List<Image>,
     /** The Mozilla CA store mpv uses to verify HTTPS servers, or null when it is not bundled. */
     val caBundle: File?,
+    /** The folder of native libraries bundled with the app (libmpv on Windows), or null. */
+    val nativeLibraries: File? = null,
     /** mpv's detailed logs, which include the addresses it opens. */
     val verboseLogs: Boolean = false,
 ) {

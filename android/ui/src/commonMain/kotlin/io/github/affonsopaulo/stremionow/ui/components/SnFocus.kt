@@ -37,8 +37,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -164,26 +166,41 @@ fun Modifier.dpadExits(): Modifier {
  * Scrolls a list only as far as needed to show the focused element. Compose's default on TV
  * keeps focus at a fixed height instead, which would push a page's header, such as the home
  * hero's title, off screen as soon as anything inside it takes focus.
+ *
+ * A vertical list that runs under the app header passes the header's height as [topInset],
+ * so a focused element is scrolled clear of the header rather than just onto the screen. The
+ * inset applies to every list inside [content] alike, so rows nested in such a list go in a
+ * plain [SnMinimalScroll] of their own.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SnMinimalScroll(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoView, content = content)
+fun SnMinimalScroll(
+    topInset: Dp = 0.dp,
+    content: @Composable () -> Unit,
+) {
+    val inset = with(LocalDensity.current) { topInset.toPx() }
+    val spec = remember(inset) { MinimalBringIntoView(inset) }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
+/** Brings an element into view with the least scrolling, below the first [start] pixels. */
 @OptIn(ExperimentalFoundationApi::class)
-private object MinimalBringIntoView : BringIntoViewSpec {
+private class MinimalBringIntoView(
+    private val start: Float,
+) : BringIntoViewSpec {
     override fun calculateScrollDistance(
         offset: Float,
         size: Float,
         containerSize: Float,
     ): Float {
-        val end = offset + size
+        val top = offset - start
+        val end = top + size
+        val visible = containerSize - start
         return when {
-            offset >= 0 && end <= containerSize -> 0f
-            offset < 0 && end > containerSize -> 0f
-            abs(offset) < abs(end - containerSize) -> offset
-            else -> end - containerSize
+            top >= 0 && end <= visible -> 0f
+            top < 0 && end > visible -> 0f
+            abs(top) < abs(end - visible) -> top
+            else -> end - visible
         }
     }
 }

@@ -5,7 +5,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.awt.ComposeDialog
 import androidx.compose.ui.awt.SwingDialog
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -15,13 +17,16 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
+import io.github.affonsopaulo.stremionow.ui.desktop.MediaKeys
 import io.github.affonsopaulo.stremionow.ui.desktop.OverlayState
 import io.github.affonsopaulo.stremionow.ui.desktop.PlayerOverlay
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.VideoWindow
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowPair
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowedPlayer
+import io.github.affonsopaulo.stremionow.ui.desktop.handleMediaCommand
 import io.github.affonsopaulo.stremionow.ui.desktop.handlePlayerShortcut
+import io.github.affonsopaulo.stremionow.ui.desktop.playerBack
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import java.awt.Dialog
 import java.awt.event.WindowAdapter
@@ -81,24 +86,32 @@ actual fun PlayerScreen(
     // Also when the app closes with the player open: never leave the video window behind.
     DisposableEffect(player) { onDispose { player.video.hide() } }
 
+    val next = viewModel.selection.nextEpisode
+    val playNext: (() -> Unit)? = next?.let { episode -> { leave.to { onOpenEpisode(episode) } } }
+    val currentPlayNext by rememberUpdatedState(playNext)
     val input = remember { DesktopInput() }
     SwingDialog(
         create = { overlay },
         dispose = ComposeDialog::dispose,
         onPreviewKeyEvent = { event ->
             input.onPreviewKeyEvent(event)
-            handlePlayerShortcut(event, player, pair, state, onBack = leave::back)
+            handlePlayerShortcut(event, player, pair, state, onBack = leave::back, onNext = currentPlayNext)
         },
     ) {
         DisposableEffect(pair) {
             pair.attach()
+            val mediaKeys =
+                MediaKeys.install(overlay) { command -> handleMediaCommand(command, player, state, currentPlayNext) }
             // Hand the foreground to the player before the app's window steps aside: hiding the
             // active window first lets the system activate whatever comes next, often another app.
             player.video.frame.toFront()
             host.stepAside()
-            onDispose(pair::close)
+            onDispose {
+                mediaKeys.close()
+                pair.close()
+            }
         }
-        ProvideDesktopInput(input) {
+        ProvideDesktopInput(input, onBack = { playerBack(pair, state, leave::back) }) {
             PlayerOverlay(
                 viewModel = viewModel,
                 pair = pair,

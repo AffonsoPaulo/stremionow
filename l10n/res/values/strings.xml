@@ -185,6 +185,16 @@
   <!-- Desktop player: shown instead of the video when libmpv, the library that plays video, is missing. -->
   <string name="player_unavailable_title">Video can\'t play</string>
   <string name="player_unavailable_body">StremioNow couldn\'t load its video player (libmpv). Reinstall the app and try again.</string>
+  <!-- Desktop player: key names shown next to a button's name in its tooltip, as a keyboard shortcut hint. -->
+  <string name="player_key_space">Space</string>
+  <string name="player_key_escape">Esc</string>
+  <!-- The left and right arrow keys. -->
+  <string name="player_key_left">←</string>
+  <string name="player_key_right">→</string>
+  <!-- The letter printed on the key that toggles full screen (F); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_full_screen">F</string>
+  <!-- The letter printed on the key that plays the next episode (N); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_next">N</string>
   <string name="player_error_title">Couldn\'t play this source</string>
   <string name="player_error_body">It may be offline, or in a format this device can\'t play.</string>
   <string name="player_choose_other">Choose another source</string>

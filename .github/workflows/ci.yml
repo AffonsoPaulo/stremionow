@@ -58,6 +58,7 @@ jobs:
               - 'design/**'
               - 'l10n/**'
               - '.github/workflows/ci.yml'
+              - '.github/scripts/**'
 
   core-lint:
     name: Core lint
@@ -142,17 +143,23 @@ jobs:
           compression-level: 0
 
   desktop:
-    name: Desktop
+    name: Desktop (${{ matrix.os }})
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
     defaults:
       run:
         shell: bash
     env:
       # The desktop builds the core for the host only, not the Android targets of rust-toolchain.toml.
       RUSTUP_TOOLCHAIN: stable
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -166,7 +173,20 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: core
+          # The cache key also carries the runner's OS and architecture.
           shared-key: desktop
+      # libmpv comes from the system on Linux and macOS (Windows downloads a pinned build), plus
+      # what the checks need: a Secret Service (GNOME Keyring over a private D-Bus session) and
+      # a virtual display with Mesa's software OpenGL for the smoke test.
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            libmpv2 libsecret-1-0 gnome-keyring dbus xvfb xauth libgl1-mesa-dri libegl-mesa0
+      - name: Install libmpv
+        if: runner.os == 'macOS'
+        run: brew install mpv
       # The desktop build includes android/, whose projects need the SDK platform to configure;
       # the NDK and cargo-ndk are not needed.
       - name: Install Android SDK platform
@@ -174,7 +194,8 @@ jobs:
           catalog=android/gradle/libs.versions.toml
           read_version() { sed -n "s/^$1 = \"\(.*\)\"/\1/p" "$catalog"; }
           platform="platforms;android-$(read_version compileSdk).$(read_version compileSdkMinor)"
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ "$RUNNER_OS" = Windows ]; then sdkmanager="$sdkmanager.bat"; fi
           # `yes` is killed by SIGPIPE once sdkmanager exits; keep that from failing the step under pipefail.
           (yes || true) | "$sdkmanager" --licenses > /dev/null
           if ! (yes || true) | "$sdkmanager" --install "$platform" > "$RUNNER_TEMP/sdkmanager.log" 2>&1; then
@@ -184,12 +205,39 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      # Formatting does not depend on the OS: check it once.
       - name: Check Kotlin formatting
+        if: runner.os == 'Linux'
         working-directory: desktop
         run: ./gradlew spotlessCheck --console=plain
       - name: Compile the desktop app and run the shared modules' desktop tests
         working-directory: desktop
         run: ./gradlew :app:compileKotlin :android:ui:desktopTest :android:player:desktopTest --console=plain
+      # Round trips through the real store: DPAPI, the login keychain or the Secret Service. They
+      # skip where the store is missing; here they must run, and --rerun keeps Gradle from
+      # reusing a result from the step above or the build cache.
+      - name: Secret store tests
+        working-directory: desktop
+        env:
+          STREMIONOW_REQUIRE_SECRET_STORE: "true"
+        run: |
+          run=()
+          if [ "$RUNNER_OS" = Linux ]; then run=(../.github/scripts/with-secret-service.sh); fi
+          "${run[@]}" ./gradlew :android:ui:desktopTest --tests '*.SecretBackendTest' --rerun --console=plain
+      # Starts the app, composes its window, plays a generated test pattern through libmpv in the
+      # player's window and exits (see SmokeTest.kt).
+      - name: Smoke test
+        working-directory: desktop
+        run: |
+          run=()
+          if [ "$RUNNER_OS" = Linux ]; then run=(xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"); fi
+          "${run[@]}" ./gradlew :app:run --args=--smoke-test --console=plain
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: desktop-test-reports-${{ matrix.os }}
+          path: android/*/build/reports/tests/desktopTest/
+          retention-days: 7
 
   license-headers:
     name: License headers

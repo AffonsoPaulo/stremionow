@@ -140,10 +140,17 @@ fn lan_addresses() -> Vec<Ipv4Addr> {
     addresses
 }
 
-/// Whether a client may connect from `peer`. A port forward or a misconfigured router could
-/// expose the listener to the internet; connections from public addresses are dropped.
-pub(crate) fn is_allowed_peer(peer: IpAddr) -> bool {
-    crate::proxy::is_private_ip(peer)
+/// Whether a client may connect from `peer`: a home-network address, as the server's own.
+/// A port forward or a misconfigured router could expose the listener to the internet;
+/// connections from public, carrier-grade NAT (also Tailscale) and link-local addresses are
+/// dropped. A router that forwards the port and also rewrites the source to its own address
+/// would hide the internet behind a home address; pairing and tokens still stand then.
+pub(crate) fn is_allowed_peer(policy: BindPolicy, peer: IpAddr) -> bool {
+    match policy {
+        BindPolicy::Lan => is_lan_ip(peer),
+        #[cfg(any(test, feature = "dev-loopback"))]
+        BindPolicy::Loopback => peer.is_loopback(),
+    }
 }
 
 /// Parses what a user typed or discovery found as a server address: `192.168.1.20`,
@@ -278,11 +285,23 @@ mod tests {
     }
 
     #[test]
-    fn only_private_peers_may_connect() {
-        assert!(is_allowed_peer(ip("192.168.1.30")));
-        assert!(is_allowed_peer(ip("127.0.0.1")));
-        assert!(!is_allowed_peer(ip("8.8.8.8")));
-        assert!(!is_allowed_peer(ip("2606:4700::1")));
+    fn only_home_network_peers_may_connect() {
+        let lan = BindPolicy::Lan;
+        assert!(is_allowed_peer(lan, ip("192.168.1.30")));
+        assert!(is_allowed_peer(lan, ip("10.0.0.4")));
+        for refused in [
+            "127.0.0.1",
+            "8.8.8.8",
+            "100.64.0.7",
+            "100.101.102.103",
+            "169.254.3.4",
+            "fd00::1",
+            "2606:4700::1",
+        ] {
+            assert!(!is_allowed_peer(lan, ip(refused)), "{refused}");
+        }
+        assert!(is_allowed_peer(BindPolicy::Loopback, ip("127.0.0.1")));
+        assert!(!is_allowed_peer(BindPolicy::Loopback, ip("192.168.1.30")));
     }
 
     #[test]

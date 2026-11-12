@@ -42,6 +42,13 @@ compose.desktop {
         providers.gradleProperty("stremionow.packaging.javaHome").orNull?.let { javaHome = it }
         // JNA calls native code; JDK 25 warns (and later releases refuse) without this.
         jvmArgs += listOf("--enable-native-access=ALL-UNNAMED", "-Dstremionow.version=$appVersion")
+        // macOS: the player reads the NSWindow behind its video window from AWT's peer, which has
+        // no public accessor (see android/player/.../macos/MacWindows.kt). Builds run on the OS
+        // they package for, so this is decided here.
+        if (System.getProperty("os.name").lowercase().contains("mac")) {
+            jvmArgs +=
+                listOf("java.awt", "sun.lwawt", "sun.lwawt.macosx").map { "--add-opens=java.desktop/$it=ALL-UNNAMED" }
+        }
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb)
@@ -65,6 +72,13 @@ compose.desktop {
             }
         }
     }
+}
+
+// Development runs only: on macOS and Linux, where libmpv is not bundled yet, let the player fall
+// back to the system's libmpv (Homebrew, libmpv2). Installed apps never get this property and use
+// only the bundled one (see MpvLibrary and docs/adr/0005-desktop-ui.md).
+tasks.withType<JavaExec>().configureEach {
+    if (name == "run") systemProperty("stremionow.libmpv.allowSystem", "true")
 }
 
 // Compose registers its packaging tasks after this script runs, hence the lazy lookup by name.

@@ -69,7 +69,8 @@ class DesktopNativesPlugin : Plugin<Project> {
             into("common") { from(downloadCaBundle) }
             into(hostResourceFolder()) {
                 from(buildRustCore)
-                // Other systems load libmpv from their package manager (see docs/poc/phase-5.md).
+                // Only Windows bundles libmpv so far. Development runs on macOS and Linux fall back
+                // to the system's (MpvLibrary); packaging it is still to do (docs/adr/0005-desktop-ui.md).
                 if (isWindows) from(extractLibmpv)
             }
         }

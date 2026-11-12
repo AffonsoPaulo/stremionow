@@ -1,25 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.player
 
+import com.sun.jna.Native
+import com.sun.jna.Platform
+import io.github.affonsopaulo.stremionow.player.macos.MacGlVideo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONArray
+import java.awt.Canvas
 import java.io.File
 import java.util.Locale
+import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
 
 /**
  * A video player backed by libmpv that renders into a native window owned by the app.
  *
- * mpv creates its own child window inside the window given to [create] (an HWND on Windows, an
- * X11 window id on Linux) and draws there with its GPU output and hardware decoding; no frame
+ * mpv draws into the window given to [create] with its GPU output and hardware decoding; no frame
  * passes through the JVM. State changes arrive on mpv's event thread and are published through
  * [state]. Mirrors the Android `MpvPlayer`.
  */
 class MpvPlayer private constructor(
     private val mpv: Mpv,
+    private val macOutput: MacGlVideo?,
 ) : VideoPlayer {
     private val mutableState = MutableStateFlow(PlaybackState())
 
@@ -124,6 +129,12 @@ class MpvPlayer private constructor(
 
     override fun release() = release {}
 
+    /** Reads an mpv property as text, for diagnostics; null when unavailable or released. */
+    fun readProperty(name: String): String? = if (released) null else mpv.getProperty(name)
+
+    /** Frames drawn through the render API (macOS); 0 where mpv draws into its own window. */
+    val framesDrawn: Long get() = macOutput?.framesDrawn ?: 0
+
     /**
      * Stops playback and frees mpv, including the child window it draws in, then runs
      * [onReleased] on mpv's release thread. Destroying waits for mpv's threads, which can be
@@ -219,14 +230,25 @@ class MpvPlayer private constructor(
             )
 
         /**
-         * Creates a player that draws into the native window [windowHandle]. [caFile] is the CA
-         * store mpv uses to verify HTTPS servers.
+         * Creates a player that draws into [canvas], a heavyweight component that fills its window,
+         * which must be showing. Call it on the AWT event thread. libmpv is loaded from
+         * [libraryDirectory] or the system (see [MpvLibrary]); [caFile] is the CA store mpv uses to
+         * verify HTTPS servers.
+         *
+         * - Windows and X11: mpv creates its own child window inside the canvas (`--wid`) and draws
+         *   there with its GPU output (`gpu-next`).
+         * - macOS: mpv renders through its render API into a layer over the window's content (see
+         *   [MacGlVideo]); `--wid` is not supported there.
+         *
+         * @throws MpvUnavailableException when libmpv is missing or too old.
          */
         fun create(
-            windowHandle: Long,
+            canvas: Canvas,
+            libraryDirectory: File?,
             caFile: File?,
             options: PlayerOptions = PlayerOptions(),
         ): MpvPlayer {
+            val renderApi = Platform.isMac()
             val mpvOptions =
                 buildMap {
                     // Ignore user config files, scripts and key bindings: the app owns the UI and input.
@@ -243,9 +265,15 @@ class MpvPlayer private constructor(
                     put("keep-open", "yes")
 
                     // Render into the app's window, on the GPU, decoding in hardware when it is safe.
-                    put("wid", windowHandle.toString())
-                    put("force-window", "yes")
-                    put("vo", "gpu-next")
+                    if (renderApi) {
+                        // The render context must exist before the video output opens, so there is
+                        // no window until a file loads.
+                        put("vo", "libmpv")
+                    } else {
+                        put("wid", Native.getComponentID(canvas).toString())
+                        put("force-window", "yes")
+                        put("vo", "gpu-next")
+                    }
                     put("hwdec", "auto-safe")
 
                     put("tls-verify", "yes")
@@ -262,8 +290,41 @@ class MpvPlayer private constructor(
                         put("sid", "no")
                     }
                 }
-            val mpv = Mpv.create(mpvOptions, logLevel = if (options.verboseLogs) "v" else "warn")
-            return MpvPlayer(mpv)
+            val preferences =
+                buildMap {
+                    // Never change the display: no HDR or colorspace switch requested from the
+                    // system for the video (the default "auto" can turn on HDR output on Windows),
+                    // and no exclusive full screen, which can change the display mode. Older
+                    // libmpv builds without these options already behave this way.
+                    put("target-colorspace-hint", listOf("no"))
+                    if (Platform.isWindows()) put("d3d11-exclusive-fs", listOf("no"))
+                    // The window id is an X11 one: keep mpv off its Wayland backends, which would
+                    // open a window of their own on a Wayland session (AWT runs under XWayland).
+                    // Lists need mpv 0.38 or newer; older ones take a single context.
+                    if (!renderApi && !Platform.isWindows()) put("gpu-context", listOf("x11egl,x11vk", "x11egl"))
+                }
+            val mpv =
+                Mpv.create(
+                    library = MpvLibrary.locate(libraryDirectory),
+                    options = mpvOptions,
+                    preferences = preferences,
+                    logLevel = if (options.verboseLogs) "v" else "warn",
+                )
+            val macOutput =
+                if (renderApi) {
+                    try {
+                        MacGlVideo.attach(
+                            mpv,
+                            checkNotNull(SwingUtilities.getWindowAncestor(canvas)) { "The canvas has no window" },
+                        )
+                    } catch (failure: Throwable) {
+                        mpv.close()
+                        throw failure
+                    }
+                } else {
+                    null
+                }
+            return MpvPlayer(mpv, macOutput)
         }
 
         private fun formatSeconds(seconds: Double): String = String.format(Locale.ROOT, "%.3f", seconds)

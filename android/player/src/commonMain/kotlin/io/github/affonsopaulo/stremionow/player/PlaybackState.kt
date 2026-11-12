@@ -39,4 +39,7 @@ data class Track(
 enum class PlayerError {
     /** The file could not be opened or decoded. */
     LoadFailed,
+
+    /** The player itself could not start, for example because libmpv is missing (desktop). */
+    PlayerUnavailable,
 }

@@ -44,6 +44,8 @@ object SmokeTest {
                     host.nativeLibraries,
                     host.caBundle,
                     PlayerOptions(verboseLogs = host.verboseLogs),
+                    // CI machines have no GPU: Mesa's software OpenGL under Xvfb on Linux.
+                    allowSoftwareRendering = true,
                 )
             }
         val mpv = player.mpv

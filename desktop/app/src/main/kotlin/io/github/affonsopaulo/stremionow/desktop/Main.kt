@@ -48,7 +48,18 @@ private val BACKGROUND = Color(0x0A, 0x0B, 0x10)
 fun main(args: Array<String>) {
     val verbose = "--verbose" in args
     val smokeTest = "--smoke-test" in args
-    if (smokeTest) startWatchdog()
+    if (smokeTest) {
+        startWatchdog()
+        // Fail at once on an exception on the interface thread, rather than at the timeout.
+        Thread.setDefaultUncaughtExceptionHandler { thread, failure ->
+            if (!thread.name.startsWith("AWT-EventQueue")) {
+                System.err.println("[smoke-test] uncaught in ${thread.name}: ${failure.stackTraceToString()}")
+                return@setDefaultUncaughtExceptionHandler
+            }
+            System.err.println("[smoke-test] FAILED: uncaught in ${thread.name}: ${failure.stackTraceToString()}")
+            Runtime.getRuntime().halt(1)
+        }
+    }
     // First, so a failure to set up the native libraries is reported too; the core is reached
     // only once they are (docs/adr/0007-crash-reports.md).
     CrashReports.install(PlatformContext.INSTANCE, isTv = false, listenToCore = false)
@@ -86,7 +97,13 @@ fun main(args: Array<String>) {
                 LaunchedEffect(host) {
                     // After the first frame, so the window really composed.
                     withFrameNanos {}
-                    val passed = SmokeTest.run(host)
+                    val passed =
+                        try {
+                            SmokeTest.run(host)
+                        } catch (failure: Throwable) {
+                            System.err.println("[smoke-test] FAILED: ${failure.stackTraceToString()}")
+                            false
+                        }
                     println("[smoke-test] ${if (passed) "PASSED" else "FAILED"}")
                     exitProcess(if (passed) 0 else 1)
                 }

@@ -161,6 +161,38 @@ pub struct CatalogInfo {
     pub name: String,
     /// Genres the catalog can filter by, if any.
     pub genres: Vec<String>,
+    /// What the catalog holds, when the app knows it, to give it a clearer name.
+    pub role: CatalogRole,
+}
+
+/// What a well-known catalog holds. Only Cinemeta's are known; every other catalog is
+/// [`CatalogRole::Other`] and goes by the name its addon gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CatalogRole {
+    /// Popular now (Cinemeta's "Popular", `top`).
+    Trending,
+    /// Released this year (Cinemeta's "New", `year`, filtered by the current year).
+    NewReleases,
+    /// The best rated (Cinemeta's "Featured", `imdbRating`).
+    Featured,
+    Other,
+}
+
+/// Manifest id of Cinemeta, the default metadata addon.
+pub(crate) const CINEMETA_ID: &str = "com.linvo.cinemeta";
+
+impl CatalogRole {
+    fn of(addon: &InstalledAddon, catalog: &CatalogDescriptor) -> Self {
+        if addon.manifest.id != CINEMETA_ID {
+            return Self::Other;
+        }
+        match catalog.id.as_str() {
+            "top" => Self::Trending,
+            "year" => Self::NewReleases,
+            "imdbRating" => Self::Featured,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl CatalogInfo {
@@ -176,6 +208,7 @@ impl CatalogInfo {
                 .filter(|n| !n.trim().is_empty())
                 .unwrap_or_else(|| catalog.id.clone()),
             genres: catalog.extra_options("genre"),
+            role: CatalogRole::of(addon, catalog),
         }
     }
 }
@@ -399,6 +432,45 @@ mod tests {
         assert!(info.provides_metadata && !info.provides_title_metadata);
         assert!(!info.configurable && info.configure_url.is_none());
         assert!(!info.link_has_settings);
+    }
+
+    #[test]
+    fn knows_what_cinemeta_catalogs_hold() {
+        let manifest = |id: &str| {
+            serde_json::json!({
+                "id": id, "version": "1", "name": "X", "resources": ["catalog"],
+                "catalogs": [
+                    {"type": "movie", "id": "top", "name": "Popular"},
+                    {"type": "series", "id": "year", "name": "New"},
+                    {"type": "movie", "id": "imdbRating", "name": "Featured"},
+                    {"type": "series", "id": "last-videos"}
+                ]
+            })
+        };
+        let roles = |id: &str| {
+            let addon = addon("https://addon.example/manifest.json", manifest(id));
+            addon
+                .manifest
+                .catalogs
+                .iter()
+                .map(|c| CatalogInfo::new(&addon, c).role)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            roles(CINEMETA_ID),
+            [
+                CatalogRole::Trending,
+                CatalogRole::NewReleases,
+                CatalogRole::Featured,
+                CatalogRole::Other
+            ]
+        );
+        assert!(
+            roles("community.lookalike")
+                .iter()
+                .all(|role| *role == CatalogRole::Other),
+            "another addon's catalogs keep their own names"
+        );
     }
 
     #[test]

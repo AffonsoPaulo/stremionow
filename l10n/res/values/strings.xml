@@ -243,6 +243,28 @@
   <string name="action_resume">Resume</string>
   <string name="action_close">Close</string>
   <string name="home_continue_watching">Continue watching</string>
+  <!-- Home rows of the default catalogs (Cinemeta): what is popular now, the releases of the
+       current year and the best rated, for movies and for series. -->
+  <string name="home_trending_movies">Trending movies</string>
+  <string name="home_trending_series">Trending series</string>
+  <string name="home_new_movies">New releases in movies</string>
+  <string name="home_new_series">New releases in series</string>
+  <string name="home_featured_movies">Featured movies</string>
+  <string name="home_featured_series">Featured series</string>
+  <!-- Quiet label after a row title naming the addon the row comes from: %1$s is the addon,
+       such as "Cinemeta". -->
+  <string name="row_caption_by">by %1$s</string>
+  <!-- The same label when two rows share a name: %1$s is the type, such as "Series", and %2$s
+       the label above, such as "by Torrentio". -->
+  <string name="row_caption_kind_by">%1$s · %2$s</string>
+  <!-- Row of an addon catalog it calls only "top": %1$s is the addon, such as "YouTube". -->
+  <string name="row_popular_on">Popular on %1$s</string>
+  <!-- Row of an addon catalog it calls only "year" or "new": %1$s is the addon. -->
+  <string name="row_new_on">New on %1$s</string>
+  <!-- Short names of the default catalogs, in the filters of the Movies and Series pages. -->
+  <string name="catalog_trending">Trending</string>
+  <string name="catalog_new_releases">New releases</string>
+  <string name="catalog_featured">Featured</string>
   <string name="sources_searching">Looking for sources…</string>
   <!-- Marks the source the app recommends, at the top of the list. -->
   <string name="sources_best">Best match</string>

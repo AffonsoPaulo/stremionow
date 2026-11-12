@@ -152,7 +152,12 @@ fun ExploreScreen(
                 initialGenre ?: stringResource(if (kind == "series") Res.string.nav_series else Res.string.nav_movies),
             )
             if (state.catalogs.size > 1) {
-                SnChipRow(state.catalogs, state.catalog, { it?.name.orEmpty() }, { it?.let(viewModel::selectCatalog) })
+                SnChipRow(
+                    state.catalogs,
+                    state.catalog,
+                    { catalog -> catalog?.let { catalogShortName(it) }.orEmpty() },
+                    { it?.let(viewModel::selectCatalog) },
+                )
             }
             val genres = state.catalog?.genres.orEmpty()
             if (genres.isNotEmpty()) {

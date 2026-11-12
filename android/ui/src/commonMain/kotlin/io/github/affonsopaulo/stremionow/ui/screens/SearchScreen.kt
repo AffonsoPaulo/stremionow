@@ -290,7 +290,14 @@ private fun ResultRows(
         items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
             val type = kindLabel(row.catalog.kind)
             SnPosterSection(
-                title = if (row.catalog.kind in sharedKinds) "$type · ${row.catalog.name}" else type,
+                title = type,
+                // Several catalogs of one type: tell them apart by their addon.
+                caption =
+                    if (row.catalog.kind in sharedKinds) {
+                        stringResource(Res.string.row_caption_by, row.catalog.addonName)
+                    } else {
+                        null
+                    },
                 items = row.items,
                 onOpen = onOpenTitle,
                 action =

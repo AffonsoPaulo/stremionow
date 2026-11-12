@@ -201,16 +201,8 @@ private fun HomeContent(
                     rows,
                     key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" },
                 ) { row ->
-                    // Cinemeta names its movie and series catalogs alike ("Popular"); add the type then.
-                    val title =
-                        if (row.catalog.name in
-                            sharedNames
-                        ) {
-                            "${row.catalog.name} · ${kindLabel(row.catalog.kind)}"
-                        } else {
-                            row.catalog.name
-                        }
-                    SnMinimalScroll { CatalogRowSection(title, row, onOpenTitle) }
+                    val name = catalogRowName(row.catalog, sameNameElsewhere = row.catalog.name in sharedNames)
+                    SnMinimalScroll { CatalogRowSection(name, row, onOpenTitle) }
                 }
             }
         }
@@ -310,11 +302,11 @@ fun TitleLogo(
 
 @Composable
 private fun CatalogRowSection(
-    title: String,
+    name: RowName,
     row: CatalogRow,
     onOpenTitle: (MetaItem) -> Unit,
 ) {
-    SnPosterSection(title, row.items, onOpenTitle, subtitle = { it.cardSubtitle() })
+    SnPosterSection(name.title, row.items, onOpenTitle, subtitle = { it.cardSubtitle() }, caption = name.caption)
 }
 
 /** Titles in progress, with how far along each one is and the time left. */

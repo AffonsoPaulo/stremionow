@@ -46,6 +46,7 @@ import io.github.affonsopaulo.stremionow.core.OtherDevice
 import io.github.affonsopaulo.stremionow.core.OtherDeviceHealth
 import io.github.affonsopaulo.stremionow.core.PairedDeviceInfo
 import io.github.affonsopaulo.stremionow.core.PairingException
+import io.github.affonsopaulo.stremionow.core.ServePause
 import io.github.affonsopaulo.stremionow.core.ServeStatus
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
@@ -55,6 +56,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.DeviceKind
 import io.github.affonsopaulo.stremionow.ui.data.DevicePlatform
 import io.github.affonsopaulo.stremionow.ui.data.DeviceSharing
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -78,6 +80,9 @@ import kotlinx.coroutines.launch
 
 /** How often the server's state is read while the page is open: the code counts down. */
 private const val SERVE_REFRESH_MS = 1_000L
+
+/** Longest name for this device as a server, as the core keeps it. */
+private const val MAX_NAME_CHARS = 40
 
 /**
  * Stands in for an address when asking for local network access before discovery, which
@@ -110,12 +115,17 @@ data class DevicesState(
     val serveBusy: Boolean = false,
     val serve: ServeStatus? = null,
     val serveProblem: ServeProblem? = null,
+    /** The name other devices see, as saved; empty until serving is first turned on. */
+    val name: String = "",
+    val nameInput: String = "",
     val other: OtherDevice? = null,
     /** Null while being checked. */
     val health: OtherDeviceHealth? = null,
     val searching: Boolean = false,
     val searched: Boolean = false,
     val found: List<FoundDevice> = emptyList(),
+    /** The found device the address came from, whose other addresses pairing also tries. */
+    val chosen: FoundDevice? = null,
     val address: String = "",
     val code: String = "",
     val pairing: Boolean = false,
@@ -132,9 +142,16 @@ class DevicesViewModel(
 
     init {
         viewModelScope.launch {
-            val serveOn = runCatching { io { core.settings().serveToDevices } }.getOrDefault(false)
+            val settings = runCatching { io { core.settings() } }.getOrNull()
             mutableState.update {
-                it.copy(loaded = true, serveOn = serveOn, serve = core.serveStatus(), other = core.otherDevice())
+                it.copy(
+                    loaded = true,
+                    serveOn = settings?.serveToDevices ?: false,
+                    name = settings?.serveName.orEmpty(),
+                    nameInput = settings?.serveName.orEmpty(),
+                    serve = core.serveStatus(),
+                    other = core.otherDevice(),
+                )
             }
             checkOther()
         }
@@ -145,13 +162,21 @@ class DevicesViewModel(
         mutableState.update { it.copy(serve = core.serveStatus()) }
     }
 
-    fun setServing(on: Boolean) {
+    /**
+     * Turns serving on or off. Turning it on makes the current network the home network and
+     * announces [defaultName] unless the user chose a name before.
+     */
+    fun setServing(
+        on: Boolean,
+        defaultName: String,
+    ) {
         if (state.value.serveBusy) return
+        val name = state.value.name.ifBlank { defaultName }
         mutableState.update { it.copy(serveOn = on, serveBusy = true, serveProblem = null) }
         viewModelScope.launch {
             val problem =
                 if (on) {
-                    runCatching { DeviceSharing.startServing(app, core) }
+                    runCatching { DeviceSharing.startServing(app, core, name, turnedOn = true) }
                         .exceptionOrNull()
                         ?.let { error ->
                             logWarning("Could not serve to other devices", error)
@@ -162,9 +187,13 @@ class DevicesViewModel(
                     null
                 }
             val serving = on && problem == null
-            runCatching { io { core.updateSettings(core.settings().copy(serveToDevices = serving)) } }
+            runCatching {
+                io { core.updateSettings(core.settings().copy(serveToDevices = serving, serveName = name)) }
+            }
             mutableState.update {
                 it.copy(
+                    name = name,
+                    nameInput = name,
                     serveOn = serving,
                     serveBusy = false,
                     serveProblem = problem,
@@ -173,6 +202,38 @@ class DevicesViewModel(
                 )
             }
             if (!serving) checkOther()
+        }
+    }
+
+    fun setNameInput(name: String) {
+        mutableState.update { it.copy(nameInput = name.take(MAX_NAME_CHARS)) }
+    }
+
+    /** Saves the name other devices see and announces it, restarting the server if it runs. */
+    fun saveName() {
+        val name =
+            state.value.nameInput
+                .trim()
+                .ifBlank { return }
+        if (name == state.value.name || state.value.serveBusy) return
+        mutableState.update { it.copy(name = name, nameInput = name) }
+        viewModelScope.launch {
+            runCatching { io { core.updateSettings(core.settings().copy(serveName = name)) } }
+            if (state.value.serveOn) {
+                // Same identity, pairings and home network; only the name changes.
+                runCatching { DeviceSharing.startServing(app, core, name, turnedOn = false) }
+                    .onFailure { logWarning("Could not rename the server", it) }
+                refreshServe()
+            }
+        }
+    }
+
+    /** Serves on the network the device is on now, after the user confirmed it. */
+    fun serveHere() {
+        viewModelScope.launch {
+            runCatching { core.serveOnThisNetwork() }
+                .onSuccess { status -> mutableState.update { it.copy(serve = status) } }
+                .onFailure { logWarning("Could not serve on this network", it) }
         }
     }
 
@@ -207,14 +268,26 @@ class DevicesViewModel(
                     searched = true,
                     found = found,
                     // One answer is almost always the device the user means.
-                    address = if (it.address.isBlank() && found.size == 1) found.first().address else it.address,
+                    chosen = if (it.address.isBlank() && found.size == 1) found.first() else it.chosen,
+                    address =
+                        if (it.address.isBlank() && found.size == 1) {
+                            found
+                                .first()
+                                .addresses
+                                .firstOrNull()
+                                .orEmpty()
+                        } else {
+                            it.address
+                        },
                 )
             }
         }
     }
 
     fun choose(device: FoundDevice) {
-        mutableState.update { it.copy(address = device.address, pairProblem = null) }
+        mutableState.update {
+            it.copy(chosen = device, address = device.addresses.firstOrNull().orEmpty(), pairProblem = null)
+        }
     }
 
     fun setAddress(address: String) {
@@ -247,7 +320,14 @@ class DevicesViewModel(
         }
         mutableState.update { it.copy(pairing = true, pairProblem = null) }
         viewModelScope.launch {
-            val result = runCatching { DeviceSharing.pair(app, core, current.address, current.code) }
+            val typed = current.address.trim()
+            // A found device's other addresses are tried too, in case the first does not answer.
+            val addresses =
+                current.chosen
+                    ?.addresses
+                    ?.takeIf { it.firstOrNull() == typed }
+                    ?: listOf(typed)
+            val result = runCatching { DeviceSharing.pair(app, core, addresses, current.code) }
             mutableState.update {
                 it.copy(
                     pairing = false,
@@ -330,10 +410,11 @@ private fun ServeSection(
     state: DevicesState,
     viewModel: DevicesViewModel,
 ) {
+    val defaultName = defaultServeName()
     // Serving receives connections from the local network, which Android 17 gates.
     val requestLocalNetwork =
         rememberLocalNetworkAccess { granted ->
-            if (granted) viewModel.setServing(true) else viewModel.localNetworkDeniedForServing()
+            if (granted) viewModel.setServing(true, defaultName) else viewModel.localNetworkDeniedForServing()
         }
     SettingsSection(stringResource(Res.string.devices_section_serve)) {
         SettingsToggle(
@@ -341,7 +422,9 @@ private fun ServeSection(
             body = stringResource(Res.string.devices_serve_body),
             checked = state.serveOn,
             enabled = !state.serveBusy && state.other == null,
-            onToggle = { if (state.serveOn) viewModel.setServing(false) else requestLocalNetwork(ANY_LOCAL_ADDRESS) },
+            onToggle = {
+                if (state.serveOn) viewModel.setServing(false, defaultName) else requestLocalNetwork(ANY_LOCAL_ADDRESS)
+            },
         )
         if (state.other != null && !state.serveOn) {
             Caption(stringResource(Res.string.devices_serve_using_other))
@@ -365,12 +448,34 @@ private fun ServeSection(
             }
         }
         val serve = state.serve ?: return@SettingsSection
-        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
-            Detail(stringResource(Res.string.devices_serve_name), serve.deviceName)
-            Detail(
-                stringResource(Res.string.devices_serve_address),
-                serve.addresses.joinToString(", ").ifEmpty { stringResource(Res.string.devices_serve_no_network) },
+        SnTextField(
+            value = state.nameInput,
+            onValueChange = viewModel::setNameInput,
+            label = stringResource(Res.string.devices_name_label),
+            hint = defaultName,
+            onImeAction = viewModel::saveName,
+        )
+        if (state.nameInput.trim().let { it.isNotEmpty() && it != state.name }) {
+            SnButton(
+                stringResource(Res.string.devices_name_save),
+                onClick = viewModel::saveName,
+                style = SnButtonStyle.Tonal,
             )
+        }
+        when (serve.paused) {
+            ServePause.OTHER_NETWORK -> {
+                OtherNetworkNotice(onServeHere = viewModel::serveHere)
+                return@SettingsSection
+            }
+
+            ServePause.NO_NETWORK -> {
+                Caption(stringResource(Res.string.devices_paused_no_network), error = true)
+                return@SettingsSection
+            }
+
+            null -> {
+                Detail(stringResource(Res.string.devices_serve_address), serve.addresses.joinToString(", "))
+            }
         }
         val code = serve.pairingCode
         if (code != null) {
@@ -380,7 +485,11 @@ private fun ServeSection(
                 onNewCode = viewModel::newCode,
                 onCancel = viewModel::cancelCode,
             )
-        } else {
+        }
+        if (serve.pairingContested) {
+            Caption(stringResource(Res.string.devices_pair_contested), error = true)
+        }
+        if (code == null) {
             SnButton(
                 text = stringResource(Res.string.devices_pair_action),
                 onClick = viewModel::newCode,
@@ -398,6 +507,45 @@ private fun ServeSection(
             }
             serve.devices.forEach { device -> PairedDeviceRow(device, onRemove = { viewModel.remove(device) }) }
         }
+    }
+}
+
+/** The neutral name a server announces until the user chooses one: "StremioNow (TV)". */
+@Composable
+private fun defaultServeName(): String {
+    val context = LocalPlatformContext.current
+    val kind =
+        when (DevicePlatform.kind(context)) {
+            DeviceKind.Tv -> Res.string.devices_kind_tv
+            DeviceKind.Phone -> Res.string.devices_kind_phone
+            DeviceKind.Tablet -> Res.string.devices_kind_tablet
+            DeviceKind.Computer -> Res.string.devices_kind_computer
+        }
+    return stringResource(Res.string.devices_default_name, stringResource(kind))
+}
+
+/** Serving paused on a network other than the home one, with the way to serve here. */
+@Composable
+private fun OtherNetworkNotice(onServeHere: () -> Unit) {
+    var confirming by rememberSaveable { mutableStateOf(false) }
+    Caption(stringResource(Res.string.devices_paused_other_network), error = true)
+    SnButton(
+        text = stringResource(Res.string.devices_serve_here),
+        onClick = { confirming = true },
+        style = SnButtonStyle.Tonal,
+    )
+    if (confirming) {
+        SnDialog(
+            title = stringResource(Res.string.devices_serve_here_title),
+            body = stringResource(Res.string.devices_serve_here_body),
+            confirmText = stringResource(Res.string.devices_serve_here),
+            dismissText = stringResource(Res.string.action_cancel),
+            onConfirm = {
+                confirming = false
+                onServeHere()
+            },
+            onDismiss = { confirming = false },
+        )
     }
 }
 
@@ -633,7 +781,7 @@ private fun PairForm(
         state.found.forEach { device ->
             FoundDeviceRow(
                 device,
-                selected = device.address == state.address.trim(),
+                selected = device.addresses.firstOrNull() == state.address.trim(),
                 onClick = { viewModel.choose(device) },
             )
         }
@@ -707,7 +855,12 @@ private fun FoundDeviceRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            BasicText(device.address, style = SnTypography.caption.copy(color = SnColors.fgMuted))
+            BasicText(
+                device.addresses.joinToString(", "),
+                style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         if (selected) {
             Image(SnIcons.Check, null, Modifier.size(20.dp), colorFilter = ColorFilter.tint(SnColors.accent))

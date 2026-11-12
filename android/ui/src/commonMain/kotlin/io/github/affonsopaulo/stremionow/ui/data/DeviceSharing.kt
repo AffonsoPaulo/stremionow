@@ -25,25 +25,34 @@ object DeviceSharing {
         val app = DevicePlatform.applicationContext(context)
         DevicePlatform.watchNetwork(app, core)
         AppGraph.scope.launch {
-            val serving = runCatching { core.settings().serveToDevices }.getOrDefault(false)
-            if (serving) {
-                runCatching { startServing(app, core) }.onFailure { logWarning("Could not serve to other devices", it) }
+            val settings = runCatching { core.settings() }.getOrNull() ?: return@launch
+            if (settings.serveToDevices) {
+                // Resumes only on the network where the user turned serving on.
+                runCatching { startServing(app, core, settings.serveName.ifBlank { FALLBACK_NAME }, turnedOn = false) }
+                    .onFailure { logWarning("Could not serve to other devices", it) }
             } else {
                 useSavedDevice(app, core)
             }
         }
     }
 
-    /** Starts serving under this device's name, with the identity kept from earlier runs. */
+    /**
+     * Starts serving as [name], with the identity kept from earlier runs. [turnedOn] is true
+     * when the user just turned serving on, which makes the current network the home network;
+     * otherwise serving resumes only on the home network.
+     */
     suspend fun startServing(
         context: PlatformContext,
         core: StremioCore,
+        name: String,
+        turnedOn: Boolean,
     ): ServeStatus {
         val app = DevicePlatform.applicationContext(context)
         val status =
             core.startServing(
-                DevicePlatform.deviceName(app),
+                name,
                 SecureStore.load(app, SecureStore.SERVE_STATE),
+                turnedOn,
                 Sink(app, SecureStore.SERVE_STATE),
             )
         DevicePlatform.setServing(app, true)
@@ -61,16 +70,19 @@ object DeviceSharing {
         useSavedDevice(app, core)
     }
 
-    /** Pairs with the device at [address] and uses it for torrents from now on. */
+    /**
+     * Pairs with the device at one of [addresses] (tried in turn) and uses it for torrents
+     * from now on. The server lists this device under its own name, which is not announced.
+     */
     suspend fun pair(
         context: PlatformContext,
         core: StremioCore,
-        address: String,
+        addresses: List<String>,
         code: String,
     ): OtherDevice {
         val app = DevicePlatform.applicationContext(context)
         return core.pairWithDevice(
-            address,
+            addresses,
             code,
             DevicePlatform.deviceName(app),
             Sink(app, SecureStore.OTHER_DEVICE),
@@ -98,6 +110,9 @@ object DeviceSharing {
             }
     }
 
+    /** Used when serving resumes at launch and no name was ever saved. */
+    private const val FALLBACK_NAME = "StremioNow"
+
     /** Keeps what the core hands over in the secret store. Holds the application context only. */
     private class Sink(
         private val context: PlatformContext,
@@ -112,12 +127,20 @@ internal expect object DevicePlatform {
     /** The context that outlives screens: the core keeps it for its whole life. */
     fun applicationContext(context: PlatformContext): PlatformContext
 
-    /** The name other devices see: the one the user gave this device, or its model. */
+    /**
+     * This device's own name (the one the user gave it, or its model), shown on a server's
+     * list of paired devices. Never announced on the network.
+     */
     fun deviceName(context: PlatformContext): String
+
+    /** What kind of device this is, for the neutral name announced when serving. */
+    fun kind(context: PlatformContext): DeviceKind
 
     /**
      * Keeps the core told whether the device is on mobile data, so "Only on Wi-Fi" applies to
-     * torrents started for other devices and to taking over from a server that went away.
+     * torrents started for other devices and to taking over from a server that went away; and,
+     * where the core cannot see the gateway itself (Android), what identifies the network, so
+     * serving stays on the home network.
      */
     fun watchNetwork(
         context: PlatformContext,
@@ -136,3 +159,6 @@ internal expect object DevicePlatform {
         block: suspend () -> T,
     ): T
 }
+
+/** Kinds of device, for the neutral name a server announces by default. */
+enum class DeviceKind { Tv, Phone, Tablet, Computer }

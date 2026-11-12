@@ -85,7 +85,7 @@ class MpvPlayer private constructor(
 
     /** Moves the playback position by [seconds], backwards when negative. */
     override fun seekBy(seconds: Double) {
-        if (!released) mpv.command(arrayOf("seek", formatSeconds(seconds), "relative"))
+        if (!released) mpv.command(arrayOf("seek", formatSeconds(seconds), "relative+exact"))
     }
 
     override fun seekTo(seconds: Double) {

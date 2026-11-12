@@ -123,7 +123,7 @@ class MpvPlayer private constructor(
     override fun togglePause() = setPaused(!state.value.isPaused)
 
     override fun seekBy(seconds: Double) {
-        if (!released) mpv.command("seek", formatSeconds(seconds), "relative")
+        if (!released) mpv.command("seek", formatSeconds(seconds), "relative+exact")
     }
 
     override fun seekTo(seconds: Double) {

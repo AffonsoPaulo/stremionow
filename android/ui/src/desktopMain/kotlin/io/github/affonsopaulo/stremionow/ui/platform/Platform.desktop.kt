@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.platform
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import kotlinx.coroutines.launch
 import java.awt.Desktop
 import java.net.URI
@@ -41,3 +42,5 @@ internal actual fun openExternalLink(
 
 /** Set by the desktop app's launcher (`-Dstremionow.version=...`). */
 internal actual fun appVersion(context: PlatformContext): String? = System.getProperty("stremionow.version")
+
+internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSupported

@@ -148,6 +148,10 @@
   <string name="player_key_right">→</string>
   <string name="player_key_full_screen">F</string>
   <string name="player_key_next">N</string>
+  <string name="player_hdr_title">Ativar HDR?</string>
+  <string name="player_hdr_body">A tela pode escurecer por um instante.</string>
+  <string name="player_hdr_turn_on">Ativar</string>
+  <string name="player_hdr_always">Sempre</string>
   <string name="player_error_title">Não foi possível reproduzir esta fonte</string>
   <string name="player_error_body">Ela pode estar fora do ar ou num formato que este aparelho não reproduz.</string>
   <string name="player_choose_other">Escolher outra fonte</string>
@@ -159,6 +163,19 @@
   <string name="settings_cache">Tamanho do cache</string>
   <string name="settings_cache_body">Espaço que os torrents podem ocupar neste aparelho, para que títulos assistidos de novo comecem mais rápido.</string>
   <string name="settings_gigabytes">%1$d GB</string>
+  <string name="settings_display">Tela</string>
+  <string name="settings_hdr">HDR</string>
+  <string name="settings_hdr_body">Ativa o HDR enquanto um vídeo em HDR toca, em telas compatíveis, e desativa quando ele termina.</string>
+  <string name="settings_switch_ask">Perguntar</string>
+  <string name="settings_switch_always">Sempre</string>
+  <string name="settings_switch_never">Nunca</string>
+  <plurals name="settings_hdr_titles">
+    <item quantity="one">HDR ativado para %1$d título</item>
+    <item quantity="other">HDR ativado para %1$d títulos</item>
+  </plurals>
+  <string name="settings_hdr_forget">Esquecer</string>
+  <string name="settings_refresh">Ajustar a taxa de atualização ao vídeo</string>
+  <string name="settings_refresh_body">Deixa filmes em 24 fps mais fluidos em telas de 60 Hz. A tela pode ficar preta por um segundo na troca.</string>
 
   <string name="player_preparing">Preparando a fonte</string>
   <string name="torrent_finding_peers">Procurando pares…</string>

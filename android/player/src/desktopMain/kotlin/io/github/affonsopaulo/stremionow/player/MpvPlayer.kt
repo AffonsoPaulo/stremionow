@@ -37,6 +37,9 @@ class MpvPlayer private constructor(
     /** Whether the video format of the current file was logged; it is known after the first frame. */
     @Volatile private var videoInfoLogged = false
 
+    /** Frame rate the container declares for the current file, when it does. */
+    @Volatile private var containerFps: Double? = null
+
     /** External subtitles requested before the current file finished loading. */
     private val pendingSubtitles = mutableListOf<Array<String>>()
 
@@ -69,10 +72,13 @@ class MpvPlayer private constructor(
         mpv.observeString("chapter-list") { json ->
             mutableState.update { it.copy(chapters = json?.let(Chapters::parse).orEmpty()) }
         }
+        mpv.observeDouble("container-fps") { value -> containerFps = value }
         mpv.observeString("video-params/gamma") { value ->
             if (value != null && !videoInfoLogged) {
                 videoInfoLogged = true
                 logProperties("Video", VIDEO_INFO_PROPERTIES)
+                val fps = containerFps ?: mpv.getProperty("estimated-vf-fps")?.toDoubleOrNull()
+                mutableState.update { it.copy(video = VideoFormat.from(value, fps)) }
             }
         }
     }
@@ -88,6 +94,7 @@ class MpvPlayer private constructor(
         }
         videoInfoLogged = false
         mutableState.value = PlaybackState()
+        containerFps = null
         mpv.setProperty("start", if (startSeconds > 0) formatSeconds(startSeconds) else "none")
         mpv.command("loadfile", url, "replace")
     }
@@ -128,6 +135,14 @@ class MpvPlayer private constructor(
     override fun selectSubtitle(trackId: Int?) = selectTrack("sid", trackId)
 
     override fun release() = release {}
+
+    /**
+     * Lets mpv tell the display the video's colorspace (`target-colorspace-hint`), which makes it
+     * output HDR. Only turn it on while the display is in HDR mode by the user's choice.
+     */
+    fun setColorspaceHint(enabled: Boolean) {
+        if (!released) mpv.setProperty("target-colorspace-hint", if (enabled) "yes" else "no")
+    }
 
     /** Reads an mpv property as text, for diagnostics; null when unavailable or released. */
     fun readProperty(name: String): String? = if (released) null else mpv.getProperty(name)

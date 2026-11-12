@@ -20,7 +20,37 @@ data class PlaybackState(
     val hardwareDecoder: String? = null,
     /** Chapters of the current file, in order; empty when it has none. */
     val chapters: List<Chapter> = emptyList(),
+    /** What the video is, once its first frame is decoded; null until then or without video. */
+    val video: VideoFormat? = null,
 )
+
+/**
+ * What the display should know about the video: whether it is HDR and its frame rate. Built from
+ * mpv's properties with [from], which only accepts values it recognizes, so a stream cannot make
+ * the app act on garbage.
+ */
+data class VideoFormat(
+    /** The transfer function is an HDR one (PQ, as in HDR10 and Dolby Vision, or HLG). */
+    val isHdr: Boolean,
+    /** Frames per second, or null when unknown or outside [MIN_FPS]..[MAX_FPS]. */
+    val framesPerSecond: Double?,
+) {
+    companion object {
+        const val MIN_FPS = 10.0
+        const val MAX_FPS = 240.0
+        private val HDR_TRANSFERS = setOf("pq", "hlg")
+
+        /** From mpv's `video-params/gamma` and `container-fps` (or `estimated-vf-fps`). */
+        fun from(
+            gamma: String?,
+            framesPerSecond: Double?,
+        ): VideoFormat =
+            VideoFormat(
+                isHdr = gamma?.trim()?.lowercase() in HDR_TRANSFERS,
+                framesPerSecond = framesPerSecond?.takeIf { it.isFinite() && it in MIN_FPS..MAX_FPS },
+            )
+    }
+}
 
 /** An audio, subtitle or video track of the current file. */
 data class Track(

@@ -502,15 +502,33 @@ private fun InfoTab(
     onOpenGenre: (String) -> Unit,
     onSearchPerson: (String) -> Unit,
 ) {
-    Column(
-        Modifier.padding(horizontal = SnLayout.gutter).widthIn(max = 880.dp),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
-    ) {
+    val overview: @Composable () -> Unit = {
         details.item.description?.let { InfoSection(stringResource(Res.string.details_overview)) { InfoText(it) } }
+    }
+    val facts: @Composable () -> Unit = {
         details.runtime?.let { InfoSection(stringResource(Res.string.details_runtime)) { InfoText(it) } }
         ChipSection(stringResource(Res.string.details_genres), details.item.genres, onOpenGenre)
         ChipSection(stringResource(Res.string.details_cast), details.cast.take(12), onSearchPerson)
         ChipSection(stringResource(Res.string.details_directors), details.directors, onSearchPerson)
+    }
+    if (SnLayout.formFactor == FormFactor.Phone) {
+        Column(
+            Modifier.padding(horizontal = SnLayout.gutter),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
+        ) {
+            overview()
+            facts()
+        }
+    } else {
+        // Wide screens: the synopsis keeps a readable line length on the left and the facts
+        // fill the rest, so the page uses its width instead of leaving half of it empty.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = SnLayout.gutter),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+        ) {
+            Column(Modifier.weight(3f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space6)) { overview() }
+            Column(Modifier.weight(2f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space6)) { facts() }
+        }
     }
 }
 

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -156,7 +155,7 @@ fun AddonsScreen() {
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {
         item(key = "intro") {
-            Column(Modifier.widthIn(max = 1000.dp), verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
                 SnPageTitle(stringResource(Res.string.nav_addons))
                 BasicText(
                     stringResource(Res.string.addons_intro),
@@ -280,7 +279,6 @@ private fun AddonRow(
     // own row, so nothing is squeezed on a phone and the order still reads well on a TV.
     Column(
         Modifier
-            .widthIn(max = 1000.dp)
             .fillMaxWidth()
             .background(SnColors.surface, shape)
             .border(1.dp, SnColors.border, shape)

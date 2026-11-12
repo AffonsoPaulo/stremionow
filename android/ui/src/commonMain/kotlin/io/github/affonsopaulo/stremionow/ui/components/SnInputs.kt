@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -61,7 +60,6 @@ fun SnSearchField(
         modifier =
             modifier
                 .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space2)
-                .widthIn(max = 880.dp)
                 .fillMaxWidth()
                 .height(64.dp)
                 .background(SnColors.surfaceInput, shape)

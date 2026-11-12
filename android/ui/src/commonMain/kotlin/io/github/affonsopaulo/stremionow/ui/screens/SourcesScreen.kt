@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -220,9 +220,11 @@ fun SourcesScreen(
             }
 
             else -> {
-                LazyColumn(
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(SnLayout.listCellMin),
                     contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
                     verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
                 ) {
                     itemsIndexed(state.sources, key = {
                         index,
@@ -249,7 +251,7 @@ private fun Header(
     state: SourcesState,
 ) {
     Column(
-        Modifier.padding(horizontal = SnLayout.gutter).widthIn(max = 880.dp),
+        Modifier.padding(horizontal = SnLayout.gutter),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
     ) {
         val episode = selection.episode
@@ -306,7 +308,6 @@ private fun SourceRow(
     Column(
         modifier =
             modifier
-                .widthIn(max = 880.dp)
                 .fillMaxWidth()
                 .snClickable(shape, onClick = onClick)
                 .background(if (best) SnColors.accentSurface else SnColors.surface, shape)

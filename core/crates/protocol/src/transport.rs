@@ -13,9 +13,10 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~')
     .remove(b':');
 
-/// A path segment at least this long, with a digit or a capital in it, is taken for a key or
-/// encoded settings: keys, UUIDs and base64 mix them, while real addon paths (`stremio/v1`,
-/// `publicdomainmovies.now.sh`) are short or lowercase words.
+/// A path segment at least this long is taken for a key or encoded settings when it has a
+/// digit or a capital in it (keys, UUIDs and base64 mix them) or is one unbroken run of
+/// letters; real addon paths (`stremio/v1`, `publicdomainmovies.now.sh`,
+/// `a-long-addon-name`) are short, or words split by '-', '_' or '.'.
 const SETTINGS_SEGMENT_LEN: usize = 16;
 
 /// Why an addon URL was rejected.
@@ -97,9 +98,12 @@ impl AddonUrl {
             .filter(|segment| !segment.is_empty())
             .any(|segment| {
                 (segment.len() >= SETTINGS_SEGMENT_LEN
-                    && segment
+                    && (segment
                         .bytes()
-                        .any(|b| b.is_ascii_digit() || b.is_ascii_uppercase()))
+                        .any(|b| b.is_ascii_digit() || b.is_ascii_uppercase())
+                        // A long run of lowercase letters with no word or host separators
+                        // reads as a key too; names and hosts are split by '-', '_' or '.'.
+                        || !segment.bytes().any(|b| matches!(b, b'.' | b'-' | b'_'))))
                     || !segment
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
@@ -280,6 +284,7 @@ mod tests {
             "https://user:secret@addon.example/manifest.json",
             "https://addon.example/a,b/manifest.json",
             "https://addon.example/3f2a9c0d1e4b5a6f7c8d/manifest.json",
+            "https://addon.example/qwhzkvmrtplxsndfgjc/manifest.json",
         ];
         for link in personal {
             assert!(

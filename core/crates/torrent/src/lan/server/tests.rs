@@ -543,7 +543,6 @@ async fn settle(harness: &Harness, paused: Option<PauseReason>) {
 async fn serving_follows_the_network_where_it_was_turned_on() {
     let harness = Harness::start_with(None, Some("home"), true).await;
     assert_eq!(harness.lan.status().paused, None);
-    let address = harness.address();
     let remote = harness.pair("TV").await;
 
     // Another network: nothing listens, and the state says why.
@@ -551,7 +550,8 @@ async fn serving_follows_the_network_where_it_was_turned_on() {
     settle(&harness, Some(PauseReason::OtherNetwork)).await;
     assert!(harness.lan.status().addresses.is_empty());
     assert_eq!(remote.check().await, RemoteHealth::Unreachable);
-    assert!(TcpStream::connect(&address).await.is_err());
+    // No raw connect check here: tests run in parallel, and on Windows another test's server
+    // can be given the freed port at once. The pinned client above is what must fail.
 
     // Back home, it serves again on its own.
     harness.lan.set_network_hint(Some("home".to_owned()));

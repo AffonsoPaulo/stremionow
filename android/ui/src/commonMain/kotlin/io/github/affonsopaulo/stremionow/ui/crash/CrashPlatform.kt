@@ -47,29 +47,6 @@ internal expect fun processExitsSince(
     since: Long,
 ): List<ProcessExit>
 
-/** Puts [text] on the clipboard; [label] names it where the system shows clips. */
-internal expect fun copyToClipboard(
-    context: PlatformContext,
-    label: String,
-    text: String,
-)
-
-/** Whether [shareText] can show the system's share sheet here. */
-internal expect fun canShareText(context: PlatformContext): Boolean
-
-/** Opens the system's share sheet with [text]; false when it cannot. */
-internal expect fun shareText(
-    context: PlatformContext,
-    subject: String,
-    text: String,
-): Boolean
-
-/** Opens [url], an HTTPS link, in the browser; false when nothing can open it. */
-internal expect fun openWebPage(
-    context: PlatformContext,
-    url: String,
-): Boolean
-
 /** Blocks the interface thread long enough for Android to report the app as not responding. */
 internal expect fun freezeForTest()
 

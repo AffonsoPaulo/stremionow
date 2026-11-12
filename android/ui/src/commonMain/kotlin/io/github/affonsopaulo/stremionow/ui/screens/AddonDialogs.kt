@@ -78,6 +78,7 @@ internal fun AddLinkDialog(
             replaces = preview.replaces,
             installing = link.installing,
             failed = link.installFailed,
+            changed = link.changed,
             onConfirm = onConfirm,
             onDismiss = onDismiss,
             onBack = onEdit,
@@ -156,6 +157,7 @@ internal fun InstallConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     onBack: () -> Unit = onDismiss,
+    changed: Boolean = false,
 ) {
     SnDialogFrame(title = stringResource(Res.string.addons_install_title, addon.name), onDismiss = onBack) {
         val cancelFocus = remember { FocusRequester() }
@@ -182,6 +184,12 @@ internal fun InstallConfirmDialog(
                     )
                 }
             }
+        }
+        if (changed) {
+            BasicText(
+                stringResource(Res.string.addons_install_changed),
+                style = SnTypography.body.copy(color = SnColors.warning),
+            )
         }
         providesText(addon)?.let {
             BasicText(

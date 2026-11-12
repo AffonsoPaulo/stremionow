@@ -29,6 +29,7 @@ class AddonWarningsTest {
         configurationRequired = false,
         configureUrl = null,
         linkHasSettings = false,
+        fingerprint = "",
     )
 
     @Test

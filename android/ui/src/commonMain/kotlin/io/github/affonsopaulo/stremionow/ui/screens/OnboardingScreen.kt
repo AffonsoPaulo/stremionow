@@ -136,7 +136,13 @@ class OnboardingViewModel(
         mutableState.update { it.copy(busy = true, debridFailed = false) }
         viewModelScope.launch {
             val url = "https://torrentio.strem.fun/${service.torrentioKey}=$key/manifest.json"
-            val ok = runCatching { core.installAddon(url) }.isSuccess
+            val ok =
+                runCatching {
+                    // The app builds this address itself; installing what it previewed keeps to
+                    // the core's rule that only a confirmed manifest is installed.
+                    val preview = core.previewAddon(url)
+                    core.installAddon(url, preview.addon.fingerprint)
+                }.isSuccess
             mutableState.update { it.copy(busy = false, debridFailed = !ok) }
             if (ok) onDone()
         }

@@ -91,6 +91,8 @@ data class LinkFlow(
     val preview: AddonPreview? = null,
     val installing: Boolean = false,
     val installFailed: Boolean = false,
+    /** The addon no longer matched what the user confirmed, so it is shown again as it is now. */
+    val changed: Boolean = false,
 )
 
 /** State of the addons screen. */
@@ -157,14 +159,19 @@ class AddonsViewModel(
         if (url in state.value.installing) return
         mutableState.update { it.copy(installing = it.installing + url, installFailed = it.installFailed - url) }
         viewModelScope.launch {
+            // The core installs it only if it still does what the list said; otherwise it is
+            // shown again, as it is now, for the user to confirm.
             val result =
-                runCatching { core.installAddon(url) }
+                runCatching { core.installAddon(url, addon.fingerprint) }
                     .onFailure { logWarning("Could not install an addon from Discover", it) }
+            val changed = result.exceptionOrNull() is CoreException.AddonChanged
+            val fresh = if (changed) runCatching { core.previewAddon(url) }.getOrNull() else null
             refreshNow()
             mutableState.update {
                 it.copy(
                     installing = it.installing - url,
-                    installFailed = if (result.isFailure) it.installFailed + url else it.installFailed,
+                    installFailed = if (result.isFailure && fresh == null) it.installFailed + url else it.installFailed,
+                    link = if (fresh != null) LinkFlow(url = url, preview = fresh, changed = true) else it.link,
                 )
             }
         }
@@ -180,7 +187,8 @@ class AddonsViewModel(
         }
 
     /** Back from the confirmation to the link. */
-    fun editLink() = mutableState.update { it.copy(link = it.link?.copy(preview = null, installFailed = false)) }
+    fun editLink() =
+        mutableState.update { it.copy(link = it.link?.copy(preview = null, installFailed = false, changed = false)) }
 
     fun localNetworkDenied() =
         mutableState.update { it.copy(link = it.link?.copy(error = LinkError.LocalNetworkDenied)) }
@@ -221,15 +229,32 @@ class AddonsViewModel(
         if (link.installing) return
         mutableState.update { it.copy(link = it.link?.copy(installing = true, installFailed = false)) }
         viewModelScope.launch {
+            val url = preview.addon.manifestUrl
+            // Installs exactly the manifest the user saw; should it be gone and the addon have
+            // changed since, the new one is shown for another confirmation instead.
             val result =
-                runCatching { core.installAddon(preview.addon.manifestUrl) }
+                runCatching { core.installAddon(url, preview.addon.fingerprint) }
                     .onFailure { logWarning("Could not install an addon", it) }
+            val fresh =
+                if (result.exceptionOrNull() is CoreException.AddonChanged) {
+                    runCatching { core.previewAddon(url) }.getOrNull()
+                } else {
+                    null
+                }
             refreshNow()
             mutableState.update { state ->
-                if (result.isSuccess) {
-                    state.copy(link = null, section = AddonsSection.Installed, type = null, query = "")
-                } else {
-                    state.copy(link = state.link?.copy(installing = false, installFailed = true))
+                when {
+                    result.isSuccess -> {
+                        state.copy(link = null, section = AddonsSection.Installed, type = null, query = "")
+                    }
+
+                    fresh != null -> {
+                        state.copy(link = state.link?.copy(installing = false, preview = fresh, changed = true))
+                    }
+
+                    else -> {
+                        state.copy(link = state.link?.copy(installing = false, installFailed = true))
+                    }
                 }
             }
         }

@@ -136,6 +136,7 @@
   <string name="addons_add_continue">Continuar</string>
   <string name="addons_checking">Verificando…</string>
   <string name="addons_install_title">Instalar %1$s?</string>
+  <string name="addons_install_changed">Este addon mudou desde que você o viu. Confira o que ele oferece agora antes de instalar.</string>
   <string name="addons_install_privacy">Addons podem ver quais títulos você navega e assiste. Instale só addons em que você confia.</string>
   <string name="addons_install_needs_setup">Ele precisa ser configurado na página de configuração antes de funcionar.</string>
   <string name="addons_install_replaces">Ele substitui o %1$s que você já tem, no mesmo lugar da lista.</string>

@@ -4,6 +4,8 @@
 
 mod catalog;
 mod client;
+mod fingerprint;
 
 pub use catalog::{AddonList, DISCOVER_SOURCE, DiscoverableAddon, discoverable};
 pub use client::{AddonClient, AddonError, InstalledAddon};
+pub use fingerprint::manifest_fingerprint;

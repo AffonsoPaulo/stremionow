@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Plain data types shared with the app interfaces.
 
-use stremionow_addons::{AddonError, InstalledAddon};
+use stremionow_addons::{AddonError, InstalledAddon, manifest_fingerprint};
 use stremionow_library::StoreError;
 use stremionow_protocol::{CatalogDescriptor, MetaDetail, MetaPreview, Video};
 
@@ -20,6 +20,9 @@ pub enum CoreError {
     /// The local database failed.
     #[error("storage error: {reason}")]
     Storage { reason: String },
+    /// The addon no longer matches what the user confirmed; nothing was installed.
+    #[error("the addon changed since it was confirmed")]
+    AddonChanged,
     /// A source could not be prepared for playback (no peers, no video file, engine error).
     #[error("playback error: {reason}")]
     Playback { reason: String },
@@ -209,6 +212,9 @@ pub struct AddonInfo {
     /// The manifest URL seems to hold the user's settings, possibly a private key, so it
     /// should not be shared without a warning.
     pub link_has_settings: bool,
+    /// What the user agrees to when confirming an install: a hash of what the manifest lets
+    /// the addon do (see `manifest_fingerprint`). Pass it back to install exactly that.
+    pub fingerprint: String,
 }
 
 /// Longest name kept, in characters; addons are loosely written and names show in one line.
@@ -263,6 +269,7 @@ impl AddonInfo {
             configuration_required: hints.configuration_required,
             configure_url: configurable.then(|| addon.url.configure_url()),
             link_has_settings: addon.url.carries_settings(),
+            fingerprint: manifest_fingerprint(manifest),
         }
     }
 }

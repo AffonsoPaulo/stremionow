@@ -2969,6 +2969,7 @@ dependencies = [
  "futures",
  "log",
  "reqwest",
+ "ring",
  "rustls",
  "serde",
  "serde_json",

@@ -183,6 +183,8 @@
   <string name="addons_checking">Checking…</string>
   <!-- Confirmation before installing. %1$s is the addon name. -->
   <string name="addons_install_title">Install %1$s?</string>
+  <!-- Shown when an addon changed between the moment the user looked at it and the install. -->
+  <string name="addons_install_changed">This addon changed since you looked at it. Check what it provides now before installing it.</string>
   <string name="addons_install_privacy">Addons can see which titles you browse and watch. Install only addons you trust.</string>
   <string name="addons_install_needs_setup">It needs to be set up on its configuration page before it works.</string>
   <!-- %1$s is the name of the installed addon that the new link replaces. -->

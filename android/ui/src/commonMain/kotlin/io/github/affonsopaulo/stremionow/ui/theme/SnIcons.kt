@@ -84,6 +84,15 @@ object SnIcons {
     val User = stroke("user", "M12 3a4 4 0 1 0 0 8a4 4 0 1 0 0 -8z", "M19 21v-2a4 4 0 0 0 -4 -4H9a4 4 0 0 0 -4 4v2")
     val Bookmark = stroke("bookmark", "M19 21l-7 -4l-7 4V5a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2z")
     val Minus = stroke("minus", "M5 12h14")
+    val Share =
+        stroke(
+            "share",
+            "M18 2a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
+            "M6 9a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
+            "M18 16a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
+            "M8.59 13.51l6.83 3.98",
+            "M15.41 6.51l-6.82 3.98",
+        )
     val FullScreen =
         stroke(
             "full-screen",

@@ -33,6 +33,7 @@ tokio-rustls.workspace = true
 rcgen.workspace = true
 ring.workspace = true
 spake2.workspace = true
+mdns-sd.workspace = true
 if-addrs.workspace = true
 
 [features]

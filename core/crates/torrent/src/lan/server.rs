@@ -29,6 +29,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
 use super::clients::ServerState;
+use super::discovery::Announcement;
 use super::net::{self, BindPolicy};
 use super::pairing::{self, Pairing, Refusal};
 use super::tls::Fingerprint;
@@ -139,6 +140,7 @@ struct Inner {
     listeners: Mutex<BTreeMap<Ipv4Addr, CancellationToken>>,
     connections: Arc<Semaphore>,
     per_peer: Arc<Mutex<HashMap<IpAddr, usize>>>,
+    announcement: Mutex<Option<Announcement>>,
     shutdown: CancellationToken,
 }
 
@@ -219,6 +221,7 @@ impl LanServer {
             listeners: Mutex::default(),
             connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             per_peer: Arc::default(),
+            announcement: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
         if fresh {
@@ -227,6 +230,10 @@ impl LanServer {
         inner.listen(first, first_listener);
         for &address in &addresses[1..] {
             inner.bind(address).await;
+        }
+        if policy.announces() {
+            *lock(&inner.announcement) =
+                Announcement::start(&inner.device_name, &inner.server_id, port);
         }
         tokio::spawn(Arc::clone(&inner).watch_interfaces());
         tokio::spawn(Arc::clone(&inner).expire_leases());
@@ -304,10 +311,11 @@ impl LanServer {
         self.inner.fingerprint
     }
 
-    /// Stops listening and stops the torrents that only other
+    /// Stops listening, withdraws the announcement and stops the torrents that only other
     /// devices were using.
     pub async fn stop(&self) {
         self.inner.shutdown.cancel();
+        lock(&self.inner.announcement).take();
         let held: Vec<(String, InfoHash)> = self
             .inner
             .locked()
@@ -328,6 +336,7 @@ impl LanServer {
 impl Drop for LanServer {
     fn drop(&mut self) {
         self.inner.shutdown.cancel();
+        lock(&self.inner.announcement).take();
         // Torrents still held by devices are stopped, if a runtime is around to do it.
         let held: Vec<(String, InfoHash)> = self
             .inner

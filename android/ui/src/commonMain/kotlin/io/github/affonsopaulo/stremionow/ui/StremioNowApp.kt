@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -28,8 +30,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.navigation.NamedNavArgument
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -43,15 +47,19 @@ import androidx.navigation.navArgument
 import androidx.savedstate.read
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.MetaDetails
+import io.github.affonsopaulo.stremionow.ui.components.AppShortcuts
 import io.github.affonsopaulo.stremionow.ui.components.HeaderOverlay
+import io.github.affonsopaulo.stremionow.ui.components.HeaderSearchState
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderOverlay
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderPage
 import io.github.affonsopaulo.stremionow.ui.components.SnHeader
+import io.github.affonsopaulo.stremionow.ui.components.SnHeaderSearch
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
+import io.github.affonsopaulo.stremionow.ui.components.rememberHeaderSearchState
 import io.github.affonsopaulo.stremionow.ui.crash.crashReportPrompt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
@@ -134,6 +142,7 @@ fun StremioNowApp(
     isTv: Boolean,
     link: TitleLink.Target? = null,
     onLinkOpened: () -> Unit = {},
+    shortcuts: AppShortcuts? = null,
 ) {
     CompositionLocalProvider(LocalIsTv provides isTv) {
         // Asks about the last crash report; in a crash loop, before the app starts.
@@ -185,9 +194,23 @@ fun StremioNowApp(
         val chrome = !immersive && !setup
         val headerOverlay = remember { HeaderOverlay() }
         val headerOpacity = rememberHeaderOpacity(headerOverlay, entry)
+        // Large pointer screens search from a field in the header; TV keeps search in its
+        // navigation row and phones in the tab bar.
+        val headerSearch = rememberHeaderSearchState()
+        val searchInHeader = SnLayout.formFactor == FormFactor.Large
+        val searchActions =
+            rememberHeaderSearchActions(headerSearch, entry?.destination?.route, sectionRoute, openTab)
+        val appShortcuts = shortcuts ?: remember { AppShortcuts() }
+        val shortcutsOn = searchInHeader && chrome
+        DisposableEffect(appShortcuts, shortcutsOn) {
+            appShortcuts.onSearch = if (shortcutsOn) headerSearch::focus else null
+            onDispose { appShortcuts.onSearch = null }
+        }
         Column(
             Modifier
                 .fillMaxSize()
+                // Without a host feeding it the window's keys, it sees them from inside the app.
+                .then(if (shortcuts == null) Modifier.onPreviewKeyEvent(appShortcuts::onPreviewKeyEvent) else Modifier)
                 .background(SnColors.bg)
                 // The header pads itself for the status bar, so title art can run under both;
                 // on phones the tab bar does the same for the navigation bar.
@@ -217,6 +240,20 @@ fun StremioNowApp(
                                 navController,
                                 openTab,
                                 opacity = { headerOpacity.value },
+                                search =
+                                    if (searchInHeader) {
+                                        {
+                                            SnHeaderSearch(
+                                                state = headerSearch,
+                                                expanded = searchActions.expanded,
+                                                onQueryChange = searchActions::type,
+                                                onClear = searchActions::dismiss,
+                                                onDismiss = searchActions::dismiss,
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
                             )
                         }
                     } else {
@@ -224,7 +261,13 @@ fun StremioNowApp(
                     },
             ) {
                 CompositionLocalProvider(LocalHeaderOverlay provides headerOverlay) {
-                    AppNavHost(navController, startRoute, searchFocusRequests, openTab)
+                    AppNavHost(
+                        navController,
+                        startRoute,
+                        searchFocusRequests,
+                        openTab,
+                        headerQuery = if (searchInHeader) headerSearch.query else null,
+                    )
                 }
             }
             // A link from outside (the TV home screen) opens its title over whatever is showing.
@@ -253,6 +296,7 @@ private fun AppHeader(
     navController: NavHostController,
     openTab: (TopDestination) -> Unit,
     opacity: () -> Float,
+    search: (@Composable () -> Unit)?,
 ) {
     Box(
         Modifier
@@ -277,6 +321,7 @@ private fun AppHeader(
                     } else {
                         null
                     },
+                search = search,
             )
         }
     }
@@ -289,6 +334,7 @@ private fun AppNavHost(
     startRoute: String,
     searchFocusRequests: Int,
     openTab: (TopDestination) -> Unit,
+    headerQuery: String?,
 ) {
     NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
         val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
@@ -306,7 +352,11 @@ private fun AppNavHost(
         page(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
         page(Routes.MOVIES) { ExploreScreen("movie", onOpenTitle = { openTitle(it.kind, it.id) }) }
         page(Routes.SEARCH) {
-            SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }, focusRequests = searchFocusRequests)
+            SearchScreen(
+                onOpenTitle = { openTitle(it.kind, it.id) },
+                focusRequests = searchFocusRequests,
+                headerQuery = headerQuery,
+            )
         }
         page(
             Routes.GENRE,
@@ -323,9 +373,12 @@ private fun AppNavHost(
             )
         }
         page(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+            val name = it.arguments?.read { getStringOrNull("name") }.orEmpty()
             SearchScreen(
-                initialQuery = it.arguments?.read { getStringOrNull("name") }.orEmpty(),
+                initialQuery = name,
                 onOpenTitle = { item -> openTitle(item.kind, item.id) },
+                // Where the header has the search field, the page names whose titles these are.
+                title = if (headerQuery != null) name else null,
             )
         }
         page(Routes.LIBRARY) {
@@ -535,4 +588,65 @@ private fun NavHostController.openTop(
         launchSingleTop = true
         restoreState = true
     }
+}
+
+/**
+ * What the header's search field does in the app: typing opens the Search page and drives its
+ * query; clearing it or pressing Esc closes it and returns to the tab the user searched from.
+ * On the Search page the field stays open, showing its query.
+ */
+@Stable
+private class HeaderSearchActions(
+    private val state: HeaderSearchState,
+) {
+    var route: String? by mutableStateOf(null)
+    var sectionRoute: String = Routes.HOME
+    var openTab: (TopDestination) -> Unit = {}
+
+    /** The tab the user searched from, to return to when the search closes. */
+    private var returnTo: String? = null
+
+    val expanded: Boolean get() = state.open || route == Routes.SEARCH
+
+    fun type(text: String) {
+        state.query = text
+        if (text.isBlank() || route == Routes.SEARCH) return
+        if (sectionRoute != Routes.SEARCH) returnTo = sectionRoute
+        openTab(TopDestination.Search)
+    }
+
+    fun dismiss() {
+        state.query = ""
+        state.open = false
+        if (route == Routes.SEARCH) openTab(TopRoutes[returnTo ?: Routes.HOME] ?: TopDestination.Home)
+    }
+
+    /** Opening the field away from earlier results starts a new search. */
+    fun onOpen() {
+        if (sectionRoute != Routes.SEARCH) state.query = ""
+    }
+}
+
+@Composable
+private fun rememberHeaderSearchActions(
+    state: HeaderSearchState,
+    route: String?,
+    sectionRoute: String,
+    openTab: (TopDestination) -> Unit,
+): HeaderSearchActions {
+    val actions = remember(state) { HeaderSearchActions(state) }
+    actions.route = route
+    actions.sectionRoute = sectionRoute
+    actions.openTab = openTab
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(state.open) { if (state.open) actions.onOpen() }
+    // Leaving the field away from the Search page closes it; so does opening a result.
+    LaunchedEffect(state.focused, route) {
+        if (!state.focused && route != Routes.SEARCH) state.open = false
+    }
+    // Closed from its own keys (Esc, clear), it lets go of the keyboard focus as well.
+    LaunchedEffect(state.open, route) {
+        if (!state.open && route != Routes.SEARCH && state.focused) focusManager.clearFocus()
+    }
+    return actions
 }

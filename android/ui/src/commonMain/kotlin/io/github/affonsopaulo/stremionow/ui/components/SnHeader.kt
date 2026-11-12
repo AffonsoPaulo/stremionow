@@ -48,16 +48,25 @@ enum class TopDestination { Search, Home, Series, Movies, MyList, Profile }
 private val HeaderPills =
     listOf(TopDestination.Home, TopDestination.Series, TopDestination.Movies, TopDestination.MyList)
 
-/** Main navigation on large screens and TV: wordmark, search, destination pills and the avatar. */
+/**
+ * Main navigation on large screens and TV: wordmark, destination pills centred on the window
+ * and the avatar.
+ *
+ * Where a pointer and keyboard drive the screen, [search] is given: the search field that
+ * sits just before the avatar and expands in place. On TV it is null, and search is the first
+ * stop of the navigation row, where the remote reaches it like any other destination.
+ */
 @Composable
 fun SnHeader(
     current: TopDestination?,
     onNavigate: (TopDestination) -> Unit,
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
+    search: (@Composable () -> Unit)? = null,
 ) {
     val pill = RoundedCornerShape(SnRadius.radiusFull)
     val spacing = SnSpacing.space4
+    val trailingGap = SnSpacing.space3
     Layout(
         modifier =
             modifier
@@ -80,13 +89,15 @@ fun SnHeader(
                 horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SnIconButton(
-                    icon = SnIcons.Search,
-                    label = stringResource(Res.string.nav_search),
-                    onClick = { onNavigate(TopDestination.Search) },
-                    tint = if (current == TopDestination.Search) SnColors.onInverse else SnColors.fgSecondary,
-                    background = if (current == TopDestination.Search) SnColors.fg else Color.Transparent,
-                )
+                if (search == null) {
+                    SnIconButton(
+                        icon = SnIcons.Search,
+                        label = stringResource(Res.string.nav_search),
+                        onClick = { onNavigate(TopDestination.Search) },
+                        tint = if (current == TopDestination.Search) SnColors.onInverse else SnColors.fgSecondary,
+                        background = if (current == TopDestination.Search) SnColors.fg else Color.Transparent,
+                    )
+                }
                 HeaderPills.forEach { destination ->
                     val selected = destination == current
                     Box(
@@ -110,32 +121,48 @@ fun SnHeader(
                     }
                 }
             }
+            // Before the avatar, so keyboard focus meets them in the order they show.
+            search?.invoke()
             SnAvatarButton(
                 selected = current == TopDestination.Profile,
                 onClick = { onNavigate(TopDestination.Profile) },
             )
         },
     ) { measurables, constraints ->
-        // The navigation stays centred on the window whatever sits at its start (the back
-        // button comes and goes), and only moves aside when it would touch its neighbours.
+        // The navigation stays centred on the window whatever sits at its sides (the back
+        // button comes and goes, the search field grows), and only moves aside when it would
+        // touch its neighbours.
         val gap = spacing.roundToPx()
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
-        val leading = measurables[0].measure(loose)
-        val trailing = measurables[2].measure(loose)
-        val room = (constraints.maxWidth - leading.width - trailing.width - 2 * gap).coerceAtLeast(0)
-        val navigation = measurables[1].measure(loose.copy(maxWidth = room))
         val width = constraints.maxWidth
-        val height = maxOf(leading.height, navigation.height, trailing.height)
+        val leading = measurables[0].measure(loose)
+        val avatar = measurables.last().measure(loose)
+        // The search field takes what the pills leave, but never less than its minimum.
+        val searchPlaceable =
+            measurables.getOrNull(2)?.takeIf { measurables.size == 4 }?.let { field ->
+                val navigationWidth = measurables[1].maxIntrinsicWidth(avatar.height)
+                val left = width - leading.width - navigationWidth - avatar.width - 2 * gap - trailingGap.roundToPx()
+                val room = left.coerceAtLeast(HeaderSearchMinWidth.roundToPx()).coerceAtMost(width)
+                field.measure(loose.copy(maxWidth = room))
+            }
+        val trailingWidth = avatar.width + (searchPlaceable?.let { it.width + trailingGap.roundToPx() } ?: 0)
+        val room = (width - leading.width - trailingWidth - 2 * gap).coerceAtLeast(0)
+        val navigation = measurables[1].measure(loose.copy(maxWidth = room))
+        val height = maxOf(leading.height, navigation.height, avatar.height, searchPlaceable?.height ?: 0)
         layout(width, height) {
             val centred = (width - navigation.width) / 2
             val navigationX =
                 centred.coerceIn(
                     leading.width + gap,
-                    (width - trailing.width - gap - navigation.width).coerceAtLeast(leading.width + gap),
+                    (width - trailingWidth - gap - navigation.width).coerceAtLeast(leading.width + gap),
                 )
             leading.placeRelative(0, (height - leading.height) / 2)
             navigation.placeRelative(navigationX, (height - navigation.height) / 2)
-            trailing.placeRelative(width - trailing.width, (height - trailing.height) / 2)
+            avatar.placeRelative(width - avatar.width, (height - avatar.height) / 2)
+            searchPlaceable?.placeRelative(
+                width - trailingWidth,
+                (height - searchPlaceable.height) / 2,
+            )
         }
     }
 }

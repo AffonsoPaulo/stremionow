@@ -30,6 +30,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
+import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
@@ -142,6 +143,8 @@ fun SearchScreen(
     onOpenTitle: (MetaItem) -> Unit,
     initialQuery: String = "",
     focusRequests: Int = 0,
+    headerQuery: String? = null,
+    title: String? = null,
 ) {
     val context = LocalPlatformContext.current
     val viewModel = viewModel(key = "search-$initialQuery") { SearchViewModel(AppGraph.core(context), initialQuery) }
@@ -150,25 +153,33 @@ fun SearchScreen(
     val kind by viewModel.kind.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    // Where the header has the search field, it drives the query and this page shows no field
+    // of its own; the view model still waits for a pause in the typing.
+    val ownField = headerQuery == null && title == null
+    if (headerQuery != null) LaunchedEffect(headerQuery) { viewModel.setQuery(headerQuery) }
     // Raise the keyboard when the user came to type, and again each time Search is chosen
     // while already open. A search opened for a person's name only shows the results.
     LaunchedEffect(focusRequests) {
         // Coming back to earlier results (from a title, for example) leaves the keyboard down.
-        if (focusRequests > 0 || viewModel.query.value.isEmpty()) {
+        if (ownField && (focusRequests > 0 || viewModel.query.value.isEmpty())) {
             runCatching { focus.requestFocus() }
             keyboard?.show()
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        SnSearchField(
-            query = query,
-            onQueryChange = viewModel::setQuery,
-            label = stringResource(Res.string.search_field_label),
-            hint = stringResource(Res.string.search_hint),
-            clearLabel = stringResource(Res.string.search_clear),
-            focusRequester = focus,
-        )
+        if (ownField) {
+            SnSearchField(
+                query = query,
+                onQueryChange = viewModel::setQuery,
+                label = stringResource(Res.string.search_field_label),
+                hint = stringResource(Res.string.search_hint),
+                clearLabel = stringResource(Res.string.search_clear),
+                focusRequester = focus,
+            )
+        } else if (title != null) {
+            SnPageTitle(title, Modifier.padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space2))
+        }
 
         when (val state = results) {
             null -> {

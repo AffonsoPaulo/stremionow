@@ -26,6 +26,11 @@ kotlin {
             implementation(libs.coil.compose)
             implementation(libs.coil.network.okhttp)
             implementation(libs.okhttp)
+            // QR codes that carry a crash report's GitHub link from a TV to a phone (ADR 0007).
+            implementation(libs.qrcodegen)
+        }
+        commonTest.dependencies {
+            implementation(libs.junit)
         }
         androidMain.dependencies {
             // The same androidx versions as before the module became multiplatform.
@@ -45,9 +50,6 @@ kotlin {
             implementation(libs.jna.platform)
             // Dispatchers.Main on the AWT event thread.
             implementation(libs.kotlinx.coroutines.swing)
-        }
-        named("desktopTest").dependencies {
-            implementation(libs.junit)
         }
     }
 }

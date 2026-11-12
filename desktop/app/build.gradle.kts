@@ -67,5 +67,9 @@ compose.desktop {
     }
 }
 
+// `./gradlew run` is the desktop's debug build: it unlocks the hidden test-crash menu
+// (docs/adr/0007-crash-reports.md). Installers never set the property.
+tasks.withType<JavaExec>().named { it == "run" }.configureEach { systemProperty("stremionow.debug", "true") }
+
 // Compose registers its packaging tasks after this script runs, hence the lazy lookup by name.
 tasks.named { it == "prepareAppResources" }.configureEach { dependsOn("prepareNativeResources") }

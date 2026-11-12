@@ -10,6 +10,7 @@ One page per decision that is hard to reverse. Copy the template below into `NNN
 | [0004](0004-android-baseline.md) | Android baseline: SDK levels, ABIs and native build | Accepted |
 | [0005](0005-desktop-ui.md) | Desktop UI: Compose Multiplatform over a native mpv window | Accepted, validated in phase 5 |
 | [0006](0006-shared-ui.md) | One Kotlin Multiplatform interface for phone, TV and desktop | Accepted |
+| [0007](0007-crash-reports.md) | Opt-in crash reports without a server | Accepted |
 | [0009](0009-aniskip.md) | Skip anime openings and endings with AniSkip | Accepted |
 
 ## Template

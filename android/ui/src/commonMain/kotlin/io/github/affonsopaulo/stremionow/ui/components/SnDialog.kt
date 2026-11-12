@@ -5,7 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -22,7 +25,9 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
+import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
@@ -42,40 +47,75 @@ fun SnDialog(
     onDismiss: () -> Unit,
     destructive: Boolean = false,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        val shape = RoundedCornerShape(SnRadius.radiusXl)
+    SnDialogFrame(title = title, onDismiss = onDismiss) {
         val cancelFocus = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { cancelFocus.requestFocus() } }
+        BasicText(body, style = SnTypography.body.copy(color = SnColors.fgSecondary))
+        SnDialogActions {
+            SnButton(
+                text = dismissText,
+                onClick = onDismiss,
+                style = SnButtonStyle.Ghost,
+                modifier = Modifier.focusRequester(cancelFocus),
+            )
+            SnButton(
+                text = confirmText,
+                onClick = onConfirm,
+                style = if (destructive) SnButtonStyle.Danger else SnButtonStyle.Primary,
+            )
+        }
+    }
+}
+
+/**
+ * The panel every dialog shares: a raised surface with [title] on top and [content] below.
+ * Back and a tap outside call [onDismiss]. [wide] gives the panel most of the screen, for
+ * long content such as a report; its content should then scroll inside a weighted child.
+ */
+@Composable
+fun SnDialogFrame(
+    title: String,
+    onDismiss: () -> Unit,
+    wide: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = !wide)) {
+        val shape = RoundedCornerShape(SnRadius.radiusXl)
         Column(
             modifier =
-                Modifier
-                    .widthIn(max = 440.dp)
-                    .fillMaxWidth()
-                    .semantics { paneTitle = title }
+                (
+                    if (wide) {
+                        Modifier
+                            .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6)
+                            .widthIn(max = 880.dp)
+                            .fillMaxWidth()
+                            .fillMaxHeight()
+                    } else {
+                        Modifier.widthIn(max = 440.dp).fillMaxWidth()
+                    }
+                ).semantics { paneTitle = title }
                     .background(SnColors.surfaceRaised, shape)
                     .border(1.dp, SnColors.border, shape)
                     .padding(SnSpacing.space6),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
         ) {
             BasicText(title, style = SnTypography.headingMd.copy(color = SnColors.fg))
-            BasicText(body, style = SnTypography.body.copy(color = SnColors.fgSecondary))
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = SnSpacing.space3),
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SnButton(
-                    text = dismissText,
-                    onClick = onDismiss,
-                    style = SnButtonStyle.Ghost,
-                    modifier = Modifier.focusRequester(cancelFocus),
-                )
-                SnButton(
-                    text = confirmText,
-                    onClick = onConfirm,
-                    style = if (destructive) SnButtonStyle.Danger else SnButtonStyle.Primary,
-                )
-            }
+            content()
         }
     }
+}
+
+/**
+ * The buttons at the foot of a dialog, aligned to the end. They wrap onto more lines when they
+ * do not fit, as longer translations need on phones.
+ */
+@Composable
+fun SnDialogActions(content: @Composable RowScope.() -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(top = SnSpacing.space3),
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2, Alignment.End),
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        itemVerticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
 }

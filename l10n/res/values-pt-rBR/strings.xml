@@ -202,4 +202,34 @@
   <string name="player_skip_credits">Pular créditos</string>
   <string name="player_up_next">A seguir em %1$d s</string>
 
+  <!-- Relatórios de falha. -->
+  <string name="crash_title_closed">O StremioNow fechou inesperadamente</string>
+  <string name="crash_title_error">O StremioNow encontrou um problema</string>
+  <string name="crash_body">Um relatório do que deu errado foi salvo neste aparelho. Enviá-lo ajuda a corrigir o problema. Ele tem só detalhes técnicos: endereços, chaves e caminhos de arquivos pessoais são removidos, e nada é enviado a menos que você escolha Enviar relatório.</string>
+  <plurals name="crash_occurrences">
+    <item quantity="one">Aconteceu %1$d vez.</item>
+    <item quantity="other">Aconteceu %1$d vezes.</item>
+  </plurals>
+  <string name="crash_view">Ver relatório</string>
+  <string name="crash_send">Enviar relatório</string>
+  <string name="crash_dont_send">Não enviar</string>
+  <string name="crash_copy">Copiar relatório</string>
+  <string name="crash_copied">Copiado</string>
+  <string name="crash_share">Compartilhar</string>
+  <string name="crash_done">Concluir</string>
+  <string name="crash_report_title">Relatório de falha</string>
+  <string name="crash_report_hint">Isto é tudo o que o relatório contém. Enviar relatório abre uma issue já preenchida no GitHub, que você pode revisar antes de enviar.</string>
+  <string name="crash_shortened">O relatório era longo demais para um link, então o GitHub recebeu uma versão resumida. Copie o relatório completo e cole-o na issue.</string>
+  <string name="crash_clip_label">Relatório de falha do StremioNow</string>
+  <string name="crash_qr_title">Enviar pelo celular</string>
+  <string name="crash_qr_body">Aponte a câmera do celular para este código para abrir uma issue já preenchida no GitHub. Você pode revisá-la lá antes de enviar; é preciso ter uma conta no GitHub.</string>
+  <string name="crash_qr_shortened">Para caber no código, o relatório foi resumido.</string>
+  <string name="crash_qr_description">Código QR com um link para uma nova issue no GitHub</string>
+  <string name="crash_no_browser">Nenhum navegador conseguiu abrir o link. Leia o código com o celular.</string>
+  <string name="settings_privacy">Privacidade</string>
+  <string name="settings_crash_reports">Relatórios de falha</string>
+  <string name="settings_crash_reports_body">Quando o StremioNow fecha inesperadamente, ele pode salvar um relatório neste aparelho. Com Perguntar antes de enviar, você pode revisá-lo e decidir se quer enviá-lo na próxima vez que abrir o app. Nada é enviado sozinho.</string>
+  <string name="settings_crash_ask">Perguntar antes de enviar</string>
+  <string name="settings_crash_never">Nunca</string>
+
 </resources>

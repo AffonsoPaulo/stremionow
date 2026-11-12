@@ -2,6 +2,7 @@
 //! Info hashes and magnet links built from what Stremio addons send.
 
 use std::fmt;
+use std::time::Duration;
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -15,10 +16,8 @@ const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
 /// Trackers kept per torrent. Real addon answers list a few dozen at most.
 const MAX_TRACKERS: usize = 64;
 
-/// Whether `https://` trackers are announced to. On Android librqbit's HTTP client verifies
-/// certificates through the platform verifier, which needs JNI setup this crate cannot do, and
-/// fails by panicking inside the announce task; UDP and plain HTTP trackers plus DHT remain.
-const HTTPS_TRACKERS: bool = !cfg!(target_os = "android");
+/// Concurrent name lookups when vetting trackers.
+const RESOLVE_CONCURRENCY: usize = 8;
 
 /// A BitTorrent v1 info hash (SHA-1 of the torrent's info dictionary).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,8 +68,14 @@ impl fmt::Debug for InfoHash {
 /// Tracker URLs from a stream's `sources`, in order and without duplicates.
 ///
 /// Addons send entries such as `tracker:udp://host:port/announce` and `dht:<info hash>`. The
-/// `tracker:` prefix is optional here; `dht:` entries are dropped because DHT is always on,
-/// and so is anything librqbit cannot announce to.
+/// `tracker:` prefix is optional here; `dht:` entries are dropped because DHT is always on.
+///
+/// Only UDP trackers are kept. librqbit announces to HTTP trackers with its own HTTP client,
+/// which follows redirects with the system resolver and cannot be replaced: an addon or a
+/// paired device could list `http://tracker.example/announce` and redirect it to a GET into
+/// this device's network, past every check made here. The UDP tracker protocol has no
+/// redirects. DHT and UDP trackers find peers for public torrents; HTTPS trackers also
+/// crashed librqbit on Android.
 pub(crate) fn tracker_urls(sources: &[String]) -> Vec<String> {
     let mut trackers: Vec<String> = Vec::new();
     for source in sources {
@@ -91,14 +96,51 @@ fn parse_tracker(source: &str) -> Option<String> {
     let source = source.trim();
     let source = source.strip_prefix("tracker:").unwrap_or(source);
     let url = url::Url::parse(source).ok()?;
-    let supported = match url.scheme() {
-        "udp" | "http" => true,
-        "https" => HTTPS_TRACKERS,
-        _ => false,
-    };
     // Public torrents never need trackers on this device or the local network, and an addon
     // must not be able to make the app announce into it.
-    (supported && url.has_host() && !crate::proxy::is_private_host(&url)).then(|| url.into())
+    (url.scheme() == "udp"
+        && url.has_host()
+        && url.port().is_some()
+        && !crate::address::is_private_host(&url))
+    .then(|| url.into())
+}
+
+/// Time allowed to resolve one tracker's name.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// The `trackers` whose names resolve to public addresses only, for torrents added by paired
+/// devices. An HTTP announce is a GET with a path chosen by whoever sent the stream, so a
+/// name pointing into the server's own network (its loopback, its router) must not get one.
+/// Names that do not resolve are dropped as well. librqbit resolves again when announcing,
+/// so a name that changes its answer in between (DNS rebinding) remains possible; ADR 0008
+/// discusses that gap.
+pub(crate) async fn public_trackers(trackers: Vec<String>) -> Vec<String> {
+    use futures::StreamExt;
+    let checks = trackers.into_iter().map(|tracker| async move {
+        let url = url::Url::parse(&tracker).ok()?;
+        if let Some(url::Host::Domain(name)) = url.host() {
+            let port = url.port_or_known_default().unwrap_or(80);
+            let lookup = tokio::net::lookup_host((name, port));
+            let addresses: Vec<_> = tokio::time::timeout(RESOLVE_TIMEOUT, lookup)
+                .await
+                .ok()?
+                .ok()?
+                .collect();
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|address| crate::address::is_private_ip(address.ip()))
+            {
+                return None;
+            }
+        }
+        Some(tracker)
+    });
+    futures::stream::iter(checks)
+        .buffered(RESOLVE_CONCURRENCY)
+        .filter_map(|kept| async move { kept })
+        .collect()
+        .await
 }
 
 /// A magnet link for `info_hash` announcing to `trackers`, which are URL-encoded.
@@ -153,6 +195,7 @@ mod tests {
             "udp://open.stealth.si:80/announce",
             "tracker:udp://tracker.opentrackr.org:1337/announce",
             "tracker:wss://tracker.webtorrent.dev",
+            "tracker:udp://no-port.example.org/announce",
             "tracker:not a url",
             "tracker:",
         ]);
@@ -160,16 +203,24 @@ mod tests {
             tracker_urls(&sources),
             strings(&[
                 "udp://tracker.opentrackr.org:1337/announce",
-                "http://tracker.example.org/announce",
                 "udp://open.stealth.si:80/announce",
             ])
         );
     }
 
     #[test]
-    fn https_trackers_follow_the_platform_policy() {
-        let sources = strings(&["tracker:https://tracker.example.org/announce"]);
-        assert_eq!(tracker_urls(&sources).len(), usize::from(HTTPS_TRACKERS));
+    fn only_public_udp_trackers_are_announced_to() {
+        // HTTP announces follow redirects with librqbit's own client, out of our control.
+        let sources = strings(&[
+            "tracker:http://tracker.example.org/announce",
+            "tracker:https://tracker.example.org/announce",
+            "tracker:udp://127.0.0.1:6969/announce",
+            "tracker:udp://192.168.1.1:80/announce",
+            "tracker:udp://2130706433:80/announce",
+            "tracker:udp://router.local:80/announce",
+            "tracker:udp://239.255.255.250:1900/announce",
+        ]);
+        assert!(tracker_urls(&sources).is_empty());
     }
 
     #[test]
@@ -178,6 +229,20 @@ mod tests {
             .map(|i| format!("tracker:udp://t{i}.example.org:80/announce"))
             .collect();
         assert_eq!(tracker_urls(&sources).len(), MAX_TRACKERS);
+    }
+
+    #[tokio::test]
+    async fn trackers_from_other_devices_must_resolve_publicly() {
+        let trackers = strings(&[
+            "udp://localhost:1337/announce",
+            "http://localhost/announce",
+            "udp://name.invalid:1337/announce",
+            "udp://8.8.8.8:1337/announce",
+        ]);
+        assert_eq!(
+            public_trackers(trackers).await,
+            strings(&["udp://8.8.8.8:1337/announce"])
+        );
     }
 
     #[test]

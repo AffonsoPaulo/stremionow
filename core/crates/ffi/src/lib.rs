@@ -13,6 +13,7 @@ mod panics;
 mod playback;
 mod records;
 mod settings;
+mod sharing;
 mod skips;
 mod streaming;
 

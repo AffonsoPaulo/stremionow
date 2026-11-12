@@ -17,6 +17,11 @@ const MATCH_REFRESH_RATE: &str = "match_refresh_rate";
 const HDR_TITLE_PREFIX: &str = "hdr_title:";
 /// Longest meta id remembered; addon ids are short (`tt0063350`, `kitsu:1`).
 const MAX_META_ID_LEN: usize = 200;
+const SERVE_TO_DEVICES: &str = "serve_to_devices";
+const SERVE_NAME: &str = "serve_name";
+
+/// Longest name for this device as a server, in characters.
+const MAX_SERVE_NAME_CHARS: usize = 40;
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
 const DEFAULT_TORRENT_CACHE_MB: u32 = 2048;
@@ -73,6 +78,11 @@ pub struct AppSettings {
     pub hdr: DisplaySwitch,
     /// Matching the display's refresh rate to the video's frame rate (desktop; off by default).
     pub match_refresh_rate: bool,
+    /// Serve torrents to other devices on the home network while the app runs (ADR 0008).
+    pub serve_to_devices: bool,
+    /// The name other devices see for this one when it serves, announced on the network;
+    /// empty until the user turns serving on, when the app sets a neutral default.
+    pub serve_name: String,
 }
 
 impl Default for AppSettings {
@@ -87,6 +97,8 @@ impl Default for AppSettings {
             aniskip: true,
             hdr: DisplaySwitch::Ask,
             match_refresh_rate: false,
+            serve_to_devices: false,
+            serve_name: String::new(),
         }
     }
 }
@@ -125,6 +137,12 @@ impl StremioCore {
             match_refresh_rate: store
                 .setting(MATCH_REFRESH_RATE)?
                 .is_some_and(|value| value == "1"),
+            serve_to_devices: store
+                .setting(SERVE_TO_DEVICES)?
+                .is_some_and(|value| value == "1"),
+            serve_name: store
+                .setting(SERVE_NAME)?
+                .map_or(defaults.serve_name, |value| serve_name(&value)),
         })
     }
 
@@ -159,6 +177,14 @@ impl StremioCore {
                 "0"
             },
         )?;
+        store.set_setting(
+            SERVE_TO_DEVICES,
+            if settings.serve_to_devices { "1" } else { "0" },
+        )?;
+        store.set_setting(SERVE_NAME, &serve_name(&settings.serve_name))?;
+        drop(store);
+        // "Only on Wi-Fi" may have changed.
+        self.apply_network_policy();
         Ok(())
     }
 
@@ -214,6 +240,18 @@ fn language_code(value: &str) -> String {
     }
 }
 
+/// A server name fit to announce: one line, bounded.
+fn serve_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_SERVE_NAME_CHARS)
+        .collect()
+}
+
 /// Keeps a resolution limit to one the ranking understands, or no limit.
 fn clamp_resolution(lines: u32) -> u32 {
     match lines {
@@ -248,6 +286,8 @@ mod tests {
             aniskip: false,
             hdr: DisplaySwitch::Never,
             match_refresh_rate: true,
+            serve_to_devices: true,
+            serve_name: "  StremioNow\non   TV ".into(),
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -263,6 +303,8 @@ mod tests {
         assert!(!saved.aniskip);
         assert_eq!(saved.hdr, DisplaySwitch::Never);
         assert!(saved.match_refresh_rate);
+        assert!(saved.serve_to_devices);
+        assert_eq!(saved.serve_name, "StremioNow on TV");
     }
 
     #[test]

@@ -5,6 +5,10 @@
 //! source: torrents are downloaded with librqbit, which fetches the pieces near the player's
 //! read position first, and remote `http(s)` sources are relayed with their `Range` requests.
 //!
+//! One device can also download torrents for the others on the home network
+//! ([`StreamServer::serve_lan`]); a device paired with it ([`pair`]) streams through it with
+//! [`StreamServer::remote_torrent_url`], still behind a loopback URL.
+//!
 //! ```no_run
 //! # async fn play() -> Result<(), stremionow_torrent::TorrentError> {
 //! use stremionow_torrent::{ServerConfig, StreamServer};
@@ -23,10 +27,12 @@
 //! # }
 //! ```
 
+mod address;
 mod cache;
 mod error;
 mod files;
 mod http;
+mod lan;
 mod magnet;
 mod proxy;
 mod range;
@@ -36,5 +42,9 @@ mod status;
 mod torrent;
 
 pub use error::TorrentError;
+pub use lan::{
+    DiscoveredServer, LanConfig, LanServer, LanStatus, PairError, PairedDevice, PairingCode,
+    PauseReason, RemoteError, RemoteHealth, RemoteServer, TorrentRoute, discover, pair,
+};
 pub use server::{ServerConfig, StreamServer};
 pub use status::{TorrentState, TorrentStatus};

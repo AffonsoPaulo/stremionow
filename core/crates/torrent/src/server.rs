@@ -2,11 +2,13 @@
 //! The public entry point: a loopback HTTP server that streams torrents and relays remote
 //! sources to the video player.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyper::body::Incoming;
 use hyper::header;
@@ -15,6 +17,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::http::{self, Body};
+use crate::lan::{RemoteError, RemoteServer, RemoteTorrent, TorrentRoute};
 use crate::magnet::{self, InfoHash};
 use crate::proxy::Proxy;
 use crate::torrent::{Engine, Network};
@@ -42,19 +45,39 @@ pub struct ServerConfig {
 /// threads through `block_in_place`.
 #[derive(Clone)]
 pub struct StreamServer {
-    shared: Arc<Shared>,
+    pub(crate) shared: Arc<Shared>,
     _running: Arc<StopOnDrop>,
 }
 
 /// State used by both the public API and the request handlers.
-struct Shared {
+pub(crate) struct Shared {
     port: u16,
     secret: String,
     /// `http://127.0.0.1:<port>/<secret>`, the prefix of every URL handed out.
     base_url: String,
     max_cache_bytes: u64,
-    engine: Engine,
+    pub(crate) engine: Engine,
     proxy: Proxy,
+    /// Who uses each torrent in the engine: this device's player, paired devices or both.
+    /// A torrent stops when its last holder lets go.
+    holders: Mutex<HashMap<InfoHash, HashSet<Holder>>>,
+    /// Torrents a paired server downloads for this device.
+    remote: Mutex<HashMap<InfoHash, Arc<RemoteTorrent>>>,
+    /// How many times each torrent was stopped, so a remote torrent stopped while it was
+    /// still being added is noticed even before it was registered.
+    stops: Mutex<HashMap<InfoHash, u64>>,
+    /// Whether this device may download torrents itself right now (see
+    /// [`StreamServer::set_local_torrents_allowed`]).
+    local_allowed: AtomicBool,
+}
+
+/// Someone using a torrent of the engine.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum Holder {
+    /// This device's player.
+    Local,
+    /// A paired device, by id.
+    Device(String),
 }
 
 /// Stops the listener and the torrent session when the last [`StreamServer`] goes away.
@@ -74,7 +97,10 @@ impl StreamServer {
         Self::start_with(config, Network::Online).await
     }
 
-    async fn start_with(config: ServerConfig, network: Network) -> Result<Self, TorrentError> {
+    pub(crate) async fn start_with(
+        config: ServerConfig,
+        network: Network,
+    ) -> Result<Self, TorrentError> {
         let shutdown = CancellationToken::new();
         // Created first, so that an error below also stops whatever already started.
         let running = Arc::new(StopOnDrop(shutdown.clone()));
@@ -90,6 +116,10 @@ impl StreamServer {
             max_cache_bytes: config.max_cache_bytes,
             engine,
             proxy,
+            holders: Mutex::default(),
+            remote: Mutex::default(),
+            stops: Mutex::default(),
+            local_allowed: AtomicBool::new(true),
         });
         let handler = {
             let shared = Arc::clone(&shared);
@@ -126,8 +156,81 @@ impl StreamServer {
         let hash = parse_hash(info_hash)?;
         let requested = file_idx.and_then(|index| usize::try_from(index).ok());
         let trackers = magnet::tracker_urls(trackers);
-        let index = self.shared.engine.add(hash, requested, &trackers).await?;
+        let index = self
+            .shared
+            .add_for(hash, Holder::Local, requested, &trackers)
+            .await?;
         Ok(format!("{}/torrent/{hash}/{index}", self.shared.base_url))
+    }
+
+    /// Like [`Self::torrent_url`], but the torrent is downloaded by the paired `server`; the
+    /// URL is a loopback one all the same, of the form
+    /// `http://127.0.0.1:<port>/<secret>/remote/<token>`.
+    ///
+    /// Progress comes from the server through [`Self::status`], and [`Self::stop`] stops it
+    /// there. If the server stops answering during playback, the next player request
+    /// continues the same file on this device, unless local torrents are not allowed.
+    pub async fn remote_torrent_url(
+        &self,
+        server: &RemoteServer,
+        info_hash: &str,
+        file_idx: Option<u32>,
+        trackers: &[String],
+    ) -> Result<String, RemoteError> {
+        let hash =
+            parse_hash(info_hash).map_err(|error| RemoteError::Torrent(error.to_string()))?;
+        let trackers = magnet::tracker_urls(trackers);
+        let token = secret::random_hex().map_err(|_| RemoteError::Protocol)?;
+        let torrent = RemoteTorrent::new(server.clone(), hash, token.clone(), trackers);
+        let stops = self.shared.stops(hash);
+        // Replacing an earlier request for the same torrent ends its polling.
+        if let Some(previous) = self.shared.remote().insert(hash, Arc::clone(&torrent)) {
+            previous.stopped.cancel();
+        }
+        torrent.start_polling();
+        let added = server.add(hash, file_idx, &torrent.trackers).await;
+        // The player may have closed, and stopped the torrent, while it was being added.
+        let current = {
+            let remote = self.shared.remote();
+            remote
+                .get(&hash)
+                .is_some_and(|current| Arc::ptr_eq(current, &torrent))
+        };
+        let stopped = !current || self.shared.stops(hash) != stops;
+        match added {
+            Ok(index) if !stopped => {
+                let _ = torrent.index.set(index);
+                Ok(format!("{}/remote/{token}", self.shared.base_url))
+            }
+            result => {
+                torrent.stopped.cancel();
+                if current {
+                    self.shared.remote().remove(&hash);
+                }
+                if result.is_ok() {
+                    // Added for nobody: let the server go of it now rather than at lease end.
+                    server.stop(hash).await;
+                    return Err(RemoteError::Stopped);
+                }
+                result.map(|_| String::new())
+            }
+        }
+    }
+
+    /// Where a torrent started by this device is downloaded; `None` if it is not running.
+    pub fn torrent_route(&self, info_hash: &str) -> Option<TorrentRoute> {
+        let hash = InfoHash::parse(info_hash)?;
+        if let Some(torrent) = self.shared.remote().get(&hash) {
+            return Some(torrent.route());
+        }
+        self.shared.engine.status(hash).map(|_| TorrentRoute::Local)
+    }
+
+    /// Whether this device may download torrents itself right now. The app turns it off
+    /// while on mobile data with "Only on Wi-Fi" set, so a paired server that stops
+    /// answering mid-film is not replaced by a download over mobile data.
+    pub fn set_local_torrents_allowed(&self, allowed: bool) {
+        self.shared.local_allowed.store(allowed, Ordering::Relaxed);
     }
 
     /// Registers a remote `http` or `https` URL and returns a local URL for it, of the form
@@ -146,15 +249,26 @@ impl StreamServer {
     /// added, was stopped, or `info_hash` is malformed.
     pub fn status(&self, info_hash: &str) -> Option<TorrentStatus> {
         let hash = InfoHash::parse(info_hash)?;
-        self.shared.engine.status(hash)
+        let remote = self.shared.remote().get(&hash).cloned();
+        match remote {
+            Some(torrent) if !torrent.fell_back.load(Ordering::Relaxed) => torrent.last_status(),
+            _ => self.shared.engine.status(hash),
+        }
     }
 
     /// Stops downloading a torrent and forgets it: its URLs answer 404 and open streams end.
     /// Downloaded data stays in the cache until [`Self::prune_cache`] removes it.
     pub async fn stop(&self, info_hash: &str) {
-        if let Some(hash) = InfoHash::parse(info_hash) {
-            self.shared.engine.stop(hash).await;
+        let Some(hash) = InfoHash::parse(info_hash) else {
+            return;
+        };
+        *self.shared.stops_mut().entry(hash).or_default() += 1;
+        let remote = self.shared.remote().remove(&hash);
+        if let Some(torrent) = remote {
+            torrent.stopped.cancel();
+            torrent.server.stop(hash).await;
         }
+        self.shared.release(hash, &Holder::Local).await;
     }
 
     /// Deletes cached torrent data, least recently played first, until the cache fits in
@@ -209,8 +323,75 @@ impl Shared {
                 }
                 self.proxy.respond(token, method, range).await
             }
+            (Some("remote"), Some(token), None, None) => {
+                if !is_read(method) {
+                    return http::method_not_allowed();
+                }
+                let torrent = self
+                    .remote()
+                    .values()
+                    .find(|torrent| secret::constant_time_eq(token, &torrent.token))
+                    .cloned();
+                match torrent {
+                    Some(torrent) => torrent.respond(self, method, range).await,
+                    None => http::not_found(),
+                }
+            }
             _ => http::not_found(),
         }
+    }
+
+    /// Adds a torrent to the engine for `holder` and returns the index of the file chosen.
+    pub(crate) async fn add_for(
+        &self,
+        hash: InfoHash,
+        holder: Holder,
+        requested: Option<usize>,
+        trackers: &[String],
+    ) -> Result<usize, TorrentError> {
+        self.holders().entry(hash).or_default().insert(holder);
+        self.engine.add(hash, requested, trackers).await
+    }
+
+    /// Lets go of a torrent for `holder`, stopping it if nobody else uses it.
+    pub(crate) async fn release(&self, hash: InfoHash, holder: &Holder) {
+        let unused = {
+            let mut holders = self.holders();
+            match holders.get_mut(&hash) {
+                Some(set) => {
+                    set.remove(holder);
+                    let empty = set.is_empty();
+                    if empty {
+                        holders.remove(&hash);
+                    }
+                    empty
+                }
+                None => true,
+            }
+        };
+        if unused {
+            self.engine.stop(hash).await;
+        }
+    }
+
+    pub(crate) fn local_torrents_allowed(&self) -> bool {
+        self.local_allowed.load(Ordering::Relaxed)
+    }
+
+    fn holders(&self) -> MutexGuard<'_, HashMap<InfoHash, HashSet<Holder>>> {
+        self.holders.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn remote(&self) -> MutexGuard<'_, HashMap<InfoHash, Arc<RemoteTorrent>>> {
+        self.remote.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn stops_mut(&self) -> MutexGuard<'_, HashMap<InfoHash, u64>> {
+        self.stops.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn stops(&self, hash: InfoHash) -> u64 {
+        self.stops_mut().get(&hash).copied().unwrap_or(0)
     }
 
     fn prune_cache(&self) -> Result<u64, TorrentError> {
@@ -246,4 +427,4 @@ fn parse_hash(info_hash: &str) -> Result<InfoHash, TorrentError> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

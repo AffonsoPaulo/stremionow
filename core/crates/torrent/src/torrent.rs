@@ -297,6 +297,15 @@ impl Engine {
         })
     }
 
+    /// The index of the file being streamed from a torrent, once it is chosen.
+    pub(crate) fn selected_index(&self, hash: InfoHash) -> Option<usize> {
+        let entry = self.torrents().get(&hash).cloned()?;
+        match entry.state() {
+            EntryState::Ready(selection) => Some(selection.index),
+            _ => None,
+        }
+    }
+
     /// Forgets a torrent and ends its streams. Downloaded data stays in the cache.
     pub(crate) async fn stop(&self, hash: InfoHash) {
         let entry = self.torrents().remove(&hash);

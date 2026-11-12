@@ -26,6 +26,9 @@ pub enum CoreError {
     /// Signing in to the Stremio account failed or the session ended.
     #[error("sign-in error: {reason}")]
     SignIn { reason: String },
+    /// Serving to other devices needs a home network, and the device is not on one.
+    #[error("not connected to a local network")]
+    NoLocalNetwork,
 }
 
 impl From<AddonError> for CoreError {

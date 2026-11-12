@@ -12,6 +12,12 @@ object SecureStore {
     /** The Stremio session key, when signed in. */
     const val STREMIO_AUTH_KEY = "stremio_auth_key"
 
+    /** This device's identity as a server for other devices: TLS key and paired devices. */
+    const val SERVE_STATE = "serve_state"
+
+    /** The pairing with the device used for torrents, token included. */
+    const val OTHER_DEVICE = "other_device"
+
     fun save(
         context: PlatformContext,
         name: String,

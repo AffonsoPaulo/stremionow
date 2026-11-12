@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.components
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -11,15 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -55,67 +57,86 @@ fun SnHeader(
     onBack: (() -> Unit)? = null,
 ) {
     val pill = RoundedCornerShape(SnRadius.radiusFull)
-    Row(
+    val spacing = SnSpacing.space4
+    Layout(
         modifier =
             modifier
                 .fillMaxWidth()
                 .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-    ) {
-        // Inner pages on a mouse-and-keyboard screen get a visible way back; a TV has its
-        // remote's Back button and a phone its own top bar.
-        if (onBack != null) {
-            SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onClick = onBack)
-        }
-        SnWordmark()
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            item {
+        content = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                // Inner pages on a mouse-and-keyboard screen get a visible way back; a TV has its
+                // remote's Back button and a phone its own top bar.
+                if (onBack != null) {
+                    SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onClick = onBack)
+                }
+                SnWordmark()
+            }
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 SnIconButton(
                     icon = SnIcons.Search,
                     label = stringResource(Res.string.nav_search),
                     onClick = { onNavigate(TopDestination.Search) },
                     tint = if (current == TopDestination.Search) SnColors.onInverse else SnColors.fgSecondary,
-                    background =
-                        if (current ==
-                            TopDestination.Search
-                        ) {
-                            SnColors.fg
-                        } else {
-                            androidx.compose.ui.graphics.Color.Transparent
-                        },
+                    background = if (current == TopDestination.Search) SnColors.fg else Color.Transparent,
                 )
-            }
-            items(HeaderPills) { destination ->
-                val selected = destination == current
-                Box(
-                    modifier =
-                        Modifier
-                            .heightIn(min = SnSize.controlMd)
-                            .semantics { this.selected = selected }
-                            .snClickable(pill, role = Role.Tab) { onNavigate(destination) }
-                            .background(
-                                if (selected) SnColors.fg else androidx.compose.ui.graphics.Color.Transparent,
-                                pill,
-                            ).padding(horizontal = SnSpacing.space4),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText(
-                        text = stringResource(destination.label()),
-                        style =
-                            SnTypography.label.copy(
-                                color = if (selected) SnColors.onInverse else SnColors.fgSecondary,
-                            ),
-                        maxLines = 1,
-                    )
+                HeaderPills.forEach { destination ->
+                    val selected = destination == current
+                    Box(
+                        modifier =
+                            Modifier
+                                .heightIn(min = SnSize.controlMd)
+                                .semantics { this.selected = selected }
+                                .snClickable(pill, role = Role.Tab) { onNavigate(destination) }
+                                .background(if (selected) SnColors.fg else Color.Transparent, pill)
+                                .padding(horizontal = SnSpacing.space4),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            text = stringResource(destination.label()),
+                            style =
+                                SnTypography.label.copy(
+                                    color = if (selected) SnColors.onInverse else SnColors.fgSecondary,
+                                ),
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
+            SnAvatarButton(
+                selected = current == TopDestination.Profile,
+                onClick = { onNavigate(TopDestination.Profile) },
+            )
+        },
+    ) { measurables, constraints ->
+        // The navigation stays centred on the window whatever sits at its start (the back
+        // button comes and goes), and only moves aside when it would touch its neighbours.
+        val gap = spacing.roundToPx()
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val leading = measurables[0].measure(loose)
+        val trailing = measurables[2].measure(loose)
+        val room = (constraints.maxWidth - leading.width - trailing.width - 2 * gap).coerceAtLeast(0)
+        val navigation = measurables[1].measure(loose.copy(maxWidth = room))
+        val width = constraints.maxWidth
+        val height = maxOf(leading.height, navigation.height, trailing.height)
+        layout(width, height) {
+            val centred = (width - navigation.width) / 2
+            val navigationX =
+                centred.coerceIn(
+                    leading.width + gap,
+                    (width - trailing.width - gap - navigation.width).coerceAtLeast(leading.width + gap),
+                )
+            leading.placeRelative(0, (height - leading.height) / 2)
+            navigation.placeRelative(navigationX, (height - navigation.height) / 2)
+            trailing.placeRelative(width - trailing.width, (height - trailing.height) / 2)
         }
-        SnAvatarButton(selected = current == TopDestination.Profile, onClick = { onNavigate(TopDestination.Profile) })
     }
 }
 

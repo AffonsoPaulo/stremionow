@@ -183,7 +183,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends \
-            libmpv2 libsecret-1-0 gnome-keyring dbus xvfb xauth libgl1-mesa-dri libegl-mesa0
+            libmpv2 libsecret-1-0 libsecret-tools gnome-keyring dbus xvfb xauth libgl1-mesa-dri libegl-mesa0
       - name: Install libmpv
         if: runner.os == 'macOS'
         run: brew install mpv

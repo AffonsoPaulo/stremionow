@@ -54,6 +54,16 @@ kotlin {
     }
 }
 
+// Show why a desktop test failed or was skipped, so CI logs carry the cause (a keyring's error).
+tasks.withType<Test>().matching { it.name == "desktopTest" }.configureEach {
+    testLogging {
+        events("failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showCauses = true
+        showStandardStreams = true
+    }
+}
+
 // Desktop text uses the same font files as Android, read from the classpath.
 val desktopFonts =
     tasks.register<Sync>("syncDesktopFonts") {

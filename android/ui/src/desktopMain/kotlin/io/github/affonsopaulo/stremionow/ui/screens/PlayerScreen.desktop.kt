@@ -48,8 +48,11 @@ actual fun PlayerScreen(
     onChangeSource: () -> Unit,
     onOpenEpisode: (Episode) -> Unit,
 ) {
-    val selection = PlaybackSession.selection
-    val source = PlaybackSession.source
+    // What this player opened with. Moving on to the next episode clears the session's source
+    // before the player has finished leaving; read live, that made the leaving player press
+    // Back and drop the new episode's source list, landing on the title page.
+    val selection = remember { PlaybackSession.selection }
+    val source = remember { PlaybackSession.source }
     if (selection == null || (source?.url == null && source?.infoHash == null)) {
         LaunchedEffect(Unit) { onBack() }
         return

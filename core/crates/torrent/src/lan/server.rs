@@ -162,7 +162,7 @@ struct Inner {
     torrents_allowed: AtomicBool,
     /// The port, once a first listener chose it.
     port: Mutex<u16>,
-    listeners: Mutex<BTreeMap<Ipv4Addr, CancellationToken>>,
+    listeners: Mutex<BTreeMap<Ipv4Addr, Listener>>,
     /// Addresses being served, which the announcement follows.
     served: Arc<Mutex<HashSet<IpAddr>>>,
     network: Mutex<NetworkState>,
@@ -494,9 +494,12 @@ impl Inner {
             .copied()
             .collect();
         for address in gone {
-            if let Some(stop) = lock(&self.listeners).remove(&address) {
+            let removed = lock(&self.listeners).remove(&address);
+            if let Some(listener) = removed {
                 log::info!("lan: no longer serving on {address}");
-                stop.cancel();
+                // Wait for the socket to close, so "paused" is never reported while a
+                // listener on another network still accepts connections.
+                listener.close().await;
             }
         }
         for &address in &wanted {
@@ -561,10 +564,11 @@ impl Inner {
         }
         log::info!("lan: serving on {address}");
         let stop = self.shutdown.child_token();
-        if let Some(previous) = lock(&self.listeners).insert(address, stop.clone()) {
-            previous.cancel();
+        let task = tokio::spawn(Arc::clone(self).accept(listener, stop.clone()));
+        let previous = lock(&self.listeners).insert(address, Listener { stop, task });
+        if let Some(previous) = previous {
+            previous.close().await;
         }
-        tokio::spawn(Arc::clone(self).accept(listener, stop));
     }
 
     async fn accept(self: Arc<Self>, listener: TcpListener, stop: CancellationToken) {
@@ -1112,6 +1116,20 @@ fn refusal(refused: Refusal) -> Response<Body> {
         }
     }
     response
+}
+
+/// A socket the server accepts connections on, and the task doing it.
+struct Listener {
+    stop: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Listener {
+    /// Stops accepting and waits until the socket is closed.
+    async fn close(self) {
+        self.stop.cancel();
+        let _ = self.task.await;
+    }
 }
 
 #[cfg(test)]

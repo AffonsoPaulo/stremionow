@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -88,10 +87,9 @@ fun SnPosterRow(
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     modifier: Modifier = Modifier,
 ) {
-    LazyRow(
+    SnRow(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        controlsCenter = SnSpacing.space2 + PosterCardWidth * 1.5f / 2,
     ) {
         items(items, key = { "${it.kind}/${it.id}" }) { item ->
             SnPosterCard(item.name, item.poster, subtitle(item), onClick = { onOpen(item) })

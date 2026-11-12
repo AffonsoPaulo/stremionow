@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
@@ -38,6 +37,7 @@ import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
+import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
@@ -48,6 +48,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
+import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
@@ -324,10 +325,7 @@ private fun ContinueWatchingRow(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(stringResource(Res.string.home_continue_watching))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-        ) {
+        SnRow(controlsCenter = EpisodeRowControlsCenter) {
             items(items, key = { it.id }) { progress ->
                 val season = progress.season?.toInt()
                 val episode = progress.episode?.toInt()

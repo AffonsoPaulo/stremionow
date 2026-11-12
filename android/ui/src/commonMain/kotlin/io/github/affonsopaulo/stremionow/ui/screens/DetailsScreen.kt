@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -48,6 +49,8 @@ import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
+import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
@@ -60,8 +63,11 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
+import io.github.affonsopaulo.stremionow.ui.components.belowHeader
+import io.github.affonsopaulo.stremionow.ui.components.headerScrim
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.startScrim
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -159,11 +165,11 @@ fun DetailsScreen(
 
     when (val details = state) {
         Loadable.Loading -> {
-            SnLoading()
+            Box(Modifier.fillMaxSize().belowHeader()) { SnLoading() }
         }
 
         is Loadable.Failed -> {
-            SnLoadError(onRetry = viewModel::load)
+            Box(Modifier.fillMaxSize().belowHeader()) { SnLoadError(onRetry = viewModel::load) }
         }
 
         is Loadable.Ready -> {
@@ -203,9 +209,20 @@ private fun DetailsContent(
             add(stringResource(Res.string.details_tab_details))
         }
     var tab by rememberSaveable(item.id) { mutableIntStateOf(0) }
+    val art = item.background ?: item.poster
+    val listState = rememberLazyListState()
+    // The art runs under the header, which stays clear until it scrolls away. A title without
+    // any starts below a solid header instead, over the plain placeholder.
+    if (art != null) ClearHeaderOverHero(listState)
+    val headerInset = LocalHeaderInset.current
+    val heroInset = if (art != null) headerInset else 0.dp
 
-    SnMinimalScroll {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = SnSpacing.space16)) {
+    SnMinimalScroll(topInset = headerInset) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(top = headerInset - heroInset, bottom = SnSpacing.space16),
+        ) {
             item(key = "hero") {
                 val height =
                     when (SnLayout.formFactor) {
@@ -213,19 +230,19 @@ private fun DetailsContent(
                         FormFactor.Large -> 560.dp
                         FormFactor.Tv -> (screenHeightDp() * 0.8f).dp
                     }
-                Box(Modifier.fillMaxWidth().heightIn(min = height)) {
+                val artScrim = if (art != null) Modifier.headerScrim() else Modifier
+                // Grows by the header's height, so its content stays where it was.
+                Box(Modifier.fillMaxWidth().heightIn(min = height + heroInset)) {
                     SnArtwork(
-                        url = item.background ?: item.poster,
+                        url = art,
                         fallbackTitle = "",
-                        modifier = Modifier.matchParentSize(),
+                        modifier = Modifier.matchParentSize().then(artScrim),
                     )
                     Box(
-                        Modifier.matchParentSize().background(
-                            Brush.horizontalGradient(
-                                0f to SnColors.bg.copy(alpha = 0.95f),
-                                0.36f to SnColors.bg.copy(alpha = 0.7f),
-                                0.7f to SnColors.bg.copy(alpha = 0f),
-                            ),
+                        Modifier.matchParentSize().startScrim(
+                            0f to SnColors.bg.copy(alpha = 0.95f),
+                            0.36f to SnColors.bg.copy(alpha = 0.7f),
+                            0.7f to SnColors.bg.copy(alpha = 0f),
                         ),
                     )
                     Box(
@@ -240,6 +257,7 @@ private fun DetailsContent(
                         Modifier
                             .align(Alignment.BottomStart)
                             .widthIn(max = 660.dp)
+                            .padding(top = heroInset)
                             .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
                         verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
                     ) {
@@ -261,20 +279,25 @@ private fun DetailsContent(
                     }
                 }
             }
+            // Tabs and rows scroll sideways without the header's inset.
             item(key = "tabs") {
-                SnTabs(
-                    tabs,
-                    tab.coerceAtMost(tabs.lastIndex),
-                    { tab = it },
-                    Modifier.padding(horizontal = SnLayout.gutter),
-                )
+                SnMinimalScroll {
+                    SnTabs(
+                        tabs,
+                        tab.coerceAtMost(tabs.lastIndex),
+                        { tab = it },
+                        Modifier.padding(horizontal = SnLayout.gutter),
+                    )
+                }
             }
             item(key = "tab-content") {
-                Box(Modifier.padding(top = SnSpacing.space6)) {
-                    when (tabs.getOrNull(tab)) {
-                        stringResource(Res.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
-                        stringResource(Res.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
-                        else -> InfoTab(details, onOpenGenre, onSearchPerson)
+                SnMinimalScroll {
+                    Box(Modifier.padding(top = SnSpacing.space6)) {
+                        when (tabs.getOrNull(tab)) {
+                            stringResource(Res.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
+                            stringResource(Res.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
+                            else -> InfoTab(details, onOpenGenre, onSearchPerson)
+                        }
                     }
                 }
             }

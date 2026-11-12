@@ -52,6 +52,7 @@ fun SnHeader(
     current: TopDestination?,
     onNavigate: (TopDestination) -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     val pill = RoundedCornerShape(SnRadius.radiusFull)
     Row(
@@ -62,6 +63,11 @@ fun SnHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
     ) {
+        // Inner pages on a mouse-and-keyboard screen get a visible way back; a TV has its
+        // remote's Back button and a phone its own top bar.
+        if (onBack != null) {
+            SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onClick = onBack)
+        }
         SnWordmark()
         LazyRow(
             modifier = Modifier.weight(1f),

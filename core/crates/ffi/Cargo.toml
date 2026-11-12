@@ -15,6 +15,7 @@ crate-type = ["lib", "cdylib"]
 [dependencies]
 stremionow-protocol.workspace = true
 stremionow-addons.workspace = true
+stremionow-curation.workspace = true
 stremionow-library.workspace = true
 stremionow-markers.workspace = true
 stremionow-ranking.workspace = true

@@ -4,12 +4,16 @@ package io.github.affonsopaulo.stremionow.ui.platform
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.navigationevent.NavigationEventInfo
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import com.sun.jna.Native
+import com.sun.jna.ptr.IntByReference
+import com.sun.jna.win32.StdCallLibrary
 import java.util.Locale
 
 /** Compose Multiplatform turns Esc into a back event on the desktop; this handles it while [enabled]. */
@@ -44,6 +48,34 @@ internal actual fun screenHeightDp(): Int =
             .value
             .toInt()
     }
+
+/** Windows' "Show animations in Windows" (client area animations); other systems: false. */
+@Composable
+internal actual fun rememberReducedMotion(): Boolean = remember { systemReducesMotion() }
+
+private fun systemReducesMotion(): Boolean {
+    if (!System.getProperty("os.name").orEmpty().startsWith("Windows")) return false
+    return runCatching {
+        val enabled = IntByReference(1)
+        Win32Ui.INSTANCE.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, enabled, 0) && enabled.value == 0
+    }.getOrDefault(false)
+}
+
+private const val SPI_GETCLIENTAREAANIMATION = 0x1042
+
+@Suppress("FunctionName", "ktlint:standard:function-naming")
+private interface Win32Ui : StdCallLibrary {
+    fun SystemParametersInfoW(
+        action: Int,
+        param: Int,
+        value: IntByReference,
+        update: Int,
+    ): Boolean
+
+    companion object {
+        val INSTANCE: Win32Ui = Native.load("user32", Win32Ui::class.java)
+    }
+}
 
 /** Decimal units, as Android shows them: "850 kB", "2.4 MB", "12 GB". */
 @Composable

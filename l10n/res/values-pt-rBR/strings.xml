@@ -181,6 +181,14 @@
   <string name="action_resume">Continuar</string>
   <string name="action_close">Fechar</string>
   <string name="home_continue_watching">Continuar assistindo</string>
+  <string name="home_new_episodes">Novos episódios</string>
+  <string name="home_new_episode_meta">%1$s · Novo</string>
+  <string name="home_because_you_watched">Porque você assistiu a %1$s</string>
+  <string name="home_more_genre">Mais títulos de %1$s</string>
+  <string name="home_from_your_list">Da sua lista</string>
+  <string name="home_hero_previous">Destaque anterior</string>
+  <string name="home_hero_next">Próximo destaque</string>
+  <string name="home_hero_pick">Destaque %1$d de %2$d: %3$s</string>
   <string name="home_trending_movies">Filmes em alta</string>
   <string name="home_trending_series">Séries em alta</string>
   <string name="home_new_movies">Lançamentos em filmes</string>

@@ -11,9 +11,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -74,27 +71,17 @@ private val HeroArtAlignment = Bias(horizontalBias = 0f, verticalBias = -0.4f)
  *
  * [textWidth] is how wide the hero's text can grow from the page gutter: the side scrim keeps
  * text over the brightest image at 4.5:1 or more across that width and clears the rest of the
- * picture. [extendBelow] lets the art continue under what follows the hero (the first row),
- * fading out there, so no plain band separates them.
+ * picture.
  */
 @Composable
 fun SnHeroBackdrop(
     url: String?,
     textWidth: Dp,
     modifier: Modifier = Modifier,
-    extendBelow: Dp = 0.dp,
 ) {
     val phone = SnLayout.formFactor == FormFactor.Phone
     val textEnd = SnLayout.gutter + textWidth
-    val extra = with(LocalDensity.current) { extendBelow.roundToPx() }
-    BoxWithConstraints(
-        modifier.layout { measurable, constraints ->
-            // Taller than the hero by [extendBelow], drawn over the space below it.
-            val height = constraints.maxHeight + extra
-            val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
-            layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, 0) }
-        },
-    ) {
+    BoxWithConstraints(modifier) {
         val widthPx = constraints.maxWidth
         Box(Modifier.fillMaxSize().background(SnColors.surfaceMuted).headerScrim()) {
             if (url != null) {

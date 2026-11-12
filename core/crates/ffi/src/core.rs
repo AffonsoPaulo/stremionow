@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::join_all;
-use futures::{StreamExt, stream};
 use serde::de::DeserializeOwned;
 use stremionow_addons::{
     AddonClient, AddonError, AddonList, DISCOVER_SOURCE, InstalledAddon, discoverable,
@@ -19,6 +18,7 @@ use stremionow_protocol::{
 };
 
 use crate::account::Account;
+use crate::home::RecentHome;
 use crate::records::{
     AddonInfo, AddonPreview, CatalogAddon, CatalogInfo, CatalogRow, CoreError, LibraryItem,
     MetaDetails, MetaItem,
@@ -48,9 +48,9 @@ pub(crate) const DEFAULTS_INSTALLED: &str = "default_addons_installed";
 /// Generous enough for slow mobile networks; stale cached data is shown meanwhile.
 const ADDON_TIMEOUT: Duration = Duration::from_secs(15);
 /// Catalog pages younger than this are served from the cache without a network request.
-const CATALOG_FRESHNESS: Duration = Duration::from_secs(30 * 60);
+pub(crate) const CATALOG_FRESHNESS: Duration = Duration::from_secs(30 * 60);
 /// Title details younger than this are served from the cache.
-const META_FRESHNESS: Duration = Duration::from_secs(6 * 60 * 60);
+pub(crate) const META_FRESHNESS: Duration = Duration::from_secs(6 * 60 * 60);
 /// Discover's addon lists younger than this are served from the cache. The lists change
 /// rarely, so a day keeps the screen instant without going stale.
 const DISCOVER_FRESHNESS: Duration = Duration::from_secs(24 * 60 * 60);
@@ -58,10 +58,6 @@ const DISCOVER_FRESHNESS: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_PREVIEWS: usize = 8;
 /// Cache entries older than this are deleted on startup.
 const CACHE_RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
-/// Maximum number of home rows, to keep the first screen fast.
-const MAX_HOME_ROWS: usize = 12;
-/// Home rows downloaded at the same time.
-const HOME_CONCURRENCY: usize = 4;
 
 /// Entry point of the core. Create one per app process and share it.
 #[derive(uniffi::Object)]
@@ -73,6 +69,8 @@ pub struct StremioCore {
     pub(crate) aniskip: AniSkip,
     /// Manifests downloaded for the user to confirm, oldest first.
     previews: Mutex<Vec<InstalledAddon>>,
+    /// The last home screen worked out, for a while (see `home.rs`).
+    pub(crate) recent_home: Mutex<Option<RecentHome>>,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -214,55 +212,6 @@ impl StremioCore {
     pub fn move_addon(&self, manifest_url: String, index: u32) -> Result<(), CoreError> {
         self.store()?.move_addon(&manifest_url, index as usize)?;
         self.addons_changed()
-    }
-
-    /// Rows of the home screen: the first page of every browsable catalog, in addon order.
-    /// Rows whose addon fails are left out; the call fails only if every row fails.
-    pub async fn home(&self) -> Result<Vec<CatalogRow>, CoreError> {
-        let catalogs: Vec<_> = self
-            .enabled()?
-            .into_iter()
-            .flat_map(|addon| {
-                addon
-                    .manifest
-                    .catalogs
-                    .iter()
-                    .filter(|c| !c.requires_extra())
-                    .map(|c| CatalogInfo::new(&addon, c))
-                    .collect::<Vec<_>>()
-            })
-            .take(MAX_HOME_ROWS)
-            .collect();
-        if catalogs.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // A few requests at a time: firing every row at once on a cold, slow connection makes
-        // them all compete and time out together. `buffered` keeps the rows in order.
-        let pages: Vec<_> = stream::iter(catalogs.iter().cloned())
-            .map(|catalog| self.catalog_page(catalog, None, 0))
-            .buffered(HOME_CONCURRENCY)
-            .collect()
-            .await;
-
-        let mut first_error = None;
-        let rows: Vec<CatalogRow> = catalogs
-            .into_iter()
-            .zip(pages)
-            .filter_map(|(catalog, page)| match page {
-                Ok(items) if !items.is_empty() => Some(CatalogRow { catalog, items }),
-                Ok(_) => None,
-                Err(error) => {
-                    log::warn!("home row {} failed: {error}", catalog.catalog_id);
-                    first_error.get_or_insert(error);
-                    None
-                }
-            })
-            .collect();
-        match (rows.is_empty(), first_error) {
-            (true, Some(error)) => Err(error),
-            _ => Ok(rows),
-        }
     }
 
     /// Catalogs of `kind` that can be browsed without a search term.
@@ -471,6 +420,7 @@ impl StremioCore {
             account,
             aniskip,
             previews: Mutex::new(Vec::new()),
+            recent_home: Mutex::new(None),
         }))
     }
 
@@ -606,7 +556,7 @@ impl StremioCore {
 
     /// Fetches JSON through the cache: fresh entries skip the network, and stale entries are
     /// used when the network fails, so browsing keeps working offline.
-    async fn cached_json<T: DeserializeOwned>(
+    pub(crate) async fn cached_json<T: DeserializeOwned>(
         &self,
         url: &str,
         freshness: Duration,
@@ -656,7 +606,7 @@ fn manifest_json(addon: &InstalledAddon) -> Result<String, CoreError> {
 }
 
 /// Removes repeated ids, keeping the first occurrence.
-fn dedupe(items: impl IntoIterator<Item = MetaItem>) -> Vec<MetaItem> {
+pub(crate) fn dedupe(items: impl IntoIterator<Item = MetaItem>) -> Vec<MetaItem> {
     let mut seen = std::collections::HashSet::new();
     items
         .into_iter()
@@ -671,7 +621,7 @@ pub(crate) fn now_millis() -> i64 {
         .unwrap_or_default()
 }
 
-fn millis(duration: Duration) -> i64 {
+pub(crate) fn millis(duration: Duration) -> i64 {
     i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
 }
 
@@ -709,71 +659,6 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp dir");
         let core = StremioCore::new(directory.path().to_string_lossy().into_owned()).expect("core");
         (core, directory)
-    }
-
-    #[tokio::test]
-    async fn builds_home_rows_and_serves_them_offline() {
-        let server = addon_server("A").await;
-        Mock::given(method("GET"))
-            .and(path("/catalog/movie/top.json"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "metas": [
-                    {"id": "tt1", "type": "movie", "name": "One", "poster": "http://insecure/p.jpg"},
-                    {"id": "tt1", "type": "movie", "name": "Duplicate"},
-                    {"id": "", "type": "movie", "name": "No id"}
-                ]
-            })))
-            .mount(&server)
-            .await;
-
-        let (core, _dir) = core();
-        install(&core, format!("{}/manifest.json", server.uri()))
-            .await
-            .expect("installs");
-        let rows = core.home().await.expect("home");
-        assert_eq!(rows.len(), 1, "the search-only catalog is not a home row");
-        assert_eq!(rows[0].catalog.genres, ["Drama"]);
-        assert_eq!(
-            rows[0].items.len(),
-            1,
-            "duplicates and empty ids are dropped"
-        );
-        assert_eq!(
-            rows[0].items[0].poster, None,
-            "plain HTTP images are dropped"
-        );
-
-        drop(server);
-        let rows = core.home().await.expect("served from cache");
-        assert_eq!(rows[0].items[0].name, "One");
-    }
-
-    #[tokio::test]
-    async fn home_skips_failing_addons() {
-        let good = addon_server("Good").await;
-        Mock::given(method("GET"))
-            .and(path("/catalog/movie/top.json"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "metas": [{"id": "tt1", "type": "movie", "name": "One"}]
-            })))
-            .mount(&good)
-            .await;
-        let bad = addon_server("Bad").await;
-        Mock::given(method("GET"))
-            .and(path("/catalog/movie/top.json"))
-            .respond_with(ResponseTemplate::new(500))
-            .mount(&bad)
-            .await;
-
-        let (core, _dir) = core();
-        for server in [&bad, &good] {
-            install(&core, format!("{}/manifest.json", server.uri()))
-                .await
-                .expect("installs");
-        }
-        let rows = core.home().await.expect("partial home");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].catalog.addon_name, "Good");
     }
 
     #[tokio::test]

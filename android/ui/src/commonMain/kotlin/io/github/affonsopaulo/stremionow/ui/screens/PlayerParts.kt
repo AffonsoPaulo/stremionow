@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -29,9 +33,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -366,6 +374,66 @@ internal fun UpNext(
             style = SnTypography.bodyLg.copy(color = SnColors.fg),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** How long the HDR prompt stays before it counts as "not now". */
+internal const val HDR_PROMPT_TIMEOUT_MS = 10_000
+
+/**
+ * A small prompt in the corner, in the place of the skip and up-next prompts, asking whether to
+ * turn on HDR for this title ([onTurnOn]) or for every HDR video ([onAlways]). Playback goes on
+ * meanwhile. Unanswered, it fades away after [HDR_PROMPT_TIMEOUT_MS] through [onTimeout], which
+ * changes nothing; a thin line shows the time left. It never takes the focus, so the player's
+ * keys keep working.
+ */
+@Composable
+internal fun HdrPrompt(
+    onTurnOn: () -> Unit,
+    onAlways: () -> Unit,
+    onTimeout: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = stringResource(Res.string.player_hdr_title)
+    val remaining = remember { Animatable(1f) }
+    LaunchedEffect(Unit) {
+        remaining.animateTo(0f, tween(HDR_PROMPT_TIMEOUT_MS, easing = LinearEasing))
+        onTimeout()
+    }
+    val shape = RoundedCornerShape(SnRadius.radiusLg)
+    Column(
+        modifier =
+            modifier
+                .widthIn(max = 360.dp)
+                .semantics {
+                    paneTitle = title
+                    liveRegion = LiveRegionMode.Polite
+                }.background(SnColors.surfaceRaised, shape)
+                .clip(shape),
+    ) {
+        Column(
+            Modifier.padding(SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+        ) {
+            BasicText(title, style = SnTypography.bodyLg.copy(color = SnColors.fg))
+            BasicText(
+                stringResource(Res.string.player_hdr_body),
+                style = SnTypography.body.copy(color = SnColors.fgSecondary),
+            )
+            Row(
+                Modifier.padding(top = SnSpacing.space2),
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+            ) {
+                SnButton(stringResource(Res.string.player_hdr_turn_on), onTurnOn)
+                SnButton(stringResource(Res.string.player_hdr_always), onAlways, style = SnButtonStyle.Secondary)
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth(remaining.value)
+                .height(2.dp)
+                .background(SnColors.accent),
         )
     }
 }

@@ -18,6 +18,7 @@ import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.SmokeTest
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import java.awt.Color
 import java.awt.Dimension
 import kotlin.concurrent.thread
@@ -47,6 +48,8 @@ fun main(args: Array<String>) {
     val smokeTest = "--smoke-test" in args
     if (smokeTest) startWatchdog()
     NativeLibraries.install()
+    // Turns HDR back off if a previous run left it on, and on exit (see DisplaySession).
+    DesktopDisplays.start()
 
     application {
         val windowState =

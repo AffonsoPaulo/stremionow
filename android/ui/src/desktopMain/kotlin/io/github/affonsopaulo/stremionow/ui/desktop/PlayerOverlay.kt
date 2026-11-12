@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.PlaybackState
 import io.github.affonsopaulo.stremionow.player.PlayerError
+import io.github.affonsopaulo.stremionow.player.VideoFormat
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
@@ -65,10 +67,14 @@ import io.github.affonsopaulo.stremionow.ui.components.SnSeekBar
 import io.github.affonsopaulo.stremionow.ui.components.formatPlaybackTime
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import io.github.affonsopaulo.stremionow.ui.desktop.display.DisplaySession
+import io.github.affonsopaulo.stremionow.ui.desktop.display.HdrChoice
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.screens.CONTROLS_TIMEOUT_MS
 import io.github.affonsopaulo.stremionow.ui.screens.EpisodesList
+import io.github.affonsopaulo.stremionow.ui.screens.HdrPrompt
 import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
@@ -82,10 +88,15 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.Cursor
 import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
+
+/** Height kept clear of the bottom controls (timeline and buttons) for prompts above them. */
+private val CONTROLS_CLEARANCE = 128.dp
 
 /** Step of the ±10 s buttons and of the arrow keys. */
 private const val SEEK_STEP_SECONDS = 10.0
@@ -106,6 +117,9 @@ internal class OverlayState {
     var panel by mutableStateOf<Panel?>(null)
 
     var scrubSeconds by mutableStateOf<Double?>(null)
+
+    /** The HDR question is showing. */
+    var isAskingHdr by mutableStateOf(false)
 
     fun poke() {
         areControlsVisible = true
@@ -177,6 +191,8 @@ internal fun playerBack(
     onBack: () -> Unit,
 ) {
     when {
+        // Dismissing the HDR prompt changes nothing, as when it times out.
+        state.isAskingHdr -> state.isAskingHdr = false
 
         pair.isFullScreen -> pair.exitFullScreen()
 
@@ -216,6 +232,7 @@ internal fun PlayerOverlay(
     viewModel: PlayerViewModel<VideoPlayer>,
     pair: WindowPair,
     state: OverlayState,
+    display: DisplayChoices?,
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
     onOpenEpisode: (Episode) -> Unit,
@@ -229,6 +246,14 @@ internal fun PlayerOverlay(
     val prepareFailed by viewModel.prepareFailed.collectAsState()
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
+
+    // Once the first frame tells what the video is: match the display, or ask about HDR. Playback
+    // goes on meanwhile, so the question never delays the start.
+    val video = playback.video
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(video, display) {
+        if (video != null && display != null) state.isAskingHdr = display.onVideo(video)
+    }
 
     LaunchedEffect(state.lastActivity, playback.isPaused, state.scrubSeconds, state.panel) {
         if (!playback.isPaused && state.scrubSeconds == null && state.panel == null) {
@@ -302,6 +327,23 @@ internal fun PlayerOverlay(
             PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (failed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (state.isAskingHdr && display != null) {
+            val answer = { choice: HdrChoice ->
+                state.isAskingHdr = false
+                scope.launch { display.answer(choice) }
+                Unit
+            }
+            HdrPrompt(
+                onTurnOn = { answer(HdrChoice.OnlyThisTitle) },
+                onAlways = { answer(HdrChoice.Always) },
+                onTimeout = { answer(HdrChoice.NotNow) },
+                // Above the timeline and buttons while they show, in the corner otherwise.
+                modifier =
+                    Modifier.align(Alignment.BottomEnd).padding(
+                        end = SnSpacing.space8,
+                        bottom = if (state.areControlsVisible) CONTROLS_CLEARANCE else SnSpacing.space8,
+                    ),
+            )
         } else if (playback.isLoaded) {
             PlaybackPrompts(
                 state = playback,
@@ -336,6 +378,34 @@ internal fun PlayerOverlay(
             for (edge in ResizeEdge.entries) ResizeHandle(edge, pair)
         }
     }
+}
+
+/**
+ * The player's link to [DisplaySession]: runs its blocking calls on the display queue, finds the
+ * monitor the [video] window is on and tells mpv, through [onHdr], whether it may output HDR.
+ */
+internal class DisplayChoices(
+    private val session: DisplaySession,
+    private val video: java.awt.Window,
+    private val onHdr: (Boolean) -> Unit,
+) {
+    /** See [DisplaySession.onVideo]; true when the user should be asked about HDR. */
+    suspend fun onVideo(format: VideoFormat): Boolean {
+        val target =
+            DesktopDisplays.control?.let { control ->
+                withContext(DesktopDisplays.dispatcher) { control.displayOf(video) }
+            }
+        val ask = withContext(DesktopDisplays.dispatcher) { session.onVideo(format, target) }
+        applyHdr()
+        return ask
+    }
+
+    suspend fun answer(choice: HdrChoice) {
+        withContext(DesktopDisplays.dispatcher) { session.answer(choice) }
+        applyHdr()
+    }
+
+    private fun applyHdr() = onHdr(session.isHdrActive)
 }
 
 /** libmpv could not be loaded: say so, and offer the way back (another source would not help). */

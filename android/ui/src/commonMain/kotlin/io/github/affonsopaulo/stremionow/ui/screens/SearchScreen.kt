@@ -8,9 +8,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -235,7 +238,13 @@ private fun SearchResults(
                         .flatMap { it.items }
                         .distinctBy { it.id }
                 }
-            SnPosterGrid {
+            val gridState = rememberLazyGridState()
+            StayAtTop(
+                data = items,
+                atTop = { gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0 },
+                scrollToTop = { gridState.requestScrollToItem(0) },
+            )
+            SnPosterGrid(state = gridState) {
                 items(items, key = { "${it.kind}/${it.id}" }) { item ->
                     SnPosterCard(
                         item.name,
@@ -266,8 +275,15 @@ private fun ResultRows(
                 .filterValues { it > 1 }
                 .keys
         }
+    val listState = rememberLazyListState()
+    StayAtTop(
+        data = rows,
+        atTop = { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 },
+        scrollToTop = { listState.requestScrollToItem(0) },
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(vertical = SnSpacing.space4),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
     ) {
@@ -290,6 +306,29 @@ private fun ResultRows(
                         null
                     },
             )
+        }
+    }
+}
+
+/**
+ * Keeps a list at its top while results stream in. Catalogs answer in any order but rows keep
+ * the addons' order, so a late answer can land above the rows on screen. A lazy list keeps
+ * showing the item it showed, which would push the first results out of view; so when the list
+ * is at its top as [data] changes, it stays there. Once the user has scrolled, the list keeps
+ * their place instead.
+ */
+@Composable
+private fun StayAtTop(
+    data: Any,
+    atTop: () -> Boolean,
+    scrollToTop: () -> Unit,
+) {
+    val shown = remember { arrayOfNulls<Any>(1) }
+    // Before the layout that applies the change, so the position read is the one on screen.
+    SideEffect {
+        if (shown[0] !== data) {
+            if (shown[0] != null && atTop()) scrollToTop()
+            shown[0] = data
         }
     }
 }

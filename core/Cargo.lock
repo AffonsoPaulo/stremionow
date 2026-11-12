@@ -2989,6 +2989,7 @@ dependencies = [
  "serde_json",
  "stremionow-addons",
  "stremionow-library",
+ "stremionow-markers",
  "stremionow-protocol",
  "stremionow-ranking",
  "stremionow-sync",
@@ -3012,6 +3013,18 @@ dependencies = [
 [[package]]
 name = "stremionow-markers"
 version = "0.0.1"
+dependencies = [
+ "futures",
+ "log",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "webpki-roots",
+ "wiremock",
+]
 
 [[package]]
 name = "stremionow-protocol"

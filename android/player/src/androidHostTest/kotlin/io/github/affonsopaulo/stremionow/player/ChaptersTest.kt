@@ -20,7 +20,7 @@ class ChaptersTest {
     @Test
     fun findsTheIntroAndCredits() {
         assertEquals(Segment(95.0, 185.0), Chapters.intro(episode, 1440.0))
-        assertEquals(1320.0, Chapters.creditsStart(episode, 1440.0))
+        assertEquals(Segment(1320.0, 1410.0), Chapters.credits(episode, 1440.0))
     }
 
     @Test
@@ -36,9 +36,18 @@ class ChaptersTest {
         // A chapter called "Intro" that lasts ten minutes is not an opening.
         assertNull(Chapters.intro(listOf(Chapter("Intro", 0.0), Chapter("Main", 600.0)), 3000.0))
         // "Credits" in the first half is not the end credits.
-        assertNull(Chapters.creditsStart(listOf(Chapter("Credits", 10.0), Chapter("Story", 90.0)), 3000.0))
+        assertNull(Chapters.credits(listOf(Chapter("Credits", 10.0), Chapter("Story", 90.0)), 3000.0))
         assertNull(Chapters.intro(emptyList(), 1000.0))
-        assertNull(Chapters.creditsStart(episode, null))
+        assertNull(Chapters.credits(episode, null))
+    }
+
+    @Test
+    fun findsRecapsAndCombinesEverything() {
+        val chapters = listOf(Chapter("Previously on", 0.0), Chapter("OP", 45.0), Chapter("Story", 135.0))
+        assertEquals(
+            Markers(intro = Segment(45.0, 135.0), recap = Segment(0.0, 45.0)),
+            Chapters.markers(chapters, 1400.0),
+        )
     }
 
     @Test

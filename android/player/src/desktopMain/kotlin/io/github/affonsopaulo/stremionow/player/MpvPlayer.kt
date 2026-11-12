@@ -255,6 +255,9 @@ class MpvPlayer private constructor(
          * - macOS: mpv renders through its render API into a layer over the window's content (see
          *   [MacGlVideo]); `--wid` is not supported there.
          *
+         * [allowSoftwareRendering] accepts a software renderer (`--gpu-sw`), for checks on
+         * machines without a GPU.
+         *
          * @throws MpvUnavailableException when libmpv is missing or too old.
          */
         fun create(
@@ -262,6 +265,7 @@ class MpvPlayer private constructor(
             libraryDirectory: File?,
             caFile: File?,
             options: PlayerOptions = PlayerOptions(),
+            allowSoftwareRendering: Boolean = false,
         ): MpvPlayer {
             val renderApi = Platform.isMac()
             val mpvOptions =
@@ -312,6 +316,9 @@ class MpvPlayer private constructor(
                     // and no exclusive full screen, which can change the display mode. Older
                     // libmpv builds without these options already behave this way.
                     put("target-colorspace-hint", listOf("no"))
+                    // mpv refuses a software renderer by default; only the smoke test, on
+                    // machines without a GPU (CI), accepts one.
+                    if (allowSoftwareRendering) put("gpu-sw", listOf("yes"))
                     if (Platform.isWindows()) put("d3d11-exclusive-fs", listOf("no"))
                     // The window id is an X11 one: keep mpv off its Wayland backends, which would
                     // open a window of their own on a Wayland session (AWT runs under XWayland).

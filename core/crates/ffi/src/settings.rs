@@ -11,9 +11,45 @@ const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
 const ANISKIP: &str = "aniskip";
+const HDR: &str = "hdr";
+const MATCH_REFRESH_RATE: &str = "match_refresh_rate";
+/// Titles the user turned HDR on for ("Only for this title"), one setting each: the prefix and the meta id.
+const HDR_TITLE_PREFIX: &str = "hdr_title:";
+/// Longest meta id remembered; addon ids are short (`tt0063350`, `kitsu:1`).
+const MAX_META_ID_LEN: usize = 200;
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
 const DEFAULT_TORRENT_CACHE_MB: u32 = 2048;
+
+/// Whether the app may change a display setting for a video, such as turning on HDR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum DisplaySwitch {
+    /// Ask each time, unless the user chose it for the title.
+    #[default]
+    Ask,
+    /// Switch without asking.
+    Always,
+    /// Never switch, and never ask.
+    Never,
+}
+
+impl DisplaySwitch {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Always => "always",
+            Self::Never => "never",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "always" => Self::Always,
+            "never" => Self::Never,
+            _ => Self::Ask,
+        }
+    }
+}
 
 /// Preferences the user can change in Settings.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -33,6 +69,10 @@ pub struct AppSettings {
     /// Ask AniSkip for the openings and endings of anime episodes. This sends the anime's id
     /// and the episode number to AniSkip (and Kitsu or AniList ids to an id mapping service).
     pub aniskip: bool,
+    /// Turning on HDR for HDR videos, on displays that support it (desktop).
+    pub hdr: DisplaySwitch,
+    /// Matching the display's refresh rate to the video's frame rate (desktop; off by default).
+    pub match_refresh_rate: bool,
 }
 
 impl Default for AppSettings {
@@ -45,6 +85,8 @@ impl Default for AppSettings {
             max_resolution: 0,
             onboarded: false,
             aniskip: true,
+            hdr: DisplaySwitch::Ask,
+            match_refresh_rate: false,
         }
     }
 }
@@ -77,6 +119,12 @@ impl StremioCore {
             aniskip: store
                 .setting(ANISKIP)?
                 .map_or(defaults.aniskip, |value| value == "1"),
+            hdr: store
+                .setting(HDR)?
+                .map_or(defaults.hdr, |value| DisplaySwitch::parse(&value)),
+            match_refresh_rate: store
+                .setting(MATCH_REFRESH_RATE)?
+                .is_some_and(|value| value == "1"),
         })
     }
 
@@ -102,13 +150,58 @@ impl StremioCore {
         )?;
         store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
         store.set_setting(ANISKIP, if settings.aniskip { "1" } else { "0" })?;
+        store.set_setting(HDR, settings.hdr.as_str())?;
+        store.set_setting(
+            MATCH_REFRESH_RATE,
+            if settings.match_refresh_rate {
+                "1"
+            } else {
+                "0"
+            },
+        )?;
         Ok(())
+    }
+
+    /// Whether the user turned HDR on for this title ("Only for this title").
+    pub fn hdr_for_title(&self, meta_id: String) -> Result<bool, CoreError> {
+        let Some(key) = hdr_title_key(&meta_id) else {
+            return Ok(false);
+        };
+        Ok(self.store()?.setting(&key)?.is_some())
+    }
+
+    /// Remembers that the user wants HDR for this title. Unusable ids are ignored.
+    pub fn set_hdr_for_title(&self, meta_id: String) -> Result<(), CoreError> {
+        if let Some(key) = hdr_title_key(&meta_id) {
+            self.store()?.set_setting(&key, "1")?;
+        }
+        Ok(())
+    }
+
+    /// Number of titles remembered for HDR.
+    pub fn hdr_title_count(&self) -> Result<u32, CoreError> {
+        Ok(self.store()?.count_settings_with_prefix(HDR_TITLE_PREFIX)?)
+    }
+
+    /// Forgets every title remembered for HDR; returns how many there were.
+    pub fn clear_hdr_titles(&self) -> Result<u32, CoreError> {
+        Ok(self
+            .store()?
+            .delete_settings_with_prefix(HDR_TITLE_PREFIX)?)
     }
 
     /// The cache sizes offered in Settings, in MiB.
     pub fn torrent_cache_choices(&self) -> Vec<u32> {
         TORRENT_CACHE_CHOICES_MB.to_vec()
     }
+}
+
+/// The setting key for a title's HDR choice, or None for an empty, overlong or control-character id.
+fn hdr_title_key(meta_id: &str) -> Option<String> {
+    let valid = !meta_id.is_empty()
+        && meta_id.len() <= MAX_META_ID_LEN
+        && !meta_id.chars().any(char::is_control);
+    valid.then(|| format!("{HDR_TITLE_PREFIX}{meta_id}"))
 }
 
 /// Keeps a language code to two or three ASCII letters, lowercased; anything else is empty.
@@ -153,6 +246,8 @@ mod tests {
             max_resolution: 1081,
             onboarded: true,
             aniskip: false,
+            hdr: DisplaySwitch::Never,
+            match_refresh_rate: true,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -166,5 +261,39 @@ mod tests {
         assert_eq!(saved.max_resolution, 0, "unknown limits mean no limit");
         assert!(saved.onboarded);
         assert!(!saved.aniskip);
+        assert_eq!(saved.hdr, DisplaySwitch::Never);
+        assert!(saved.match_refresh_rate);
+    }
+
+    #[test]
+    fn hdr_titles_are_remembered_and_cleared() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert!(!core.hdr_for_title("tt0063350".into()).expect("reads"));
+
+        core.set_hdr_for_title("tt0063350".into()).expect("saves");
+        core.set_hdr_for_title("kitsu:1".into()).expect("saves");
+        core.set_hdr_for_title("tt0063350".into())
+            .expect("saves twice");
+        // Unusable ids are ignored rather than stored.
+        core.set_hdr_for_title(String::new()).expect("ignored");
+        core.set_hdr_for_title(format!("a{}b", char::from(1u8)))
+            .expect("ignored");
+        core.set_hdr_for_title("x".repeat(MAX_META_ID_LEN + 1))
+            .expect("ignored");
+
+        assert!(core.hdr_for_title("tt0063350".into()).expect("reads"));
+        assert!(
+            !core
+                .hdr_for_title("tt00633".into())
+                .expect("a prefix is another title")
+        );
+        assert_eq!(core.hdr_title_count().expect("counts"), 2);
+        // Other settings never match the prefix.
+        core.update_settings(AppSettings::default()).expect("saves");
+        assert_eq!(core.clear_hdr_titles().expect("clears"), 2);
+        assert_eq!(core.hdr_title_count().expect("counts"), 0);
+        assert!(!core.hdr_for_title("kitsu:1".into()).expect("reads"));
+        assert_eq!(core.settings().expect("reads").hdr, DisplaySwitch::Ask);
     }
 }

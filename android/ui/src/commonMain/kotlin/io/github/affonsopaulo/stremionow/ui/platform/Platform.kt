@@ -32,3 +32,10 @@ internal expect fun openExternalLink(
 
 /** The app's version name, for example "0.0.1", or null when it is unknown. */
 internal expect fun appVersion(context: PlatformContext): String?
+
+/**
+ * Whether the app may change display settings for a video (HDR, refresh rate), so Settings
+ * offers them: on Windows desktops. Android switches HDR by itself and matches the refresh rate
+ * through the system's own setting.
+ */
+internal expect fun displaySwitchingSupported(): Boolean

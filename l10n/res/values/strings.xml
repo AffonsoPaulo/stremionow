@@ -182,6 +182,26 @@
   <string name="player_full_screen">Full screen</string>
   <!-- Desktop player: accessibility label of the same button while the video covers the screen. -->
   <string name="player_exit_full_screen">Exit full screen</string>
+  <!-- Desktop player: shown instead of the video when libmpv, the library that plays video, is missing. -->
+  <string name="player_unavailable_title">Video can\'t play</string>
+  <string name="player_unavailable_body">StremioNow couldn\'t load its video player (libmpv). Reinstall the app and try again.</string>
+  <!-- Desktop player: key names shown next to a button's name in its tooltip, as a keyboard shortcut hint. -->
+  <string name="player_key_space">Space</string>
+  <string name="player_key_escape">Esc</string>
+  <!-- The left and right arrow keys. -->
+  <string name="player_key_left">←</string>
+  <string name="player_key_right">→</string>
+  <!-- The letter printed on the key that toggles full screen (F); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_full_screen">F</string>
+  <!-- The letter printed on the key that plays the next episode (N); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_next">N</string>
+  <!-- Desktop player: small prompt in the corner when an HDR video starts on a screen that supports HDR but has it off. It fades away after a few seconds. -->
+  <string name="player_hdr_title">Turn on HDR?</string>
+  <string name="player_hdr_body">The screen may go dark for a moment.</string>
+  <!-- Prompt button: turns HDR on now, and every time this movie or series plays. Keep it short. -->
+  <string name="player_hdr_turn_on">Turn on</string>
+  <!-- Prompt button: turns HDR on for every HDR video from now on. Keep it short. -->
+  <string name="player_hdr_always">Always</string>
   <string name="player_error_title">Couldn\'t play this source</string>
   <string name="player_error_body">It may be offline, or in a format this device can\'t play.</string>
   <string name="player_choose_other">Choose another source</string>
@@ -199,6 +219,23 @@
   <string name="settings_aniskip">Skip segments from AniSkip</string>
   <!-- Description under the AniSkip switch. It must say what is sent, and to whom. -->
   <string name="settings_aniskip_body">Offers to skip anime openings, recaps and endings, using times shared by the AniSkip community. To find them, the anime and episode you play are sent to AniSkip (api.aniskip.com) and to an ID mapping service (arm.haglund.dev).</string>
+  <!-- Settings section about the screen (desktop). -->
+  <string name="settings_display">Display</string>
+  <string name="settings_hdr">HDR</string>
+  <string name="settings_hdr_body">Turn HDR on while an HDR video plays, on screens that support it, and off again when it ends.</string>
+  <!-- Choices for HDR: ask each time, always turn it on, never turn it on. -->
+  <string name="settings_switch_ask">Ask</string>
+  <string name="settings_switch_always">Always</string>
+  <string name="settings_switch_never">Never</string>
+  <!-- Titles for which the user answered "Only for this title". %1$d is how many. -->
+  <plurals name="settings_hdr_titles">
+    <item quantity="one">HDR is on for %1$d title</item>
+    <item quantity="other">HDR is on for %1$d titles</item>
+  </plurals>
+  <!-- Button that forgets the titles HDR was turned on for. -->
+  <string name="settings_hdr_forget">Forget</string>
+  <string name="settings_refresh">Match refresh rate to the video</string>
+  <string name="settings_refresh_body">Helps 24 fps films look smooth on 60 Hz screens. The screen may go black for a second when it switches.</string>
 
   <!-- Torrent playback. -->
   <string name="player_preparing">Getting the source ready</string>

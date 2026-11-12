@@ -140,6 +140,18 @@
   <string name="player_minimize">Minimizar</string>
   <string name="player_full_screen">Tela cheia</string>
   <string name="player_exit_full_screen">Sair da tela cheia</string>
+  <string name="player_unavailable_title">Não é possível reproduzir vídeos</string>
+  <string name="player_unavailable_body">O StremioNow não conseguiu carregar o reprodutor de vídeo (libmpv). Reinstale o app e tente de novo.</string>
+  <string name="player_key_space">Espaço</string>
+  <string name="player_key_escape">Esc</string>
+  <string name="player_key_left">←</string>
+  <string name="player_key_right">→</string>
+  <string name="player_key_full_screen">F</string>
+  <string name="player_key_next">N</string>
+  <string name="player_hdr_title">Ativar HDR?</string>
+  <string name="player_hdr_body">A tela pode escurecer por um instante.</string>
+  <string name="player_hdr_turn_on">Ativar</string>
+  <string name="player_hdr_always">Sempre</string>
   <string name="player_error_title">Não foi possível reproduzir esta fonte</string>
   <string name="player_error_body">Ela pode estar fora do ar ou num formato que este aparelho não reproduz.</string>
   <string name="player_choose_other">Escolher outra fonte</string>
@@ -153,6 +165,19 @@
   <string name="settings_gigabytes">%1$d GB</string>
   <string name="settings_aniskip">Trechos para pular do AniSkip</string>
   <string name="settings_aniskip_body">Oferece pular aberturas, recapitulações e encerramentos de animes com os tempos compartilhados pela comunidade do AniSkip. Para encontrá-los, o anime e o episódio que você assiste são enviados ao AniSkip (api.aniskip.com) e a um serviço de mapeamento de IDs (arm.haglund.dev).</string>
+  <string name="settings_display">Tela</string>
+  <string name="settings_hdr">HDR</string>
+  <string name="settings_hdr_body">Ativa o HDR enquanto um vídeo em HDR toca, em telas compatíveis, e desativa quando ele termina.</string>
+  <string name="settings_switch_ask">Perguntar</string>
+  <string name="settings_switch_always">Sempre</string>
+  <string name="settings_switch_never">Nunca</string>
+  <plurals name="settings_hdr_titles">
+    <item quantity="one">HDR ativado para %1$d título</item>
+    <item quantity="other">HDR ativado para %1$d títulos</item>
+  </plurals>
+  <string name="settings_hdr_forget">Esquecer</string>
+  <string name="settings_refresh">Ajustar a taxa de atualização ao vídeo</string>
+  <string name="settings_refresh_body">Deixa filmes em 24 fps mais fluidos em telas de 60 Hz. A tela pode ficar preta por um segundo na troca.</string>
 
   <string name="player_preparing">Preparando a fonte</string>
   <string name="torrent_finding_peers">Procurando pares…</string>

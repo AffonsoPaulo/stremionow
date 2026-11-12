@@ -34,6 +34,9 @@ class MpvPlayer private constructor(
 
     @Volatile private var fileLoaded = false
 
+    /** Frame rate the container declares for the current file, when it does. */
+    @Volatile private var containerFps: Double? = null
+
     /** External subtitles requested before the current file finished loading. */
     private val pendingSubtitles = mutableListOf<Array<String>>()
 
@@ -48,6 +51,7 @@ class MpvPlayer private constructor(
             pendingSubtitles.clear()
         }
         mutableState.value = PlaybackState()
+        containerFps = null
         mpv.setPropertyString("start", if (startSeconds > 0) formatSeconds(startSeconds) else "none")
         mpv.command(arrayOf("loadfile", url, "replace"))
     }
@@ -180,6 +184,10 @@ class MpvPlayer private constructor(
             "demuxer-cache-time" -> {
                 mutableState.update { it.copy(bufferedAheadSeconds = (value - it.positionSeconds).coerceAtLeast(0.0)) }
             }
+
+            "container-fps" -> {
+                containerFps = value
+            }
         }
     }
 
@@ -198,8 +206,17 @@ class MpvPlayer private constructor(
         property: String,
         value: String,
     ) {
-        if (property == "hwdec-current") {
-            mutableState.update { it.copy(hardwareDecoder = value.takeUnless { v -> v.isEmpty() || v == "no" }) }
+        when (property) {
+            "hwdec-current" -> {
+                mutableState.update { it.copy(hardwareDecoder = value.takeUnless { v -> v.isEmpty() || v == "no" }) }
+            }
+
+            // Known once the first frame is decoded; the frame rate lets the display match it.
+            "video-params/gamma" -> {
+                if (mutableState.value.video == null) {
+                    mutableState.update { it.copy(video = VideoFormat.from(value, containerFps)) }
+                }
+            }
         }
     }
 
@@ -295,6 +312,8 @@ class MpvPlayer private constructor(
             mpv.observeProperty("hwdec-current", MpvFormat.MPV_FORMAT_STRING)
             mpv.observeProperty("track-list", MpvFormat.MPV_FORMAT_NONE)
             mpv.observeProperty("chapter-list", MpvFormat.MPV_FORMAT_NONE)
+            mpv.observeProperty("container-fps", MpvFormat.MPV_FORMAT_DOUBLE)
+            mpv.observeProperty("video-params/gamma", MpvFormat.MPV_FORMAT_STRING)
             return player
         }
 

@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.desktop
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.awt.Dimension
 import java.awt.Frame
 import java.awt.Point
 import java.awt.Rectangle
@@ -16,6 +17,7 @@ import java.awt.event.WindowFocusListener
 import java.awt.event.WindowStateListener
 import java.beans.PropertyChangeListener
 import javax.swing.Timer
+import kotlin.math.roundToInt
 
 /** Which edges a resize gesture moves. */
 internal enum class ResizeEdge(
@@ -75,6 +77,15 @@ internal class WindowPair(
     private var gesture: Gesture? = null
 
     /**
+     * The windowed size in dp. A DPI change (a move to a monitor with another scale, or a scale
+     * changed in the system settings) reaches each window on its own, and AWT resizes each from
+     * whatever size it has at that moment, so the pixel size alone drifts: across a monitor
+     * boundary the change can apply twice, or not at all. The pair keeps this size instead and
+     * applies it at the new scale once the change settles.
+     */
+    private val windowedSize = WindowedSize()
+
+    /**
      * Follows the pointer while a gesture lasts, where the system can tell when the button is
      * released. Compose restarts its pointer handlers when the overlay changes density (crossing
      * to a monitor with another scale), which would otherwise drop the gesture halfway.
@@ -99,7 +110,7 @@ internal class WindowPair(
      * A DPI or monitor change reaches each window separately, and AWT keeps resizing both for a
      * moment afterwards; check again once that has settled.
      */
-    private val settleTimer = Timer(SETTLE_DELAY_MS) { conform() }.apply { isRepeats = false }
+    private val settleTimer = Timer(SETTLE_DELAY_MS) { settle() }.apply { isRepeats = false }
 
     private val configurationListener =
         PropertyChangeListener {
@@ -142,6 +153,7 @@ internal class WindowPair(
     /** Starts following the overlay. */
     fun attach() {
         conform()
+        rememberSize()
         overlay.addComponentListener(geometryListener)
         overlay.addWindowListener(overlayStateListener)
         video.addComponentListener(geometryListener)
@@ -165,14 +177,15 @@ internal class WindowPair(
         val bounds = system.bounds(overlay)
         val target =
             when (val edge = current.edge) {
-                // Keep the current size, which a DPI change may alter on the way to another
-                // monitor, and the pointer on the same spot of the window, like system dragging.
+                // Keep the pointer on the same spot of the window, like system dragging, and the
+                // size in dp at the scale of the monitor the window is on now.
                 null -> {
+                    val size = sizeAtCurrentScale()
                     Rectangle(
-                        cursor.x - (current.anchorX * bounds.width).toInt(),
-                        cursor.y - (current.anchorY * bounds.height).toInt(),
-                        bounds.width,
-                        bounds.height,
+                        cursor.x - (current.anchorX * size.width).toInt(),
+                        cursor.y - (current.anchorY * size.height).toInt(),
+                        size.width,
+                        size.height,
                     )
                 }
 
@@ -191,8 +204,15 @@ internal class WindowPair(
      */
     fun endGesture(cancelled: Boolean = false) {
         if (cancelled && system.isPrimaryButtonDown() == true) return
+        val ended = gesture ?: return
         gesture = null
         gestureTimer.stop()
+        if (ended.edge == null) {
+            // A DPI change may still be on its way after the drop; settle the size once it is.
+            settleTimer.restart()
+        } else {
+            rememberSize()
+        }
     }
 
     fun toggleFullScreen() = if (isFullScreen) exitFullScreen() else enterFullScreen()
@@ -213,6 +233,8 @@ internal class WindowPair(
         windowedBounds?.let { system.setBounds(video, overlay, it) }
         windowedBounds = null
         isFullScreen = false
+        // Full screen may have ended on a monitor with another scale.
+        settleTimer.restart()
         log.log(System.Logger.Level.INFO, "Full screen off: ${system.bounds(overlay)}")
     }
 
@@ -234,6 +256,27 @@ internal class WindowPair(
         gestureTimer.stop()
     }
 
+    /**
+     * Once DPI changes have settled: applies the windowed size in dp at the overlay's current
+     * scale, keeping its top-left corner, then puts the video window under it.
+     */
+    private fun settle() {
+        if (gesture == null && !isFullScreen && !system.isMinimized(overlay) && overlay.isShowing) {
+            val bounds = system.bounds(overlay)
+            val size = sizeAtCurrentScale()
+            if (bounds.width != size.width || bounds.height != size.height) {
+                system.setBounds(video, overlay, Rectangle(bounds.x, bounds.y, size.width, size.height))
+            }
+            windowedSize.appliedAt(system.scale(overlay))
+        }
+        conform()
+    }
+
+    /** Takes the overlay's current size as the windowed size in dp. */
+    private fun rememberSize() = windowedSize.remember(system.bounds(overlay), system.scale(overlay))
+
+    private fun sizeAtCurrentScale(): Dimension = windowedSize.at(system.scale(overlay))
+
     /** Puts the video window exactly under the overlay. */
     private fun conform() {
         if (system.isMinimized(overlay)) {
@@ -243,6 +286,11 @@ internal class WindowPair(
         if (system.isMinimized(video) || !overlay.isShowing) return
         val target = system.bounds(overlay)
         if (system.bounds(video) != target) system.setBounds(video, target)
+        // Resized by the system at the same scale (snapping, another program): that is the new
+        // windowed size. At another scale, the size is left to settle().
+        if (gesture == null && !isFullScreen) {
+            if (windowedSize.isCurrentAt(system.scale(overlay))) rememberSize() else settleTimer.restart()
+        }
     }
 
     /**
@@ -281,4 +329,35 @@ internal class WindowPair(
         const val SETTLE_DELAY_MS = 300
         const val GESTURE_POLL_MS = 8
     }
+}
+
+/**
+ * A window size in dp, kept apart from its size in pixels so that it survives scale changes. The
+ * scale is the size of one dp in pixels.
+ */
+internal class WindowedSize {
+    private var width = 0.0
+    private var height = 0.0
+    private var scale = 0.0
+
+    /** Takes [bounds], in pixels at [scale], as the size. */
+    fun remember(
+        bounds: Rectangle,
+        scale: Double,
+    ) {
+        width = bounds.width / scale
+        height = bounds.height / scale
+        this.scale = scale
+    }
+
+    /** The size in pixels at [scale]. */
+    fun at(scale: Double): Dimension = Dimension((width * scale).roundToInt(), (height * scale).roundToInt())
+
+    /** Records that the size was applied at [scale]. */
+    fun appliedAt(scale: Double) {
+        this.scale = scale
+    }
+
+    /** Whether the size was last taken or applied at [scale]; if not, it still has to be applied. */
+    fun isCurrentAt(scale: Double): Boolean = scale == this.scale
 }

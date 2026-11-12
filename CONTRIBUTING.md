@@ -29,7 +29,7 @@ docs(adr): record desktop UI decision
 
 ## Project rules
 
-CI checks Rust formatting, lint and tests, Kotlin formatting (ktlint through Spotless), Android Lint, the Android build, the desktop build with its tests, and license headers. Reviewers enforce the rules CI cannot check.
+CI checks Rust formatting, lint and tests, Kotlin formatting (ktlint through Spotless), Android Lint, the Android build, the desktop build with its tests on Windows, macOS and Linux (including each system's secret store and a start-up smoke test), and license headers. Reviewers enforce the rules CI cannot check.
 
 Format Kotlin locally with `./gradlew spotlessApply` from `android/` and from `desktop/`.
 

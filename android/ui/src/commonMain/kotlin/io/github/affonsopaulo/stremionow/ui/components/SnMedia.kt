@@ -61,6 +61,12 @@ fun SnArtwork(
     }
 }
 
+/** Width of a poster card in a row. */
+val PosterCardWidth = 160.dp
+
+/** Width of an episode card. */
+val EpisodeCardWidth = 280.dp
+
 /** 2:3 poster card with the title and a short line underneath. */
 @Composable
 fun SnPosterCard(
@@ -69,7 +75,7 @@ fun SnPosterCard(
     subtitle: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    width: Dp? = 160.dp,
+    width: Dp? = PosterCardWidth,
 ) {
     Column(
         modifier = (if (width != null) modifier.width(width) else modifier),
@@ -115,7 +121,7 @@ fun SnEpisodeCard(
     progress: Float? = null,
     highlighted: Boolean = false,
 ) {
-    Column(modifier.width(280.dp), verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+    Column(modifier.width(EpisodeCardWidth), verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
         Box(
             Modifier
                 .fillMaxWidth()

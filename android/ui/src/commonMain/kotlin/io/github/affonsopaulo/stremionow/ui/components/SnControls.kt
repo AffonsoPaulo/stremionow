@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -166,11 +165,12 @@ fun <T> SnChipRow(
     LaunchedEffect(selectedIndex) { if (selectedIndex > 0) listState.animateScrollToItem(selectedIndex) }
     // Room for the focus ring around the first and last chips; the offset keeps the first
     // chip aligned with whatever sits above the row.
-    LazyRow(
+    SnRow(
         modifier = modifier.offset(x = -FocusRingSpace),
         state = listState,
         contentPadding = PaddingValues(horizontal = FocusRingSpace, vertical = FocusRingSpace),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        spacing = SnSpacing.space2,
+        overContent = true,
     ) {
         itemsIndexed(options) { _, option ->
             SnChip(text = label(option), selected = option == selected, onClick = { onSelect(option) })

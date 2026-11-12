@@ -29,6 +29,13 @@ internal expect fun isLargeScreen(): Boolean
 @ReadOnlyComposable
 internal expect fun screenHeightDp(): Int
 
+/**
+ * Whether the user asked the system for less motion: animations off on Android, "Show
+ * animations in Windows" off on Windows. Read when the screen appears. Elsewhere, false.
+ */
+@Composable
+internal expect fun rememberReducedMotion(): Boolean
+
 /** A file size for display, such as "2.4 MB", in the platform's short format. */
 @Composable
 internal expect fun formatShortFileSize(bytes: Long): String

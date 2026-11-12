@@ -24,6 +24,7 @@ stremionow-ranking = { path = "crates/ranking" }
 stremionow-sync = { path = "crates/sync" }
 stremionow-torrent = { path = "crates/torrent" }
 stremionow-markers = { path = "crates/markers" }
+stremionow-curation = { path = "crates/curation" }
 
 uniffi = "0.32.2"
 serde = { version = "1.0.229", features = ["derive"] }

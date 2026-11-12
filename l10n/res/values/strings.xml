@@ -28,6 +28,10 @@
   <string name="action_retry">Try again</string>
   <string name="action_cancel">Cancel</string>
   <string name="action_open_addons">Open Addons</string>
+  <!-- Mouse buttons at the edges of a row of titles that show the titles hidden past its end
+       (Next) or before its start (Previous). Spoken by screen readers. -->
+  <string name="action_row_next">Next</string>
+  <string name="action_row_previous">Previous</string>
   <string name="action_explore_series">Explore series</string>
 
   <!-- Short season and episode label. %1$d is the season number, %2$d the episode number. -->
@@ -95,7 +99,7 @@
 
   <!-- Details screen. -->
   <string name="details_tab_episodes">Episodes</string>
-  <string name="details_tab_related">You may also like</string>
+  <string name="details_tab_related">More like this</string>
   <string name="details_tab_details">Details</string>
   <!-- Season selector. %1$d is the season number. -->
   <string name="details_season">Season %1$d</string>
@@ -239,6 +243,45 @@
   <string name="action_resume">Resume</string>
   <string name="action_close">Close</string>
   <string name="home_continue_watching">Continue watching</string>
+  <!-- Home row of series the user follows that have an episode out since they last watched. -->
+  <string name="home_new_episodes">New episodes</string>
+  <!-- Under a series in New episodes; %1$s is the episode, for example "S2 E5". -->
+  <string name="home_new_episode_meta">%1$s · New</string>
+  <!-- Home row of titles like one the user watched; %1$s is that title. -->
+  <string name="home_because_you_watched">Because you watched %1$s</string>
+  <!-- Home row of a genre the user watches a lot; %1$s is the genre as the addon names it,
+       often in English ("Horror"), so phrase it to read well with any word. -->
+  <string name="home_more_genre">More %1$s</string>
+  <!-- Home row of titles saved to My list and not started yet. -->
+  <string name="home_from_your_list">From your list</string>
+  <!-- Small buttons beside the dots under the home hero that show the previous or next title. -->
+  <string name="home_hero_previous">Previous pick</string>
+  <string name="home_hero_next">Next pick</string>
+  <!-- A dot under the home hero, spoken: %1$d is its position, %2$d how many there are and
+       %3$s the title it shows. -->
+  <string name="home_hero_pick">Pick %1$d of %2$d: %3$s</string>
+  <!-- Home rows of the default catalogs (Cinemeta): what is popular now, the releases of the
+       current year and the best rated, for movies and for series. -->
+  <string name="home_trending_movies">Trending movies</string>
+  <string name="home_trending_series">Trending series</string>
+  <string name="home_new_movies">New releases in movies</string>
+  <string name="home_new_series">New releases in series</string>
+  <string name="home_featured_movies">Featured movies</string>
+  <string name="home_featured_series">Featured series</string>
+  <!-- Quiet label after a row title naming the addon the row comes from: %1$s is the addon,
+       such as "Cinemeta". -->
+  <string name="row_caption_by">by %1$s</string>
+  <!-- The same label when two rows share a name: %1$s is the type, such as "Series", and %2$s
+       the label above, such as "by Torrentio". -->
+  <string name="row_caption_kind_by">%1$s · %2$s</string>
+  <!-- Row of an addon catalog it calls only "top": %1$s is the addon, such as "YouTube". -->
+  <string name="row_popular_on">Popular on %1$s</string>
+  <!-- Row of an addon catalog it calls only "year" or "new": %1$s is the addon. -->
+  <string name="row_new_on">New on %1$s</string>
+  <!-- Short names of the default catalogs, in the filters of the Movies and Series pages. -->
+  <string name="catalog_trending">Trending</string>
+  <string name="catalog_new_releases">New releases</string>
+  <string name="catalog_featured">Featured</string>
   <string name="sources_searching">Looking for sources…</string>
   <!-- Marks the source the app recommends, at the top of the list. -->
   <string name="sources_best">Best match</string>

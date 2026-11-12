@@ -51,6 +51,18 @@ pub struct ProgressEntry {
     pub updated_at: i64,
 }
 
+/// A title the user has finished videos of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchedTitle {
+    pub id: String,
+    /// The video finished last: the movie itself, or an episode such as `tt0903747:1:2`.
+    pub last_video_id: String,
+    /// Unix time in milliseconds.
+    pub watched_at: i64,
+    /// How many of its videos are watched.
+    pub videos: u32,
+}
+
 const MIGRATIONS: &[&str] = &[
     // 1: settings, addons, my list and response cache.
     r"
@@ -398,6 +410,25 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Titles with watched videos, most recently watched first, at most `limit`: for each,
+    /// the video watched last, when, and how many of its videos are watched.
+    pub fn watched_titles(&self, limit: usize) -> Result<Vec<WatchedTitle>, StoreError> {
+        // SQLite fills the bare `video_id` from the row that holds the MAX.
+        let mut statement = self.connection.prepare(
+            "SELECT id, video_id, MAX(watched_at) AS last, COUNT(*) FROM watched
+             GROUP BY id ORDER BY last DESC, id LIMIT ?1",
+        )?;
+        let rows = statement.query_map([i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+            Ok(WatchedTitle {
+                id: row.get(0)?,
+                last_video_id: row.get(1)?,
+                watched_at: row.get(2)?,
+                videos: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     // Response cache
 
     /// A cached body and the time it was fetched (Unix milliseconds).
@@ -615,6 +646,33 @@ mod tests {
 
         store.remove_progress("a").expect("removes");
         assert!(store.progress("a").expect("reads").is_none());
+    }
+
+    #[test]
+    fn lists_watched_titles_by_their_last_watch() {
+        let store = Store::open_in_memory().expect("opens");
+        store.mark_watched("tt1", "tt1:1:1", 10).expect("marks");
+        store.mark_watched("tt1", "tt1:1:2", 30).expect("marks");
+        store.mark_watched("tt2", "tt2", 20).expect("marks");
+        let titles = store.watched_titles(10).expect("lists");
+        assert_eq!(
+            titles,
+            [
+                WatchedTitle {
+                    id: "tt1".into(),
+                    last_video_id: "tt1:1:2".into(),
+                    watched_at: 30,
+                    videos: 2,
+                },
+                WatchedTitle {
+                    id: "tt2".into(),
+                    last_video_id: "tt2".into(),
+                    watched_at: 20,
+                    videos: 1,
+                },
+            ]
+        );
+        assert_eq!(store.watched_titles(1).expect("lists").len(), 1);
     }
 
     #[test]

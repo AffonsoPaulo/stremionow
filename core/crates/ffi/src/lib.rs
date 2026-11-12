@@ -9,6 +9,7 @@
 
 mod account;
 mod core;
+mod home;
 mod panics;
 mod playback;
 mod records;
@@ -18,6 +19,7 @@ mod skips;
 mod streaming;
 
 pub use crate::core::StremioCore;
+pub use crate::home::{HomeEntry, HomeFeed, HomeListener, HomeReason, HomeSection};
 pub use crate::panics::{
     PanicDetails, PanicListener, TestCrash, set_panic_listener, trigger_test_crash,
 };

@@ -18,6 +18,8 @@
   <string name="action_retry">Tentar de novo</string>
   <string name="action_cancel">Cancelar</string>
   <string name="action_open_addons">Abrir Addons</string>
+  <string name="action_row_next">Próximos</string>
+  <string name="action_row_previous">Anteriores</string>
   <string name="action_explore_series">Explorar séries</string>
 
   <string name="episode_short">T%1$d E%2$d</string>
@@ -70,7 +72,7 @@
   <string name="search_see_all_label">Ver tudo em %1$s</string>
 
   <string name="details_tab_episodes">Episódios</string>
-  <string name="details_tab_related">Você também pode gostar</string>
+  <string name="details_tab_related">Títulos parecidos</string>
   <string name="details_tab_details">Detalhes</string>
   <string name="details_season">Temporada %1$d</string>
   <string name="details_specials">Especiais</string>
@@ -179,6 +181,27 @@
   <string name="action_resume">Continuar</string>
   <string name="action_close">Fechar</string>
   <string name="home_continue_watching">Continuar assistindo</string>
+  <string name="home_new_episodes">Novos episódios</string>
+  <string name="home_new_episode_meta">%1$s · Novo</string>
+  <string name="home_because_you_watched">Porque você assistiu a %1$s</string>
+  <string name="home_more_genre">Mais títulos de %1$s</string>
+  <string name="home_from_your_list">Da sua lista</string>
+  <string name="home_hero_previous">Destaque anterior</string>
+  <string name="home_hero_next">Próximo destaque</string>
+  <string name="home_hero_pick">Destaque %1$d de %2$d: %3$s</string>
+  <string name="home_trending_movies">Filmes em alta</string>
+  <string name="home_trending_series">Séries em alta</string>
+  <string name="home_new_movies">Lançamentos em filmes</string>
+  <string name="home_new_series">Lançamentos em séries</string>
+  <string name="home_featured_movies">Filmes em destaque</string>
+  <string name="home_featured_series">Séries em destaque</string>
+  <string name="row_caption_by">por %1$s</string>
+  <string name="row_caption_kind_by">%1$s · %2$s</string>
+  <string name="row_popular_on">Em alta no %1$s</string>
+  <string name="row_new_on">Novidades no %1$s</string>
+  <string name="catalog_trending">Em alta</string>
+  <string name="catalog_new_releases">Lançamentos</string>
+  <string name="catalog_featured">Em destaque</string>
   <string name="sources_searching">Procurando fontes…</string>
   <string name="sources_best">Melhor opção</string>
   <string name="sources_opens_outside">Abre fora do app</string>

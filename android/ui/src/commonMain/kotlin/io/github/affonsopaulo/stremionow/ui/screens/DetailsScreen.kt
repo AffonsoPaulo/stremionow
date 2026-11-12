@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,13 +30,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
@@ -50,24 +50,25 @@ import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
+import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
-import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnChip
 import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
+import io.github.affonsopaulo.stremionow.ui.components.SnHeroBackdrop
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
+import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
-import io.github.affonsopaulo.stremionow.ui.components.headerScrim
+import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
-import io.github.affonsopaulo.stremionow.ui.components.startScrim
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -132,17 +133,15 @@ class DetailsViewModel(
         }
     }
 
-    /** Titles from the same catalog type and main genre, a simple stand-in for recommendations. */
+    /**
+     * Titles like this one, scored by the core on genres, era, director and cast, without the
+     * ones the user has watched. A row of suggestions: on failure it simply stays empty.
+     */
     private suspend fun loadRelated(item: MetaItem) {
-        val genre = item.genres.firstOrNull() ?: return
-        val catalog =
-            runCatching { io { core.catalogs(kind) } }.getOrDefault(emptyList()).firstOrNull { genre in it.genres }
-                ?: return
         mutableRelated.value =
-            runCatching { core.catalogPage(catalog, genre, 0u) }
+            runCatching { core.similarTitles(item.kind, item.id) }
+                .onFailure { logWarning("Could not find titles like ${item.kind}/${item.id}", it) }
                 .getOrDefault(emptyList())
-                .filter { it.id != item.id }
-                .take(20)
     }
 }
 
@@ -217,86 +216,90 @@ private fun DetailsContent(
     val headerInset = LocalHeaderInset.current
     val heroInset = if (art != null) headerInset else 0.dp
 
-    SnMinimalScroll(topInset = headerInset) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            state = listState,
-            contentPadding = PaddingValues(top = headerInset - heroInset, bottom = SnSpacing.space16),
-        ) {
-            item(key = "hero") {
-                val height =
-                    when (SnLayout.formFactor) {
-                        FormFactor.Phone -> 420.dp
-                        FormFactor.Large -> 560.dp
-                        FormFactor.Tv -> (screenHeightDp() * 0.8f).dp
-                    }
-                val artScrim = if (art != null) Modifier.headerScrim() else Modifier
-                // Grows by the header's height, so its content stays where it was.
-                Box(Modifier.fillMaxWidth().heightIn(min = height + heroInset)) {
-                    SnArtwork(
-                        url = art,
-                        fallbackTitle = "",
-                        modifier = Modifier.matchParentSize().then(artScrim),
-                    )
-                    Box(
-                        Modifier.matchParentSize().startScrim(
-                            0f to SnColors.bg.copy(alpha = 0.95f),
-                            0.36f to SnColors.bg.copy(alpha = 0.7f),
-                            0.7f to SnColors.bg.copy(alpha = 0f),
-                        ),
-                    )
-                    Box(
-                        Modifier.matchParentSize().background(
-                            Brush.verticalGradient(
-                                0.55f to SnColors.bg.copy(alpha = 0f),
-                                1f to SnColors.bg,
-                            ),
-                        ),
-                    )
-                    Column(
-                        Modifier
-                            .align(Alignment.BottomStart)
-                            .widthIn(max = 660.dp)
-                            .padding(top = heroInset)
-                            .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
-                        verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-                    ) {
-                        TitleLogo(item)
-                        MetaLine(item, details.runtime, onOpenGenre)
-                        Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-                            WatchButton(details, progress, onPlay)
-                            SnButton(
-                                text =
-                                    stringResource(
-                                        if (inLibrary) Res.string.action_in_list else Res.string.action_add_to_list,
-                                    ),
-                                icon = if (inLibrary) SnIcons.Check else SnIcons.Plus,
-                                style = SnButtonStyle.Secondary,
-                                onClick = onToggleLibrary,
-                            )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val page = DpSize(maxWidth, maxHeight)
+        SnMinimalScroll(topInset = headerInset) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                state = listState,
+                contentPadding = PaddingValues(top = headerInset - heroInset, bottom = SnSpacing.space16),
+            ) {
+                item(key = "hero") {
+                    val height =
+                        when (SnLayout.formFactor) {
+                            FormFactor.Phone -> {
+                                420.dp + heroInset
+                            }
+
+                            FormFactor.Tv -> {
+                                (screenHeightDp() * 0.8f).dp + heroInset
+                            }
+
+                            // The picture's own shape as the window grows, up to most of its height.
+                            FormFactor.Large -> {
+                                heroHeight(page.width, page.height, min = 560.dp + heroInset, maxFraction = 0.8f)
+                            }
                         }
-                        item.description?.let { ExpandableDescription(item.id, it) }
+                    // Grows by the header's height, so its content stays where it was.
+                    Box(Modifier.fillMaxWidth().heightIn(min = height)) {
+                        SnHeroBackdrop(
+                            url = art,
+                            textWidth = DetailsTextWidth,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                        Column(
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .widthIn(max = DetailsTextWidth + SnLayout.gutter * 2)
+                                .padding(top = heroInset)
+                                .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
+                            verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+                        ) {
+                            TitleLogo(item)
+                            MetaLine(item, details.runtime, onOpenGenre)
+                            Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+                                WatchButton(details, progress, onPlay)
+                                SnButton(
+                                    text =
+                                        stringResource(
+                                            if (inLibrary) Res.string.action_in_list else Res.string.action_add_to_list,
+                                        ),
+                                    icon = if (inLibrary) SnIcons.Check else SnIcons.Plus,
+                                    style = SnButtonStyle.Secondary,
+                                    onClick = onToggleLibrary,
+                                )
+                            }
+                            item.description?.let { ExpandableDescription(item.id, it) }
+                        }
                     }
                 }
-            }
-            // Tabs and rows scroll sideways without the header's inset.
-            item(key = "tabs") {
-                SnMinimalScroll {
-                    SnTabs(
-                        tabs,
-                        tab.coerceAtMost(tabs.lastIndex),
-                        { tab = it },
-                        Modifier.padding(horizontal = SnLayout.gutter),
-                    )
+                // Tabs and rows scroll sideways without the header's inset.
+                item(key = "tabs") {
+                    SnMinimalScroll {
+                        SnTabs(
+                            tabs,
+                            tab.coerceAtMost(tabs.lastIndex),
+                            { tab = it },
+                            Modifier.padding(horizontal = SnLayout.gutter),
+                        )
+                    }
                 }
-            }
-            item(key = "tab-content") {
-                SnMinimalScroll {
-                    Box(Modifier.padding(top = SnSpacing.space6)) {
-                        when (tabs.getOrNull(tab)) {
-                            stringResource(Res.string.details_tab_episodes) -> EpisodesTab(details, progress, onPlay)
-                            stringResource(Res.string.details_tab_related) -> RelatedTab(related, onOpenTitle)
-                            else -> InfoTab(details, onOpenGenre, onSearchPerson)
+                item(key = "tab-content") {
+                    SnMinimalScroll {
+                        Box(Modifier.padding(top = SnSpacing.space6)) {
+                            when (tabs.getOrNull(tab)) {
+                                stringResource(Res.string.details_tab_episodes) -> {
+                                    EpisodesTab(details, progress, onPlay)
+                                }
+
+                                stringResource(Res.string.details_tab_related) -> {
+                                    RelatedTab(related, onOpenTitle)
+                                }
+
+                                else -> {
+                                    InfoTab(details, onOpenGenre, onSearchPerson)
+                                }
+                            }
                         }
                     }
                 }
@@ -304,6 +307,9 @@ private fun DetailsContent(
         }
     }
 }
+
+/** How wide the title's logo, facts, buttons and synopsis may grow over its art. */
+private val DetailsTextWidth = 580.dp
 
 /**
  * Watch, or Resume with the episode where the user stopped. A new series starts at its first
@@ -384,10 +390,7 @@ private fun EpisodesTab(
                 style = SnTypography.body.copy(color = SnColors.fgMuted),
             )
         }
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-        ) {
+        SnRow(controlsCenter = EpisodeRowControlsCenter) {
             items(episodes, key = { it.id }) { episode ->
                 val number = episode.episode?.toInt()
                 SnEpisodeCard(

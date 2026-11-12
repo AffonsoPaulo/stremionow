@@ -3272,6 +3272,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "stremionow-curation"
+version = "0.0.1"
+
+[[package]]
 name = "stremionow-ffi"
 version = "0.0.1"
 dependencies = [
@@ -3280,6 +3284,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stremionow-addons",
+ "stremionow-curation",
  "stremionow-library",
  "stremionow-markers",
  "stremionow-protocol",

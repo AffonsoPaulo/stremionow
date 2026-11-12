@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -36,11 +36,15 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
-/** Title of a content section, announced as a heading, with an optional action at the end. */
+/**
+ * Title of a content section, announced as a heading, with an optional action at the end.
+ * A [caption], such as the addon a row comes from, follows the title in a quieter style.
+ */
 @Composable
 fun SnSectionHeader(
     title: String,
     modifier: Modifier = Modifier,
+    caption: String? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -48,16 +52,34 @@ fun SnSectionHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {
-        BasicText(
-            title,
-            modifier = Modifier.weight(1f).semantics { heading() },
-            style = SnTypography.sectionTitle.copy(color = SnColors.fg),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(
+                title,
+                modifier = Modifier.weight(1f, fill = false).semantics { heading() },
+                style = SnTypography.sectionTitle.copy(color = SnColors.fg),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!caption.isNullOrBlank()) {
+                BasicText(
+                    caption,
+                    modifier = Modifier.widthIn(max = MaxCaptionWidth),
+                    style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         action?.invoke()
     }
 }
+
+/** A long addon name gives way to the row's title. */
+private val MaxCaptionWidth = 240.dp
 
 /** "See all ›" link for a section header. [label] is the spoken name, e.g. "See all Movies". */
 @Composable
@@ -88,10 +110,9 @@ fun SnPosterRow(
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     modifier: Modifier = Modifier,
 ) {
-    LazyRow(
+    SnRow(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        controlsCenter = SnSpacing.space2 + PosterCardWidth * 1.5f / 2,
     ) {
         items(items, key = { "${it.kind}/${it.id}" }) { item ->
             SnPosterCard(item.name, item.poster, subtitle(item), onClick = { onOpen(item) })
@@ -107,10 +128,11 @@ fun SnPosterSection(
     onOpen: (MetaItem) -> Unit,
     modifier: Modifier = Modifier,
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
+    caption: String? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-        SnSectionHeader(title, action = action)
+        SnSectionHeader(title, caption = caption, action = action)
         SnPosterRow(items, onOpen, subtitle)
     }
 }

@@ -27,6 +27,7 @@
 //! # }
 //! ```
 
+mod address;
 mod cache;
 mod error;
 mod files;

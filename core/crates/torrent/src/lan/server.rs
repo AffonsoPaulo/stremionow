@@ -427,7 +427,7 @@ impl Inner {
                     continue;
                 }
             };
-            if !net::is_allowed_peer(peer.ip()) {
+            if !net::is_allowed_peer(self.policy, peer.ip()) {
                 continue;
             }
             let Some(slot) = self.admit(peer.ip()) else {

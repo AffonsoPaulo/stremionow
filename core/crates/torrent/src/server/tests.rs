@@ -18,7 +18,7 @@ use crate::torrent::DATA_DIR;
 
 const HASH: &str = "08ada5a7a6183aae1e09d831df6748d566095a10";
 
-async fn offline_server(max_cache_bytes: u64) -> (StreamServer, tempfile::TempDir) {
+pub(crate) async fn offline_server(max_cache_bytes: u64) -> (StreamServer, tempfile::TempDir) {
     let cache = tempfile::tempdir().expect("temp dir");
     let config = ServerConfig {
         cache_dir: cache.path().to_path_buf(),
@@ -31,7 +31,7 @@ async fn offline_server(max_cache_bytes: u64) -> (StreamServer, tempfile::TempDi
 }
 
 /// A plain client; built after the server, which installs the TLS provider reqwest needs.
-fn client() -> reqwest::Client {
+pub(crate) fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -43,7 +43,7 @@ fn origin(server: &StreamServer) -> String {
     format!("http://127.0.0.1:{}", server.shared.port)
 }
 
-async fn get(url: &str, range: Option<&str>) -> reqwest::Response {
+pub(crate) async fn get(url: &str, range: Option<&str>) -> reqwest::Response {
     let mut request = client().get(url);
     if let Some(range) = range {
         request = request.header(header::RANGE, range);
@@ -57,13 +57,17 @@ fn header_of(response: &reqwest::Response, name: header::HeaderName) -> Option<S
 }
 
 /// The bytes of a fake film: a pattern that reveals any offset mistake.
-fn film(len: usize) -> Vec<u8> {
+pub(crate) fn film(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i % 251) as u8).collect()
 }
 
 /// Adds a torrent whose data is already in the cache, as if downloaded earlier, and returns
 /// its info hash and stream URL.
-async fn cached_torrent(server: &StreamServer, cache: &Path, content: &[u8]) -> (String, String) {
+pub(crate) async fn cached_torrent(
+    server: &StreamServer,
+    cache: &Path,
+    content: &[u8],
+) -> (String, String) {
     let source = tempfile::tempdir().expect("temp dir");
     let file = source.path().join("movie.mkv");
     fs::write(&file, content).expect("write film");

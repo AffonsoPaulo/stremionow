@@ -46,9 +46,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
+import io.github.affonsopaulo.stremionow.core.FallbackReason
 import io.github.affonsopaulo.stremionow.core.SkipSegment
 import io.github.affonsopaulo.stremionow.core.TorrentPhase
 import io.github.affonsopaulo.stremionow.core.TorrentProgress
+import io.github.affonsopaulo.stremionow.core.TorrentSource
 import io.github.affonsopaulo.stremionow.player.Chapters
 import io.github.affonsopaulo.stremionow.player.Markers
 import io.github.affonsopaulo.stremionow.player.PlaybackPrompt
@@ -354,9 +356,38 @@ private fun PanelOption(
     }
 }
 
-/** "Looking for peers…", "Checking downloaded data…" or "12 peers · 2.4 MB/s". */
+/**
+ * "Looking for peers…", "Checking downloaded data…" or "12 peers · 2.4 MB/s", after a line
+ * saying which device downloads the torrent when it is not this one, or why this one took over.
+ */
 @Composable
-internal fun torrentStatusText(progress: TorrentProgress): String =
+internal fun torrentStatusText(progress: TorrentProgress): String {
+    val source =
+        when (val source = progress.source) {
+            is TorrentSource.Remote -> {
+                stringResource(Res.string.torrent_on_device, source.name)
+            }
+
+            is TorrentSource.FellBack -> {
+                stringResource(
+                    when (source.reason) {
+                        FallbackReason.UNREACHABLE -> Res.string.torrent_fallback_unreachable
+                        FallbackReason.UNPAIRED -> Res.string.torrent_fallback_unpaired
+                        FallbackReason.PAUSED -> Res.string.torrent_fallback_paused
+                    },
+                    source.name,
+                )
+            }
+
+            TorrentSource.ThisDevice -> {
+                null
+            }
+        }
+    return listOfNotNull(source, torrentPhaseText(progress)).joinToString("\n")
+}
+
+@Composable
+private fun torrentPhaseText(progress: TorrentProgress): String =
     when (progress.phase) {
         TorrentPhase.METADATA -> {
             stringResource(Res.string.torrent_finding_peers)

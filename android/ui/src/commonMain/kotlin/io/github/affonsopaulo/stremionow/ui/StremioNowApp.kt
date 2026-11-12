@@ -61,6 +61,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.screens.AddonsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.DetailsScreen
+import io.github.affonsopaulo.stremionow.ui.screens.DevicesScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ExploreScreen
 import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
@@ -90,6 +91,7 @@ private object Routes {
     const val PERSON = "person/{name}"
     const val SOURCES = "sources"
     const val SETTINGS = "settings"
+    const val DEVICES = "settings/devices"
     const val ONBOARDING = "onboarding"
     const val SIGN_IN = "sign-in"
     const val PLAYER = "player"
@@ -337,7 +339,10 @@ private fun AppNavHost(
             )
         }
         page(Routes.ADDONS) { AddonsScreen() }
-        page(Routes.SETTINGS) { SettingsScreen() }
+        page(Routes.SETTINGS) {
+            SettingsScreen(onOpenDevices = { navController.navigate(Routes.DEVICES) { launchSingleTop = true } })
+        }
+        page(Routes.DEVICES) { DevicesScreen() }
         page(Routes.SIGN_IN) {
             OnboardingScreen(onFinished = { navController.popBackStack() }, signInOnly = true)
         }
@@ -490,6 +495,7 @@ private fun phoneTitle(
         Routes.DETAILS -> ""
         Routes.SOURCES -> stringResource(Res.string.sources_title)
         Routes.SETTINGS -> stringResource(Res.string.settings_title)
+        Routes.DEVICES -> stringResource(Res.string.devices_title)
         else -> null
     }
 

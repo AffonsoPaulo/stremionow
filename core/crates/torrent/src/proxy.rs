@@ -12,6 +12,7 @@ use hyper::{Method, Response, StatusCode};
 use url::Url;
 
 use crate::TorrentError;
+use crate::address::{is_private_host, is_private_ip};
 use crate::http::{self, Body};
 
 /// Registered sources kept at once; the oldest is forgotten first. A session plays a handful.
@@ -119,7 +120,7 @@ impl Proxy {
 }
 
 /// The source's status, selected headers and, unless `head_only`, its streamed body.
-fn relay(upstream: reqwest::Response, head_only: bool) -> Response<Body> {
+pub(crate) fn relay(upstream: reqwest::Response, head_only: bool) -> Response<Body> {
     let status = upstream.status();
     let headers: Vec<_> = FORWARDED_HEADERS
         .iter()
@@ -211,84 +212,9 @@ impl reqwest::dns::Resolve for PublicResolver {
     }
 }
 
-/// Whether `ip` is on this device or a network that is not the public internet: loopback,
-/// private, shared (carrier-grade NAT), link-local, unique-local, unspecified or broadcast.
-pub(crate) fn is_private_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(ip) => is_private_v4(ip),
-        std::net::IpAddr::V6(ip) => {
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || (ip.segments()[0] & 0xfe00) == 0xfc00
-                || (ip.segments()[0] & 0xffc0) == 0xfe80
-                || ip.to_ipv4_mapped().is_some_and(is_private_v4)
-        }
-    }
-}
-
-fn is_private_v4(ip: std::net::Ipv4Addr) -> bool {
-    let [first, second, ..] = ip.octets();
-    ip.is_loopback()
-        || ip.is_private()
-        || ip.is_link_local()
-        || ip.is_unspecified()
-        || ip.is_broadcast()
-        || first == 0
-        || (first == 100 && (64..128).contains(&second))
-}
-
-/// Whether `url` points at this device or a private network, judging by its text alone:
-/// IP literals and local names. Names that resolve to private addresses are caught by
-/// [`PublicResolver`] when connecting.
-pub(crate) fn is_private_host(url: &url::Url) -> bool {
-    match url.host() {
-        Some(url::Host::Ipv4(ip)) => is_private_v4(ip),
-        Some(url::Host::Ipv6(ip)) => is_private_ip(std::net::IpAddr::V6(ip)),
-        Some(url::Host::Domain(name)) => {
-            let name = name.to_ascii_lowercase();
-            name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local")
-        }
-        None => true,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn recognizes_private_hosts() {
-        for private in [
-            "http://127.0.0.1/x",
-            "http://10.0.0.2/x",
-            "http://192.168.1.10/x",
-            "http://169.254.1.1/x",
-            "http://[::1]/x",
-            "http://[fd00::1]/x",
-            "http://[fe80::1]/x",
-            "http://localhost/x",
-            "http://nas.local/x",
-            "http://100.64.0.1/x",
-            "http://0.1.2.3/x",
-            "http://[::ffff:192.168.1.1]/x",
-            "http://[::ffff:169.254.0.1]/x",
-        ] {
-            assert!(
-                is_private_host(&url::Url::parse(private).expect("url")),
-                "{private}"
-            );
-        }
-        for public in [
-            "https://cdn.example.org/x",
-            "http://8.8.8.8/x",
-            "http://[2606:4700::1]/x",
-        ] {
-            assert!(
-                !is_private_host(&url::Url::parse(public).expect("url")),
-                "{public}"
-            );
-        }
-    }
 
     #[tokio::test]
     async fn public_sources_never_resolve_to_private_addresses() {

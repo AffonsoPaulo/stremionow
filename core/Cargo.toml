@@ -53,6 +53,16 @@ http-body-util = "0.1.5"
 bytes = "1.12.1"
 tokio-util = { version = "0.7.20", features = ["io"] }
 getrandom = "0.4.3"
+# Serving to other devices (ADR 0008).
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "ring"] }
+ring = "0.17.14"
+spake2 = "0.4.0"
+mdns-sd = "0.21.7"
+if-addrs = "0.15.0"
+# Windows: adapter types, gateways and the gateway's MAC address, to tell the home network from
+# others (ADR 0008). Already in the tree through if-addrs and tokio.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 
 [profile.release]
 lto = "thin"

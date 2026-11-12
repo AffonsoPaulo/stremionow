@@ -24,6 +24,11 @@ use crate::server::{Holder, Shared};
 /// How often progress is read from the server.
 const STATUS_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Progress reads in a row that find the torrent gone before polling stops. The server lost
+/// it (its lease expired, it restarted) or nobody plays it any more; a later player request
+/// adds it again and polling resumes.
+const MAX_MISSING: u32 = 30;
+
 /// Where a torrent is being downloaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TorrentRoute {
@@ -51,6 +56,8 @@ pub(crate) struct RemoteTorrent {
     taking_over: tokio::sync::Mutex<()>,
     /// Stops the progress poller.
     pub(crate) stopped: CancellationToken,
+    /// Whether a poller is running.
+    polling: AtomicBool,
 }
 
 impl RemoteTorrent {
@@ -70,7 +77,15 @@ impl RemoteTorrent {
             fell_back: AtomicBool::new(false),
             taking_over: tokio::sync::Mutex::new(()),
             stopped: CancellationToken::new(),
+            polling: AtomicBool::new(false),
         })
+    }
+
+    /// Starts reading progress from the server, unless that is already happening.
+    pub(crate) fn start_polling(self: &Arc<Self>) {
+        if !self.polling.swap(true, Ordering::Relaxed) {
+            tokio::spawn(Arc::clone(self).poll());
+        }
     }
 
     pub(crate) fn route(&self) -> TorrentRoute {
@@ -89,21 +104,41 @@ impl RemoteTorrent {
             .clone()
     }
 
-    /// Reads progress from the server until stopped or fallen back.
-    pub(crate) async fn poll(self: Arc<Self>) {
+    /// Reads progress from the server until stopped, fallen back, unpaired, or the server
+    /// keeps saying it does not have the torrent.
+    async fn poll(self: Arc<Self>) {
+        let mut missing = 0;
         loop {
             tokio::select! {
-                () = self.stopped.cancelled() => return,
+                () = self.stopped.cancelled() => break,
                 () = tokio::time::sleep(STATUS_INTERVAL) => {}
             }
             if self.fell_back.load(Ordering::Relaxed) {
-                return;
+                break;
             }
-            // Failures keep the last status; the relay notices a server that went away.
-            if let Ok(status) = self.server.status(self.hash).await {
-                *self.status.lock().unwrap_or_else(PoisonError::into_inner) = status;
+            match self.server.status(self.hash).await {
+                Ok(Some(status)) => {
+                    missing = 0;
+                    self.set_status(Some(status));
+                }
+                // Before the server has recorded the torrent, "not found" is expected.
+                Ok(None) if self.index.get().is_some() => {
+                    missing += 1;
+                    self.set_status(None);
+                    if missing >= MAX_MISSING {
+                        break;
+                    }
+                }
+                Err(RemoteError::Unpaired | RemoteError::CertificateChanged) => break,
+                // Failures keep the last status; the relay notices a server that went away.
+                Ok(None) | Err(_) => {}
             }
         }
+        self.polling.store(false, Ordering::Relaxed);
+    }
+
+    fn set_status(&self, status: Option<TorrentStatus>) {
+        *self.status.lock().unwrap_or_else(PoisonError::into_inner) = status;
     }
 
     /// Answers a player request: from the server, or from this device after taking over.
@@ -117,9 +152,13 @@ impl RemoteTorrent {
             return http::not_found();
         };
         if !self.fell_back.load(Ordering::Relaxed) {
-            match self.forward(method, index, range).await {
+            match Arc::clone(self).forward(method, index, range).await {
                 Ok(response) => return response,
-                Err(RemoteError::Unreachable | RemoteError::Unpaired) => {}
+                Err(
+                    RemoteError::Unreachable
+                    | RemoteError::Unpaired
+                    | RemoteError::CertificateChanged,
+                ) => {}
                 Err(_) => return http::empty(StatusCode::BAD_GATEWAY),
             }
             if !self.take_over(shared, index).await {
@@ -138,7 +177,7 @@ impl RemoteTorrent {
     /// included, comes from a server that is up, and goes to the player as it is; only a
     /// server that cannot be reached is replaced by this device.
     async fn forward(
-        &self,
+        self: Arc<Self>,
         method: &Method,
         index: usize,
         range: Option<&HeaderValue>,
@@ -150,7 +189,7 @@ impl RemoteTorrent {
                 .stream(method, self.hash, index, range)
                 .send()
                 .await
-                .map_err(|_| self.server.connection_error())?;
+                .map_err(|error| super::client::connection_error(&error))?;
             match upstream.status() {
                 StatusCode::UNAUTHORIZED => return Err(RemoteError::Unpaired),
                 StatusCode::NOT_FOUND if !readded => {
@@ -159,6 +198,9 @@ impl RemoteTorrent {
                     let again = self.server.add(self.hash, file, &self.trackers).await?;
                     if again != index {
                         return Err(RemoteError::Protocol);
+                    }
+                    if !self.stopped.is_cancelled() {
+                        self.start_polling();
                     }
                 }
                 _ => return Ok(crate::proxy::relay(upstream, method == Method::HEAD)),

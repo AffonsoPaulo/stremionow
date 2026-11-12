@@ -2,7 +2,7 @@
 //! Serving to other devices: one device downloads torrents for the others on the home
 //! network (ADR 0008).
 //!
-//! - `net`: which interfaces and addresses may be used.
+//! - `net`, `network`: which addresses may be used, and which network each is on.
 //! - `tls`, `pairing`, `clients`: the server's certificate, pairing codes and paired devices.
 //! - `server`: the API paired devices use.
 //! - `discovery`: mDNS announcements and browsing.
@@ -11,7 +11,9 @@
 mod client;
 mod clients;
 mod discovery;
+mod limits;
 mod net;
+mod network;
 mod pairing;
 mod relay;
 mod server;
@@ -23,4 +25,4 @@ pub use discovery::{DiscoveredServer, discover};
 pub(crate) use relay::RemoteTorrent;
 pub use relay::TorrentRoute;
 pub(crate) use server::DEFAULT_PORT;
-pub use server::{LanConfig, LanServer, LanStatus, PairedDevice, PairingCode};
+pub use server::{LanConfig, LanServer, LanStatus, PairedDevice, PairingCode, PauseReason};

@@ -23,7 +23,17 @@ struct Harness {
 }
 
 impl Harness {
+    /// A server turned on now, on loopback's stand-in home network.
     async fn start(saved_state: Option<String>) -> Self {
+        Self::start_with(saved_state, None, true).await
+    }
+
+    /// `network` stands in for the network the device is on (see `BindPolicy::Loopback`).
+    async fn start_with(
+        saved_state: Option<String>,
+        network: Option<&str>,
+        turned_on: bool,
+    ) -> Self {
         let (stream, cache) = offline_server(0).await;
         let saved = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&saved);
@@ -31,6 +41,8 @@ impl Harness {
             device_name: "Living room PC".to_owned(),
             saved_state,
             on_state_change: Box::new(move |state| sink.lock().expect("lock").push(state)),
+            network_hint: network.map(str::to_owned),
+            serve_on_current_network: turned_on,
         };
         let lan = LanServer::start(stream.clone(), config, BindPolicy::Loopback)
             .await
@@ -267,9 +279,13 @@ async fn removed_devices_and_reset_servers_must_pair_again() {
     let phone = moved(&phone, &restarted);
     assert_eq!(phone.check().await, RemoteHealth::Ready);
 
-    // A reset server has a new certificate: the client is told to pair again.
+    // A reset server has a new certificate. The client notices, from that very request,
+    // and can look for its server elsewhere before asking the user to pair again.
     let reset = Harness::start(None).await;
-    assert_eq!(moved(&phone, &reset).check().await, RemoteHealth::Unpaired);
+    assert_eq!(
+        moved(&phone, &reset).check().await,
+        RemoteHealth::CertificateChanged
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -455,7 +471,7 @@ async fn idle_and_excess_connections_are_dropped() {
     let address = harness.address();
     // Connections that never start TLS hold slots only until the handshake timeout.
     let mut idle = Vec::new();
-    for _ in 0..MAX_CONNECTIONS_PER_PEER {
+    for _ in 0..super::super::limits::MAX_PER_PEER {
         idle.push(TcpStream::connect(&address).await.expect("connect"));
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -510,4 +526,202 @@ fn the_oldest_torrent_of_a_device_makes_room() {
         "already held"
     );
     assert_eq!(oldest_beyond_limit(&holdings, "phone", hashes[3]), None);
+}
+
+/// Waits for the server to have reconciled with a network change.
+async fn settle(harness: &Harness, paused: Option<PauseReason>) {
+    for _ in 0..50 {
+        if harness.lan.status().paused == paused {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("still {:?}", harness.lan.status().paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn serving_follows_the_network_where_it_was_turned_on() {
+    let harness = Harness::start_with(None, Some("home"), true).await;
+    assert_eq!(harness.lan.status().paused, None);
+    let address = harness.address();
+    let remote = harness.pair("TV").await;
+
+    // Another network: nothing listens, and the state says why.
+    harness.lan.set_network_hint(Some("cafe".to_owned()));
+    settle(&harness, Some(PauseReason::OtherNetwork)).await;
+    assert!(harness.lan.status().addresses.is_empty());
+    assert_eq!(remote.check().await, RemoteHealth::Unreachable);
+    assert!(TcpStream::connect(&address).await.is_err());
+
+    // Back home, it serves again on its own.
+    harness.lan.set_network_hint(Some("home".to_owned()));
+    settle(&harness, None).await;
+    assert_eq!(remote.check().await, RemoteHealth::Ready);
+
+    // Only the user makes another network the home network.
+    harness.lan.set_network_hint(Some("office".to_owned()));
+    settle(&harness, Some(PauseReason::OtherNetwork)).await;
+    harness
+        .lan
+        .serve_on_this_network()
+        .await
+        .expect("serves here");
+    assert_eq!(harness.lan.status().paused, None);
+    harness.lan.set_network_hint(Some("home".to_owned()));
+    settle(&harness, Some(PauseReason::OtherNetwork)).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_restart_never_adopts_the_current_network() {
+    // Serving restored at launch, on a network the user never chose, stays paused.
+    let harness = Harness::start_with(None, Some("hotel"), false).await;
+    assert_eq!(harness.lan.status().paused, Some(PauseReason::OtherNetwork));
+    assert!(harness.lan.status().addresses.is_empty());
+
+    // The home network is part of the saved state.
+    let home = Harness::start_with(None, Some("home"), true).await;
+    let saved = home.last_saved();
+    home.lan.stop().await;
+    drop(home);
+    let restarted = Harness::start_with(Some(saved.clone()), Some("home"), false).await;
+    assert_eq!(restarted.lan.status().paused, None);
+    restarted.lan.stop().await;
+    drop(restarted);
+    let elsewhere = Harness::start_with(Some(saved), Some("hotel"), false).await;
+    assert_eq!(
+        elsewhere.lan.status().paused,
+        Some(PauseReason::OtherNetwork)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn saves_arrive_in_order() {
+    let harness = Arc::new(Harness::start(None).await);
+    let mut devices = Vec::new();
+    for i in 0..3 {
+        tokio::time::sleep(pairing::MIN_ATTEMPT_INTERVAL).await;
+        let code = harness.lan.new_pairing_code().expect("code").code;
+        pair(&harness.address(), &code, &format!("Device {i}"))
+            .await
+            .expect("paired");
+        devices.push(format!("Device {i}"));
+    }
+    let ids: Vec<String> = harness
+        .lan
+        .status()
+        .devices
+        .into_iter()
+        .map(|device| device.id)
+        .collect();
+    let removals = ids.iter().map(|id| {
+        let harness = Arc::clone(&harness);
+        let id = id.clone();
+        tokio::spawn(async move { harness.lan.remove_device(&id).await })
+    });
+    for removal in removals {
+        assert!(removal.await.expect("task"));
+    }
+    // Whatever order the removals ran in, the last state handed over has none of them.
+    let last = harness.last_saved();
+    for name in devices {
+        assert!(!last.contains(&name), "{name} came back");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removing_a_device_ends_its_open_streams() {
+    let harness = Harness::start(None).await;
+    let content = film(16 * 1024 * 1024);
+    let (hash, _) = cached_torrent(&harness.stream, harness._cache.path(), &content).await;
+    let remote = harness.pair("TV").await;
+    let (client, _client_cache) = offline_server(0).await;
+    let url = client
+        .remote_torrent_url(&remote, &hash, None, &[])
+        .await
+        .expect("remote url");
+    let mut response = crate::server::tests::client()
+        .get(&url)
+        .send()
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let first = response.chunk().await.expect("chunk").expect("data");
+    assert!(!first.is_empty());
+    let id = harness.lan.status().devices[0].id.clone();
+    assert!(harness.lan.remove_device(&id).await);
+    let mut received = first.len();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        received += chunk.len();
+    }
+    assert!(received < content.len(), "the stream ended early");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gone_torrents_and_switched_files_answer_differently() {
+    let harness = Harness::start(None).await;
+    let (hash, _) = cached_torrent(&harness.stream, harness._cache.path(), &film(50_000)).await;
+    let remote = harness.pair("TV").await;
+    let (client, _client_cache) = offline_server(0).await;
+    client
+        .remote_torrent_url(&remote, &hash, None, &[])
+        .await
+        .expect("remote url");
+    let raw = pinned_client(&harness);
+    let base = format!("https://{}", harness.address());
+    let token = token_of(&remote);
+    let error = |response: reqwest::Response| async move {
+        let status = response.status();
+        let body: wire::Failure = response.json().await.expect("json");
+        assert_eq!(body.message, None, "no details leave the server");
+        (status, body.error)
+    };
+    let other_file = raw
+        .get(format!("{base}/v1/torrents/{hash}/1"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("answer");
+    assert_eq!(
+        error(other_file).await,
+        (StatusCode::CONFLICT, "file_switched".to_owned())
+    );
+    // A torrent that stopped is gone, not switched: the relay may add it again.
+    harness
+        .stream
+        .shared
+        .engine
+        .stop(InfoHash::parse(&hash).expect("hash"))
+        .await;
+    let gone = raw
+        .get(format!("{base}/v1/torrents/{hash}/0"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("answer");
+    assert_eq!(
+        error(gone).await,
+        (StatusCode::NOT_FOUND, "not_found".to_owned())
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_torrents_report_only_a_code() {
+    let harness = Harness::start(None).await;
+    let remote = harness.pair("TV").await;
+    let raw = pinned_client(&harness);
+    let response = raw
+        .post(format!("https://{}/v1/torrents", harness.address()))
+        .bearer_auth(token_of(&remote))
+        .json(&serde_json::json!({
+            "info_hash": "1111111111111111111111111111111111111111",
+            "file_idx": null,
+            "trackers": ["tracker:udp://127.0.0.1:1/announce"]
+        }))
+        .send()
+        .await
+        .expect("answer");
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: wire::Failure = response.json().await.expect("json");
+    assert_eq!(body.message, None);
+    assert!(!body.error.is_empty());
 }

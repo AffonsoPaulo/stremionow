@@ -66,16 +66,23 @@ pub enum PairError {
 pub enum RemoteError {
     #[error("the other device cannot be reached")]
     Unreachable,
-    /// The server no longer knows this device's token: it was removed there, or the server
-    /// was reset.
+    /// The server no longer knows this device's token: it was removed there.
     #[error("the other device no longer recognizes this one")]
     Unpaired,
+    /// Something at the server's address presented another certificate: the server was
+    /// reset, or its address now belongs to another device. Look for the server elsewhere
+    /// before asking the user to pair again.
+    #[error("another device answers at the other device's address")]
+    CertificateChanged,
     /// The server is not starting torrents right now (it is on mobile data).
     #[error("the other device is not starting torrents right now")]
     Paused,
     /// The torrent itself failed on the server: no peers, no video file.
     #[error("{0}")]
     Torrent(String),
+    /// The torrent was stopped while it was being added.
+    #[error("the torrent was stopped")]
+    Stopped,
     #[error("unexpected answer from the other device")]
     Protocol,
 }
@@ -86,6 +93,8 @@ pub enum RemoteHealth {
     Ready,
     Unreachable,
     Unpaired,
+    /// Another certificate at the server's address; see [`RemoteError::CertificateChanged`].
+    CertificateChanged,
 }
 
 /// A paired server. Cheap to clone.
@@ -95,7 +104,6 @@ pub struct RemoteServer {
 }
 
 struct Inner {
-    verifier: Arc<PinnedVerifier>,
     address: SocketAddr,
     server_id: String,
     name: String,
@@ -123,11 +131,9 @@ impl RemoteServer {
         token: String,
         fingerprint: Fingerprint,
     ) -> Result<Self, TorrentError> {
-        let verifier = PinnedVerifier::pinned(fingerprint);
-        let http = http_client(Arc::clone(&verifier))?;
+        let http = http_client(PinnedVerifier::pinned(fingerprint))?;
         Ok(Self {
             inner: Arc::new(Inner {
-                verifier,
                 base: format!("https://{address}"),
                 address,
                 server_id,
@@ -218,8 +224,8 @@ impl RemoteServer {
             }
             Ok(response) if response.status() == StatusCode::UNAUTHORIZED => RemoteHealth::Unpaired,
             Ok(_) => RemoteHealth::Unreachable,
-            Err(_) => match self.connection_error() {
-                RemoteError::Unpaired => RemoteHealth::Unpaired,
+            Err(error) => match connection_error(&error) {
+                RemoteError::CertificateChanged => RemoteHealth::CertificateChanged,
                 _ => RemoteHealth::Unreachable,
             },
         }
@@ -252,7 +258,7 @@ impl RemoteServer {
             .json(&body)
             .send()
             .await
-            .map_err(|_| self.connection_error())?;
+            .map_err(|error| connection_error(&error))?;
         let added: wire::Added = answer(response).await?;
         Ok(added.index)
     }
@@ -267,7 +273,7 @@ impl RemoteServer {
             .timeout(SHORT_TIMEOUT)
             .send()
             .await
-            .map_err(|_| self.connection_error())?;
+            .map_err(|error| connection_error(&error))?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -304,16 +310,6 @@ impl RemoteServer {
             request = request.header(header::RANGE, range.clone());
         }
         request
-    }
-
-    /// Why a request could not be sent: a server with another certificate was reset (or is
-    /// an impostor), so this device must pair again; anything else is a network problem.
-    pub(crate) fn connection_error(&self) -> RemoteError {
-        if self.inner.verifier.take_mismatch() {
-            RemoteError::Unpaired
-        } else {
-            RemoteError::Unreachable
-        }
     }
 
     fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
@@ -445,6 +441,28 @@ async fn post<B: Serialize, T: DeserializeOwned>(
     })
 }
 
+/// Why a request to the paired server could not be sent: another certificate at its address,
+/// or a network problem.
+pub(crate) fn connection_error(error: &reqwest::Error) -> RemoteError {
+    if super::tls::is_pin_mismatch(error) {
+        RemoteError::CertificateChanged
+    } else {
+        RemoteError::Unreachable
+    }
+}
+
+/// What the server's error code means, for logs; the server sends no details.
+fn torrent_failure(code: &str) -> RemoteError {
+    match code {
+        "metadata_timeout" => {
+            RemoteError::Torrent("no peer sent the torrent's file list in time".to_owned())
+        }
+        "no_video_file" => RemoteError::Torrent("the torrent contains no video file".to_owned()),
+        "stopped" => RemoteError::Stopped,
+        _ => RemoteError::Torrent("the torrent failed on the other device".to_owned()),
+    }
+}
+
 /// The body of a successful answer, or the error it reports.
 async fn answer<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, RemoteError> {
     let status = response.status();
@@ -458,8 +476,9 @@ async fn answer<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, R
     Err(match failure {
         Some(failure) if failure.error == "torrents_paused" => RemoteError::Paused,
         Some(failure) if status == StatusCode::UNPROCESSABLE_ENTITY => {
-            RemoteError::Torrent(failure.message.unwrap_or(failure.error))
+            torrent_failure(&failure.error)
         }
+        Some(failure) if status == StatusCode::GONE => torrent_failure(&failure.error),
         _ if status.is_server_error() => RemoteError::Unreachable,
         _ => RemoteError::Protocol,
     })

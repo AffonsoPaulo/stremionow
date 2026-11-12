@@ -60,6 +60,9 @@ ring = "0.17.14"
 spake2 = "0.4.0"
 mdns-sd = "0.21.7"
 if-addrs = "0.15.0"
+# Windows: adapter types, gateways and the gateway's MAC address, to tell the home network from
+# others (ADR 0008). Already in the tree through if-addrs and tokio.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 
 [profile.release]
 lto = "thin"

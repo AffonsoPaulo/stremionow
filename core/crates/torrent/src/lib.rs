@@ -44,7 +44,7 @@ mod torrent;
 pub use error::TorrentError;
 pub use lan::{
     DiscoveredServer, LanConfig, LanServer, LanStatus, PairError, PairedDevice, PairingCode,
-    RemoteError, RemoteHealth, RemoteServer, TorrentRoute, discover, pair,
+    PauseReason, RemoteError, RemoteHealth, RemoteServer, TorrentRoute, discover, pair,
 };
 pub use server::{ServerConfig, StreamServer};
 pub use status::{TorrentState, TorrentStatus};

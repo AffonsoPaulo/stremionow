@@ -11,9 +11,14 @@
 //! the token would never be sent.
 //!
 //! Guessing online is bounded: a code lasts [`CODE_LIFETIME`], allows [`MAX_ATTEMPTS`]
-//! exchanges, one per [`MIN_ATTEMPT_INTERVAL`] across all clients, and works once.
+//! exchanges in all and [`MAX_ATTEMPTS_PER_PEER`] from one address, and works once. Each
+//! address may send one first message per [`MIN_ATTEMPT_INTERVAL`], whether or not a code
+//! is showing, so polling for a code to appear is as slow as guessing. Several addresses
+//! still can spend a code's attempts; the server's screen then says another device is
+//! trying, and the user shows a new code.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use ring::hmac;
@@ -32,8 +37,15 @@ pub(crate) const CODE_LIFETIME: Duration = Duration::from_secs(3 * 60);
 /// Exchanges allowed per code before it is withdrawn.
 pub(crate) const MAX_ATTEMPTS: u32 = 10;
 
-/// Shortest time between two exchanges, from any client.
+/// Exchanges one address may start per code. A person mistyping needs a couple.
+pub(crate) const MAX_ATTEMPTS_PER_PEER: u32 = 3;
+
+/// Shortest time between two first messages from one address.
 pub(crate) const MIN_ATTEMPT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Shortest time between two first messages from any addresses, bounding the work one
+/// burst of addresses can cause.
+const MIN_GLOBAL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long a started exchange waits for its second message.
 const EXCHANGE_LIFETIME: Duration = Duration::from_secs(30);
@@ -53,7 +65,7 @@ pub(crate) enum Refusal {
     NoCode,
     /// Too soon after the previous exchange; retry after the given time.
     TooSoon(Duration),
-    /// The code was withdrawn after too many wrong guesses.
+    /// Too many guesses from this address, or the code was withdrawn after too many in all.
     TooManyAttempts,
     /// The exchange is unknown or expired.
     UnknownExchange,
@@ -81,19 +93,25 @@ impl Refusal {
 #[derive(Default)]
 pub(crate) struct Pairing {
     code: Option<ActiveCode>,
+    /// Latest first message per address, kept for [`MIN_ATTEMPT_INTERVAL`].
+    recent: HashMap<IpAddr, Instant>,
     last_attempt: Option<Instant>,
     exchanges: HashMap<String, Exchange>,
+    /// The last code was withdrawn after too many attempts.
+    withdrawn: bool,
 }
 
 struct ActiveCode {
     digits: String,
     expires: Instant,
     attempts: u32,
+    per_peer: HashMap<IpAddr, u32>,
 }
 
 struct Exchange {
     key: Vec<u8>,
     started: Instant,
+    peer: IpAddr,
 }
 
 impl Pairing {
@@ -105,9 +123,21 @@ impl Pairing {
             digits: digits.clone(),
             expires,
             attempts: 0,
+            per_peer: HashMap::new(),
         });
         self.exchanges.clear();
+        self.withdrawn = false;
         Ok((digits, expires))
+    }
+
+    /// Whether more than one address tried the code on screen, or the last code was
+    /// withdrawn after too many attempts: someone else on the network is trying to pair.
+    pub(crate) fn contested(&self) -> bool {
+        self.withdrawn
+            || self
+                .code
+                .as_ref()
+                .is_some_and(|code| code.per_peer.len() > 1)
     }
 
     /// The code on screen and the time it has left, if it is still valid.
@@ -123,15 +153,32 @@ impl Pairing {
         self.exchanges.clear();
     }
 
-    /// First message: the client's SPAKE2 message. Returns the exchange id and the server's
-    /// SPAKE2 message. Every call counts as a guess, right or wrong.
+    /// First message: the client's SPAKE2 message from `peer`. Returns the exchange id and
+    /// the server's SPAKE2 message. Every call counts as a guess, right or wrong, and the
+    /// rate limit applies before anything else is revealed, even whether a code is showing.
     pub(crate) fn start(
         &mut self,
         now: Instant,
+        peer: IpAddr,
         client_message: &[u8],
     ) -> Result<(String, Vec<u8>), Refusal> {
         self.exchanges
             .retain(|_, exchange| now.duration_since(exchange.started) < EXCHANGE_LIFETIME);
+        self.recent
+            .retain(|_, last| now.duration_since(*last) < MIN_ATTEMPT_INTERVAL);
+        if let Some(last) = self.recent.get(&peer) {
+            return Err(Refusal::TooSoon(
+                MIN_ATTEMPT_INTERVAL - now.duration_since(*last),
+            ));
+        }
+        if let Some(last) = self.last_attempt {
+            let since = now.duration_since(last);
+            if since < MIN_GLOBAL_INTERVAL {
+                return Err(Refusal::TooSoon(MIN_GLOBAL_INTERVAL - since));
+            }
+        }
+        self.recent.insert(peer, now);
+        self.last_attempt = Some(now);
         let Some(code) = self.code.as_mut() else {
             return Err(Refusal::NoCode);
         };
@@ -139,17 +186,16 @@ impl Pairing {
             self.cancel();
             return Err(Refusal::NoCode);
         }
-        if let Some(last) = self.last_attempt {
-            let since = now.duration_since(last);
-            if since < MIN_ATTEMPT_INTERVAL {
-                return Err(Refusal::TooSoon(MIN_ATTEMPT_INTERVAL - since));
-            }
-        }
         if code.attempts >= MAX_ATTEMPTS {
             self.cancel();
+            self.withdrawn = true;
             return Err(Refusal::TooManyAttempts);
         }
-        self.last_attempt = Some(now);
+        let mine = code.per_peer.entry(peer).or_default();
+        if *mine >= MAX_ATTEMPTS_PER_PEER {
+            return Err(Refusal::TooManyAttempts);
+        }
+        *mine += 1;
         code.attempts += 1;
         let (state, server_message) = Spake2::<Ed25519Group>::start_b(
             &Password::new(code.digits.as_bytes()),
@@ -169,8 +215,14 @@ impl Pairing {
             self.exchanges.remove(&oldest);
         }
         let id = secret::random_hex().map_err(|_| Refusal::Malformed)?;
-        self.exchanges
-            .insert(id.clone(), Exchange { key, started: now });
+        self.exchanges.insert(
+            id.clone(),
+            Exchange {
+                key,
+                started: now,
+                peer,
+            },
+        );
         Ok((id, server_message))
     }
 
@@ -180,6 +232,7 @@ impl Pairing {
     pub(crate) fn finish(
         &mut self,
         now: Instant,
+        peer: IpAddr,
         exchange: &str,
         client_proof: &[u8],
         own_fingerprint: &Fingerprint,
@@ -187,7 +240,7 @@ impl Pairing {
         let Some(exchange) = self.exchanges.remove(exchange) else {
             return Err(Refusal::UnknownExchange);
         };
-        if now.duration_since(exchange.started) >= EXCHANGE_LIFETIME {
+        if exchange.peer != peer || now.duration_since(exchange.started) >= EXCHANGE_LIFETIME {
             return Err(Refusal::UnknownExchange);
         }
         if self.current(now).is_none() {
@@ -308,17 +361,31 @@ mod tests {
 
     const FINGERPRINT: Fingerprint = [7; 32];
 
-    /// Runs a whole exchange with `typed` as the client's code.
+    fn peer(last: u8) -> IpAddr {
+        IpAddr::from([192, 168, 1, last])
+    }
+
+    /// Runs a whole exchange from address `.20` with `typed` as the client's code.
     fn exchange(
         pairing: &mut Pairing,
         now: Instant,
         typed: &str,
         seen: &Fingerprint,
     ) -> Result<Vec<u8>, Refusal> {
+        exchange_from(pairing, now, peer(20), typed, seen)
+    }
+
+    fn exchange_from(
+        pairing: &mut Pairing,
+        now: Instant,
+        from: IpAddr,
+        typed: &str,
+        seen: &Fingerprint,
+    ) -> Result<Vec<u8>, Refusal> {
         let (client, message) = ClientExchange::start(typed);
-        let (id, reply) = pairing.start(now, &message)?;
+        let (id, reply) = pairing.start(now, from, &message)?;
         let key = client.finish(&reply).ok_or(Refusal::Malformed)?;
-        pairing.finish(now, &id, &key.proof(seen), &FINGERPRINT)
+        pairing.finish(now, from, &id, &key.proof(seen), &FINGERPRINT)
     }
 
     #[test]
@@ -352,10 +419,16 @@ mod tests {
         let now = Instant::now();
         let (code, _) = pairing.new_code(now).expect("code");
         let (client, message) = ClientExchange::start(&code);
-        let (id, reply) = pairing.start(now, &message).expect("started");
+        let (id, reply) = pairing.start(now, peer(20), &message).expect("started");
         let client_key = client.finish(&reply).expect("key");
         let server_key = pairing
-            .finish(now, &id, &client_key.proof(&FINGERPRINT), &FINGERPRINT)
+            .finish(
+                now,
+                peer(20),
+                &id,
+                &client_key.proof(&FINGERPRINT),
+                &FINGERPRINT,
+            )
             .expect("paired");
         let proof = server_proof(&server_key, &FINGERPRINT, "server", "token");
         assert!(client_key.verify_server(&FINGERPRINT, "server", "token", &proof));
@@ -384,20 +457,21 @@ mod tests {
     }
 
     #[test]
-    fn guesses_are_rate_limited_and_bounded() {
+    fn guesses_are_rate_limited_per_address() {
         let mut pairing = Pairing::default();
         let mut now = Instant::now();
-        let (code, _) = pairing.new_code(now).expect("code");
-        let wrong = if code == "000000" { "000001" } else { "000000" };
+        // Polling before a code appears is limited too.
         assert_eq!(
-            exchange(&mut pairing, now, wrong, &FINGERPRINT),
-            Err(Refusal::WrongCode)
+            exchange(&mut pairing, now, "000000", &FINGERPRINT),
+            Err(Refusal::NoCode)
         );
         assert!(matches!(
-            exchange(&mut pairing, now, &code, &FINGERPRINT),
+            exchange(&mut pairing, now, "000000", &FINGERPRINT),
             Err(Refusal::TooSoon(_))
         ));
-        for _ in 1..MAX_ATTEMPTS {
+        let (code, _) = pairing.new_code(now).expect("code");
+        let wrong = if code == "000000" { "000001" } else { "000000" };
+        for _ in 0..MAX_ATTEMPTS_PER_PEER {
             now += MIN_ATTEMPT_INTERVAL;
             assert_eq!(
                 exchange(&mut pairing, now, wrong, &FINGERPRINT),
@@ -408,9 +482,55 @@ mod tests {
         assert_eq!(
             exchange(&mut pairing, now, &code, &FINGERPRINT),
             Err(Refusal::TooManyAttempts),
+            "one address cannot keep guessing"
+        );
+        assert!(!pairing.contested(), "one address is not someone else");
+        // Another device still can pair with the same code, and the server notices.
+        now += MIN_GLOBAL_INTERVAL;
+        assert!(exchange_from(&mut pairing, now, peer(30), &code, &FINGERPRINT).is_ok());
+    }
+
+    #[test]
+    fn many_addresses_spend_a_code_and_are_reported() {
+        let mut pairing = Pairing::default();
+        let mut now = Instant::now();
+        let (code, _) = pairing.new_code(now).expect("code");
+        let wrong = if code == "000000" { "000001" } else { "000000" };
+        let mut address = 100;
+        for _ in 0..MAX_ATTEMPTS {
+            now += MIN_GLOBAL_INTERVAL;
+            address += 1;
+            assert_eq!(
+                exchange_from(&mut pairing, now, peer(address), wrong, &FINGERPRINT),
+                Err(Refusal::WrongCode)
+            );
+        }
+        assert!(pairing.contested());
+        now += MIN_GLOBAL_INTERVAL;
+        assert_eq!(
+            exchange(&mut pairing, now, &code, &FINGERPRINT),
+            Err(Refusal::TooManyAttempts),
             "even the right code fails once the guesses are spent"
         );
         assert_eq!(pairing.current(now), None);
+        assert!(
+            pairing.contested(),
+            "the screen says why the code went away"
+        );
+        pairing.new_code(now).expect("code");
+        assert!(!pairing.contested());
+    }
+
+    #[test]
+    fn bursts_from_many_addresses_are_slowed() {
+        let mut pairing = Pairing::default();
+        let now = Instant::now();
+        pairing.new_code(now).expect("code");
+        let _ = exchange_from(&mut pairing, now, peer(1), "000000", &FINGERPRINT);
+        assert!(matches!(
+            exchange_from(&mut pairing, now, peer(2), "000000", &FINGERPRINT),
+            Err(Refusal::TooSoon(_))
+        ));
     }
 
     #[test]
@@ -434,15 +554,24 @@ mod tests {
         let now = Instant::now();
         let (code, _) = pairing.new_code(now).expect("code");
         let (client, message) = ClientExchange::start(&code);
-        let (id, reply) = pairing.start(now, &message).expect("started");
+        let (id, reply) = pairing.start(now, peer(20), &message).expect("started");
         let proof = client.finish(&reply).expect("key").proof(&FINGERPRINT);
-        let late = now + EXCHANGE_LIFETIME;
         assert_eq!(
-            pairing.finish(late, &id, &proof, &FINGERPRINT),
+            pairing.finish(now, peer(21), &id, &proof, &FINGERPRINT),
+            Err(Refusal::UnknownExchange),
+            "an exchange belongs to the address that started it"
+        );
+        let (client, message) = ClientExchange::start(&code);
+        let later = now + MIN_ATTEMPT_INTERVAL;
+        let (id, reply) = pairing.start(later, peer(20), &message).expect("started");
+        let proof = client.finish(&reply).expect("key").proof(&FINGERPRINT);
+        let late = later + EXCHANGE_LIFETIME;
+        assert_eq!(
+            pairing.finish(late, peer(20), &id, &proof, &FINGERPRINT),
             Err(Refusal::UnknownExchange)
         );
         assert_eq!(
-            pairing.finish(now, &id, &proof, &FINGERPRINT),
+            pairing.finish(later, peer(20), &id, &proof, &FINGERPRINT),
             Err(Refusal::UnknownExchange),
             "an exchange is gone after one answer"
         );
@@ -473,7 +602,10 @@ mod tests {
         let mut pairing = Pairing::default();
         let now = Instant::now();
         pairing.new_code(now).expect("code");
-        assert_eq!(pairing.start(now, b"junk"), Err(Refusal::Malformed));
+        assert_eq!(
+            pairing.start(now, peer(20), b"junk"),
+            Err(Refusal::Malformed)
+        );
     }
 
     #[test]

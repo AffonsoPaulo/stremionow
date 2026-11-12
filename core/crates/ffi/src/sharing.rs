@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use stremionow_torrent::{
-    LanConfig, LanStatus, PairError, RemoteHealth, RemoteServer, TorrentError,
+    LanConfig, LanStatus, PairError, PauseReason, RemoteHealth, RemoteServer, TorrentError,
 };
 
 use crate::core::StremioCore;
@@ -23,16 +23,29 @@ pub trait SecretSink: Send + Sync {
     fn save(&self, value: String);
 }
 
+/// Why the server is not serving right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ServePause {
+    /// Not connected to a home network.
+    NoNetwork,
+    /// On a network other than the one where serving was turned on.
+    OtherNetwork,
+}
+
 /// The running server, as Settings shows it.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ServeStatus {
     pub device_name: String,
-    /// Addresses with the port, such as "192.168.1.20:47630". Empty while off the network.
+    /// Addresses with the port, such as "192.168.1.20:47630". Empty while paused.
     pub addresses: Vec<String>,
+    pub paused: Option<ServePause>,
     /// The pairing code on screen, if any.
     pub pairing_code: Option<String>,
     /// Seconds the code has left.
     pub pairing_seconds_left: u32,
+    /// Another device tried the code, or used up the last one: someone else on the network
+    /// may be trying to pair.
+    pub pairing_contested: bool,
     pub devices: Vec<PairedDeviceInfo>,
 }
 
@@ -50,8 +63,8 @@ pub struct PairedDeviceInfo {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct FoundDevice {
     pub name: String,
-    pub server_id: String,
-    pub address: String,
+    /// Every address it announced; pairing tries them in turn.
+    pub addresses: Vec<String>,
 }
 
 /// The device this one uses for torrents.
@@ -129,6 +142,11 @@ fn serve_status(status: LanStatus) -> ServeStatus {
             .iter()
             .map(|address| format!("{address}:{}", status.port))
             .collect(),
+        paused: status.paused.map(|reason| match reason {
+            PauseReason::NoNetwork => ServePause::NoNetwork,
+            PauseReason::OtherNetwork => ServePause::OtherNetwork,
+        }),
+        pairing_contested: status.pairing_contested,
         pairing_seconds_left: status.pairing.as_ref().map_or(0, |pairing| {
             u32::try_from(pairing.expires_in.as_secs()).unwrap_or(0)
         }),
@@ -151,12 +169,15 @@ fn serve_status(status: LanStatus) -> ServeStatus {
 #[uniffi::export(async_runtime = "tokio")]
 impl StremioCore {
     /// Starts serving torrents to paired devices on the home network, named `device_name`.
-    /// `saved_state` is what `sink` received last time (`None` the first time). Stops the
-    /// use of another device for torrents: a device does one or the other.
+    /// `saved_state` is what `sink` received last time (`None` the first time). With
+    /// `turned_on`, the user just turned serving on and the current network becomes the
+    /// home network; at launch, pass false, and serving resumes only on that network. Stops
+    /// the use of another device for torrents: a device does one or the other.
     pub async fn start_serving(
         &self,
         device_name: String,
         saved_state: Option<String>,
+        turned_on: bool,
         sink: Box<dyn SecretSink>,
     ) -> Result<ServeStatus, CoreError> {
         self.stop_serving().await;
@@ -165,6 +186,8 @@ impl StremioCore {
             device_name,
             saved_state,
             on_state_change: Box::new(move |state| sink.save(state)),
+            network_hint: self.streaming.network_hint(),
+            serve_on_current_network: turned_on,
         };
         let lan = self
             .streaming
@@ -198,6 +221,27 @@ impl StremioCore {
             })
             .unwrap_or(Err(TorrentError::NoLocalNetwork))
             .map_err(CoreError::from)
+    }
+
+    /// Makes the network the device is on now the home network and serves there, after the
+    /// user confirmed it.
+    pub async fn serve_on_this_network(&self) -> Result<ServeStatus, CoreError> {
+        let lan = self.streaming.lan().ok_or(CoreError::NoLocalNetwork)?;
+        let status = self
+            .streaming
+            .run(async move {
+                lan.serve_on_this_network().await?;
+                Ok::<_, TorrentError>(serve_status(lan.status()))
+            })
+            .await?;
+        Ok(status?)
+    }
+
+    /// Tells the core what the app knows about the network it is on (Android: gateway,
+    /// DHCP server and DNS from the system), to tell the home network from others where
+    /// the core cannot see the gateway itself. `None` when off the network.
+    pub fn set_network_hint(&self, hint: Option<String>) {
+        self.streaming.set_network_hint(hint);
     }
 
     /// Withdraws the pairing code.
@@ -234,26 +278,40 @@ impl StremioCore {
             .into_iter()
             .map(|server| FoundDevice {
                 name: server.name,
-                server_id: server.server_id,
-                address: server.address.to_string(),
+                addresses: server.addresses.iter().map(ToString::to_string).collect(),
             })
             .collect()
     }
 
-    /// Pairs with the device at `address` using the code it shows, and uses it for
-    /// torrents from now on. `device_name` is how this device appears there. The pairing
-    /// goes to `sink`, for the app's encrypted store; pass it to
-    /// [`StremioCore::use_other_device`] at the next launch.
+    /// Pairs with the device at one of `addresses` (tried in turn, as discovery lists them,
+    /// or the one the user typed) using the code it shows, and uses it for torrents from now
+    /// on. `device_name` is how this device appears there. The pairing goes to `sink`, for
+    /// the app's encrypted store; pass it to [`StremioCore::use_other_device`] at the next
+    /// launch.
     pub async fn pair_with_device(
         &self,
-        address: String,
+        addresses: Vec<String>,
         code: String,
         device_name: String,
         sink: Box<dyn SecretSink>,
     ) -> Result<OtherDevice, PairingError> {
         let paired = self
             .streaming
-            .run(async move { stremionow_torrent::pair(&address, &code, &device_name).await })
+            .run(async move {
+                let mut result = Err(PairError::InvalidAddress);
+                for address in addresses.iter().take(8) {
+                    result = stremionow_torrent::pair(address, &code, &device_name).await;
+                    // Only an address that did not answer is worth another try; anything
+                    // else came from the device and already counted against the code.
+                    if !matches!(
+                        result,
+                        Err(PairError::Unreachable | PairError::InvalidAddress)
+                    ) {
+                        break;
+                    }
+                }
+                result
+            })
             .await
             .map_err(|_| PairingError::Failed)??;
         sink.save(paired.save());
@@ -296,6 +354,11 @@ impl StremioCore {
         match checked {
             Ok(RemoteHealth::Ready) => OtherDeviceHealth::Ready,
             Ok(RemoteHealth::Unpaired) => OtherDeviceHealth::Unpaired,
+            // Look elsewhere first: another device may have the old address now.
+            Ok(RemoteHealth::CertificateChanged) => match self.streaming.rediscover().await {
+                Some(_) => OtherDeviceHealth::Ready,
+                None => OtherDeviceHealth::Unpaired,
+            },
             _ => match self.streaming.rediscover().await {
                 Some(_) => OtherDeviceHealth::Ready,
                 None => OtherDeviceHealth::Unreachable,
@@ -402,7 +465,7 @@ mod tests {
         core.stop_serving().await;
         assert_eq!(
             core.pair_with_device(
-                "8.8.8.8".into(),
+                vec!["8.8.8.8".into()],
                 "123456".into(),
                 "TV".into(),
                 Box::new(Collected::default())

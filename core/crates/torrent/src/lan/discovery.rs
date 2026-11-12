@@ -1,48 +1,71 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Finding servers with mDNS and DNS-SD (`_stremionow._tcp`).
 //!
-//! Announcements carry only the server's random id and name; nothing in them is trusted.
-//! Pairing checks who is really answering, and a paired client checks the pinned
-//! certificate on every connection. Both announcing and browsing stay on home-network
-//! interfaces, so queries never go out over a VPN or a mobile network.
+//! An announcement carries the name the user chose for the server (neutral by default) and
+//! nothing that stays the same between runs: the instance and host names are random each
+//! time serving starts, and instead of the server's id it carries a random nonce with a tag,
+//! an HMAC of the nonce keyed by the id. A paired client, which learned the id when pairing,
+//! recognizes its server by the tag; anyone else sees a different, unlinkable announcement
+//! every time.
+//!
+//! Nothing in an announcement is trusted: pairing and the pinned certificate decide who is
+//! answering. Announcing happens only on the interfaces being served, and browsing only on
+//! home-network interfaces, so queries never leave through a VPN or a mobile network.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use mdns_sd::{IfKind, IfPredicate, ServiceDaemon, ServiceEvent, ServiceInfo};
+use ring::hmac;
 
 use super::net;
+use crate::secret;
 
 /// The DNS-SD service type.
 pub(crate) const SERVICE_TYPE: &str = "_stremionow._tcp.local.";
 
+/// Hex digits of the tag: 64 bits, plenty to tell a handful of servers apart.
+const TAG_HEX: usize = 16;
+
 /// A server found on the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredServer {
-    /// The name the server's user sees for it, such as "Living room PC".
+    /// The name its user chose, such as "Living room PC".
     pub name: String,
-    /// The server's random id, the same after it moves to another address.
-    pub server_id: String,
-    pub address: SocketAddr,
+    /// Every home-network address it announced, in a stable order. Try each in turn.
+    pub addresses: Vec<SocketAddr>,
+    nonce: String,
+    tag: String,
 }
 
-/// A daemon that only uses home-network interfaces.
-fn daemon() -> Option<ServiceDaemon> {
+impl DiscoveredServer {
+    /// Whether this is the server with `server_id`, known from pairing.
+    pub fn is_server(&self, server_id: &str) -> bool {
+        secret::constant_time_eq(&tag(server_id, &self.nonce), &self.tag)
+    }
+}
+
+/// The tag announced with `nonce` by the server with `server_id`.
+fn tag(server_id: &str, nonce: &str) -> String {
+    let key = hmac::Key::new(hmac::HMAC_SHA256, server_id.as_bytes());
+    let mac = hmac::sign(&key, nonce.as_bytes());
+    let mut text = secret::to_hex(mac.as_ref());
+    text.truncate(TAG_HEX);
+    text
+}
+
+/// A daemon limited to the interfaces `allowed` accepts.
+fn daemon(
+    allowed: impl Fn(&if_addrs::Interface) -> bool + Send + Sync + 'static,
+) -> Option<ServiceDaemon> {
     let daemon = ServiceDaemon::new()
         .inspect_err(|error| log::warn!("mdns: cannot start: {error}"))
         .ok()?;
-    let lan = IfPredicate::new(|interface| {
-        net::is_lan_interface(
-            &interface.name,
-            interface.ip(),
-            interface.is_oper_up(),
-            interface.is_p2p,
-        )
-    });
     let configured = daemon
         .disable_interface(IfKind::All)
-        .and_then(|()| daemon.enable_interface(IfKind::Predicate(lan)));
+        .and_then(|()| daemon.enable_interface(IfKind::Predicate(IfPredicate::new(allowed))));
     if let Err(error) = configured {
         log::warn!("mdns: cannot limit interfaces: {error}");
         let _ = daemon.shutdown();
@@ -58,16 +81,33 @@ pub(crate) struct Announcement {
 }
 
 impl Announcement {
-    /// Announces `name` and `server_id` on `port`. The addresses follow the interfaces, so a
-    /// new address after a DHCP renewal is announced by itself. Failing to announce is not
-    /// fatal: clients can still enter the address by hand.
-    pub(crate) fn start(name: &str, server_id: &str, port: u16) -> Option<Self> {
-        let daemon = daemon()?;
-        let properties = [("id", server_id), ("name", name), ("v", "1")];
+    /// Announces `name` on `port`, on the interfaces whose addresses are in `served`. The
+    /// announced addresses follow those interfaces. Failing to announce is not fatal:
+    /// clients can still enter the address by hand.
+    pub(crate) fn start(
+        name: &str,
+        server_id: &str,
+        port: u16,
+        served: Arc<Mutex<HashSet<IpAddr>>>,
+    ) -> Option<Self> {
+        let daemon = daemon(move |interface| {
+            served
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(&interface.ip())
+        })?;
+        let nonce = secret::random_hex().ok()?;
+        let tag = tag(server_id, &nonce);
+        let properties = [
+            ("name", name),
+            ("n", nonce.as_str()),
+            ("t", tag.as_str()),
+            ("v", "2"),
+        ];
         let info = ServiceInfo::new(
             SERVICE_TYPE,
-            server_id,
-            &format!("{server_id}.local."),
+            &nonce,
+            &format!("{nonce}.local."),
             "",
             port,
             &properties[..],
@@ -105,7 +145,14 @@ pub async fn discover(timeout: Duration, exclude: Option<String>) -> Vec<Discove
 }
 
 fn browse(timeout: Duration, exclude: Option<&str>) -> Vec<DiscoveredServer> {
-    let Some(daemon) = daemon() else {
+    let Some(daemon) = daemon(|interface| {
+        net::is_lan_interface(
+            &interface.name,
+            interface.ip(),
+            interface.is_oper_up(),
+            interface.is_p2p,
+        )
+    }) else {
         return Vec::new();
     };
     let events = match daemon.browse(SERVICE_TYPE) {
@@ -126,37 +173,68 @@ fn browse(timeout: Duration, exclude: Option<&str>) -> Vec<DiscoveredServer> {
             continue;
         };
         let properties = &service.txt_properties;
-        let (Some(id), Some(name)) = (
-            properties.get_property_val_str("id"),
+        let (Some(name), Some(nonce), Some(tag)) = (
             properties.get_property_val_str("name"),
+            properties.get_property_val_str("n"),
+            properties.get_property_val_str("t"),
         ) else {
             continue;
         };
-        if exclude == Some(id) || crate::secret::from_hex(id).is_none_or(|id| id.len() != 16) {
+        if nonce.len() != 32 || tag.len() != TAG_HEX {
             continue;
         }
-        let mut addresses: Vec<IpAddr> = service
+        let addresses = service
             .addresses
             .iter()
             .map(mdns_sd::ScopedIp::to_ip_addr)
             .filter(|ip| net::is_lan_ip(*ip))
-            .collect();
-        addresses.sort_unstable();
-        let Some(ip) = addresses.first() else {
-            continue;
-        };
-        found.insert(
-            id.to_owned(),
-            DiscoveredServer {
+            .map(|ip| SocketAddr::new(ip, service.port));
+        // One server answers once per interface; keep every address it gave.
+        let server = found
+            .entry(nonce.to_owned())
+            .or_insert_with(|| DiscoveredServer {
                 name: super::clients::clean_name(name),
-                server_id: id.to_owned(),
-                address: SocketAddr::new(*ip, service.port),
-            },
-        );
+                addresses: Vec::new(),
+                nonce: nonce.to_owned(),
+                tag: tag.to_owned(),
+            });
+        server.addresses.extend(addresses);
+        server.addresses.sort_unstable();
+        server.addresses.dedup();
     }
     let _ = daemon.stop_browse(SERVICE_TYPE);
     let _ = daemon.shutdown();
-    let mut servers: Vec<DiscoveredServer> = found.into_values().collect();
-    servers.sort_by(|a, b| a.name.cmp(&b.name).then(a.server_id.cmp(&b.server_id)));
+    let mut servers: Vec<DiscoveredServer> = found
+        .into_values()
+        .filter(|server| !server.addresses.is_empty())
+        .filter(|server| exclude.is_none_or(|id| !server.is_server(id)))
+        .collect();
+    servers.sort_by(|a, b| a.name.cmp(&b.name).then(a.addresses.cmp(&b.addresses)));
     servers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn announced(server_id: &str, nonce: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: "PC".to_owned(),
+            addresses: vec!["192.168.1.20:47630".parse().expect("address")],
+            nonce: nonce.to_owned(),
+            tag: tag(server_id, nonce),
+        }
+    }
+
+    #[test]
+    fn paired_clients_recognize_their_server_and_others_cannot_link_it() {
+        let id = "1".repeat(32);
+        let first = announced(&id, &"a".repeat(32));
+        let second = announced(&id, &"b".repeat(32));
+        assert!(first.is_server(&id));
+        assert!(second.is_server(&id));
+        assert!(!first.is_server(&"2".repeat(32)));
+        assert_ne!(first.tag, second.tag, "nothing stable across runs");
+        assert_eq!(first.tag.len(), TAG_HEX);
+    }
 }

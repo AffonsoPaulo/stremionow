@@ -19,6 +19,7 @@ import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.SmokeTest
+import io.github.affonsopaulo.stremionow.ui.desktop.SystemTitleBar
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import java.awt.Color
@@ -46,6 +47,8 @@ private val BACKGROUND = Color(0x0A, 0x0B, 0x10)
  * pattern through libmpv once and exits with 0 when everything worked (see [SmokeTest]).
  */
 fun main(args: Array<String>) {
+    // Before AWT starts: the macOS title bar follows the system's light or dark mode.
+    SystemTitleBar.useSystemAppearance()
     val verbose = "--verbose" in args
     val smokeTest = "--smoke-test" in args
     if (smokeTest) {
@@ -82,6 +85,7 @@ fun main(args: Array<String>) {
                 window.iconImages = AppIcon.images
                 window.minimumSize = MINIMUM_SIZE
                 window.background = BACKGROUND
+                SystemTitleBar.follow(window)
             }
             val host =
                 remember(window) {

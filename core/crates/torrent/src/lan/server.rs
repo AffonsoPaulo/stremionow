@@ -4,9 +4,13 @@
 //! The API is deliberately small. Paired devices can add a torrent (info hash, file index,
 //! trackers), read its progress, stream its file and stop it. There is no route that fetches
 //! a URL, so the server cannot be turned into a proxy into its own network; trackers sent by
-//! devices must resolve to public addresses (see [`crate::magnet::public_trackers`]).
+//! devices must be UDP trackers resolving to public addresses (see
+//! [`crate::magnet::public_trackers`]).
+//!
+//! The server only listens on the network where the user turned it on (see `network`), and
+//! pauses elsewhere: on another Wi-Fi, a VPN, or a network it cannot identify.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +18,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full, Limited};
+use futures::StreamExt;
+use http_body_util::{BodyExt, BodyStream, Full, Limited, StreamBody};
 use hyper::body::Incoming;
 use hyper::header::{self, HeaderValue};
 use hyper::server::conn::http1;
@@ -24,12 +29,13 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
 use super::clients::ServerState;
 use super::discovery::Announcement;
+use super::limits::{Limits, Slot};
 use super::net::{self, BindPolicy};
 use super::pairing::{self, Pairing, Refusal};
 use super::tls::Fingerprint;
@@ -41,12 +47,6 @@ use crate::{StreamServer, TorrentError, secret};
 
 /// Port tried first, so addresses typed by hand stay the same; any free port otherwise.
 pub(crate) const DEFAULT_PORT: u16 = 47630;
-
-/// Connections served at once, from all devices.
-const MAX_CONNECTIONS: usize = 48;
-
-/// Connections one address may hold. A player opens one or two, plus status requests.
-const MAX_CONNECTIONS_PER_PEER: usize = 8;
 
 /// Time a device gets to finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -68,27 +68,36 @@ const MAX_TORRENTS_PER_DEVICE: usize = 3;
 /// player shares.
 const MAX_STREAMS_PER_DEVICE: usize = 3;
 
-/// A torrent nobody streamed or asked about for this long is stopped: the device that
-/// added it went to sleep, lost its network or crashed before stopping it.
+/// A torrent nobody streamed for this long is stopped: the device that added it went to
+/// sleep, lost its network or crashed before stopping it. Progress requests do not count,
+/// so a client that forgot a torrent but keeps polling does not hold it forever.
 const LEASE: Duration = Duration::from_secs(5 * 60);
 
 /// How often leases are checked.
 const LEASE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
-/// How often the interfaces are listed again, to follow address changes.
+/// How often the interfaces are listed again, to follow address and network changes.
 const INTERFACE_CHECK_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Settings for [`StreamServer::serve_lan`].
 pub struct LanConfig {
-    /// The name other devices see, such as "Living room PC".
+    /// The name other devices see, chosen by the user; announced on the network, so the
+    /// app's default should not be the owner's name.
     pub device_name: String,
     /// What the last run passed to `on_state_change`; `None` the first time, which creates a
     /// new identity.
     pub saved_state: Option<String>,
-    /// Called with the new state whenever it changes (a device paired or was removed, or a
-    /// new identity was created). The app keeps it in its secret store: it holds the TLS
-    /// private key.
+    /// Called with the new state whenever it changes (a device paired or was removed, the
+    /// home network changed, or a new identity was created). The app keeps it in its secret
+    /// store: it holds the TLS private key.
     pub on_state_change: Box<dyn Fn(String) + Send + Sync>,
+    /// What the app knows about the current network, for systems that do not let the core
+    /// see the gateway (Android): see [`LanServer::set_network_hint`].
+    pub network_hint: Option<String>,
+    /// Make the current network the home network. True when the user turns serving on;
+    /// false when the app restores it at launch, so it never adopts whatever network the
+    /// device happens to be on then.
+    pub serve_on_current_network: bool,
 }
 
 /// A pairing code being shown.
@@ -109,15 +118,28 @@ pub struct PairedDevice {
     pub streaming: bool,
 }
 
+/// Why the server is not listening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseReason {
+    /// The device is not on any home network.
+    NoNetwork,
+    /// The device is on a network other than the one where serving was turned on, or on one
+    /// it cannot identify.
+    OtherNetwork,
+}
+
 /// What Settings shows about the running server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanStatus {
     pub device_name: String,
     pub server_id: String,
     pub port: u16,
-    /// Addresses other devices can reach it at; empty while the device is off the network.
+    /// Addresses other devices can reach it at; empty while paused.
     pub addresses: Vec<Ipv4Addr>,
+    pub paused: Option<PauseReason>,
     pub pairing: Option<PairingCode>,
+    /// Another device tried the code on screen, or spent the last one.
+    pub pairing_contested: bool,
     pub devices: Vec<PairedDevice>,
 }
 
@@ -132,16 +154,31 @@ struct Inner {
     server_id: String,
     fingerprint: Fingerprint,
     acceptor: TlsAcceptor,
-    port: u16,
     policy: BindPolicy,
     locked: Mutex<Locked>,
     on_state_change: Box<dyn Fn(String) + Send + Sync>,
+    /// Held while the state is serialized and handed to the app, so saves arrive in order.
+    saving: Mutex<()>,
     torrents_allowed: AtomicBool,
+    /// The port, once a first listener chose it.
+    port: Mutex<u16>,
     listeners: Mutex<BTreeMap<Ipv4Addr, CancellationToken>>,
-    connections: Arc<Semaphore>,
-    per_peer: Arc<Mutex<HashMap<IpAddr, usize>>>,
+    /// Addresses being served, which the announcement follows.
+    served: Arc<Mutex<HashSet<IpAddr>>>,
+    network: Mutex<NetworkState>,
+    /// Serializes reconciling listeners with the network.
+    reconciling: tokio::sync::Mutex<()>,
+    /// Wakes the network watcher early.
+    network_changed: Notify,
+    limits: Arc<Limits>,
     announcement: Mutex<Option<Announcement>>,
     shutdown: CancellationToken,
+}
+
+#[derive(Default)]
+struct NetworkState {
+    hint: Option<String>,
+    paused: Option<PauseReason>,
 }
 
 struct Locked {
@@ -149,6 +186,8 @@ struct Locked {
     pairing: Pairing,
     /// Torrents each device is using, by device id and info hash.
     holdings: HashMap<(String, InfoHash), Holding>,
+    /// Cancelled when a device is removed, which ends its open streams.
+    revoked: HashMap<String, CancellationToken>,
 }
 
 struct Holding {
@@ -158,10 +197,10 @@ struct Holding {
 }
 
 impl StreamServer {
-    /// Starts serving torrents to other devices on every home-network address of this
-    /// device (see [`net::is_lan_interface`]): never on a public, mobile or VPN interface,
-    /// never on `0.0.0.0`. Fails with [`TorrentError::NoLocalNetwork`] when there is no such
-    /// address. The server follows address changes by itself and stops when dropped.
+    /// Starts serving torrents to other devices on the home network: only on interfaces on
+    /// the network where the user turned serving on (see `network`), never on a public,
+    /// mobile, VPN or virtual interface, never on `0.0.0.0`. Elsewhere it waits, paused,
+    /// and resumes when the device is back. Stops when dropped.
     pub async fn serve_lan(&self, config: LanConfig) -> Result<LanServer, TorrentError> {
         LanServer::start(self.clone(), config, BindPolicy::Lan).await
     }
@@ -182,68 +221,64 @@ impl LanServer {
         policy: BindPolicy,
     ) -> Result<Self, TorrentError> {
         let loaded = config.saved_state.as_deref().and_then(ServerState::load);
-        let fresh = loaded.is_none();
-        if config.saved_state.is_some() && fresh {
+        let mut changed = loaded.is_none();
+        if config.saved_state.is_some() && changed {
             log::warn!("lan: saved state unreadable; starting with a new identity");
         }
-        let state = match loaded {
+        let mut state = match loaded {
             Some(state) => state,
             None => ServerState::generate()?,
         };
-        let addresses = policy.addresses();
-        let Some(&first) = addresses.first() else {
-            return Err(TorrentError::NoLocalNetwork);
-        };
-        policy.check(IpAddr::V4(first))?;
-        let first_listener = match TcpListener::bind((first, DEFAULT_PORT)).await {
-            Ok(listener) => listener,
-            Err(error) => {
-                log::info!("lan: port {DEFAULT_PORT} unavailable ({error}); using another");
-                TcpListener::bind((first, 0)).await?
+        if config.serve_on_current_network {
+            let current = current_networks(policy, config.network_hint.as_deref());
+            if !current.is_empty() {
+                changed |= state.set_home(current);
             }
-        };
-        let port = first_listener.local_addr()?.port();
+        }
         let inner = Arc::new(Inner {
             stream,
             device_name: super::clients::clean_name(&config.device_name),
             server_id: state.server_id.clone(),
             fingerprint: state.identity.fingerprint(),
             acceptor: TlsAcceptor::from(state.identity.server_config()?),
-            port,
             policy,
             locked: Mutex::new(Locked {
                 state,
                 pairing: Pairing::default(),
                 holdings: HashMap::new(),
+                revoked: HashMap::new(),
             }),
             on_state_change: config.on_state_change,
+            saving: Mutex::new(()),
             torrents_allowed: AtomicBool::new(true),
+            port: Mutex::new(0),
             listeners: Mutex::default(),
-            connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
-            per_peer: Arc::default(),
+            served: Arc::default(),
+            network: Mutex::new(NetworkState {
+                hint: config.network_hint,
+                paused: None,
+            }),
+            reconciling: tokio::sync::Mutex::new(()),
+            network_changed: Notify::new(),
+            limits: Arc::default(),
             announcement: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
-        if fresh {
+        if changed {
             inner.save();
         }
-        inner.listen(first, first_listener);
-        for &address in &addresses[1..] {
-            inner.bind(address).await;
-        }
-        if policy.announces() {
-            *lock(&inner.announcement) =
-                Announcement::start(&inner.device_name, &inner.server_id, port);
-        }
-        tokio::spawn(Arc::clone(&inner).watch_interfaces());
+        inner.reconcile().await;
+        tokio::spawn(Arc::clone(&inner).watch_network());
         tokio::spawn(Arc::clone(&inner).expire_leases());
-        log::info!("lan: serving on port {port}");
         Ok(Self { inner })
     }
 
-    /// What Settings shows: addresses, the pairing code and the paired devices.
+    /// What Settings shows: addresses or why it is paused, the pairing code and the paired
+    /// devices.
     pub fn status(&self) -> LanStatus {
         let addresses = lock(&self.inner.listeners).keys().copied().collect();
+        let paused = lock(&self.inner.network).paused;
+        let port = *lock(&self.inner.port);
         let now = Instant::now();
         let locked = self.inner.locked();
         let devices = locked
@@ -262,12 +297,14 @@ impl LanServer {
         LanStatus {
             device_name: self.inner.device_name.clone(),
             server_id: self.inner.server_id.clone(),
-            port: self.inner.port,
+            port,
             addresses,
+            paused,
             pairing: locked
                 .pairing
                 .current(now)
                 .map(|(code, expires_in)| PairingCode { code, expires_in }),
+            pairing_contested: locked.pairing.contested(),
             devices,
         }
     }
@@ -287,14 +324,40 @@ impl LanServer {
         self.inner.locked().pairing.cancel();
     }
 
-    /// Unpairs a device and stops what it was playing. Returns whether it was paired.
+    /// Unpairs a device and ends what it was streaming. Returns whether it was paired.
     pub async fn remove_device(&self, id: &str) -> bool {
-        let removed = self.inner.locked().state.remove(id);
+        let removed = self.inner.revoke(id);
         if removed {
             self.inner.save();
-            self.inner.release_device(id).await;
         }
+        self.inner.release_device(id).await;
         removed
+    }
+
+    /// Makes the network the device is on now the home network, after the user confirmed
+    /// it, and resumes serving there. Fails when the device is on no identifiable network.
+    pub async fn serve_on_this_network(&self) -> Result<(), TorrentError> {
+        let hint = lock(&self.inner.network).hint.clone();
+        let current = current_networks(self.inner.policy, hint.as_deref());
+        if current.is_empty() {
+            return Err(TorrentError::NoLocalNetwork);
+        }
+        let changed = self.inner.locked().state.set_home(current);
+        if changed {
+            self.inner.save();
+        }
+        self.inner.reconcile().await;
+        Ok(())
+    }
+
+    /// Tells the server what the app knows about the network it is on now (Android: from
+    /// the system's link properties), and checks the network again at once.
+    pub fn set_network_hint(&self, hint: Option<String>) {
+        let mut network = lock(&self.inner.network);
+        if network.hint != hint {
+            network.hint = hint;
+            self.inner.network_changed.notify_one();
+        }
     }
 
     /// Whether devices may start torrents. The app turns it off while this device is on
@@ -359,28 +422,18 @@ impl Drop for LanServer {
 impl std::fmt::Debug for LanServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LanServer")
-            .field("port", &self.inner.port)
+            .field("port", &*lock(&self.inner.port))
             .finish_non_exhaustive()
     }
 }
 
-/// A connection slot: one of [`MAX_CONNECTIONS`], counted against its peer too.
-struct Slot {
-    peer: IpAddr,
-    per_peer: Arc<Mutex<HashMap<IpAddr, usize>>>,
-    _permit: OwnedSemaphorePermit,
-}
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let mut per_peer = lock(&self.per_peer);
-        if let Some(count) = per_peer.get_mut(&self.peer) {
-            *count -= 1;
-            if *count == 0 {
-                per_peer.remove(&self.peer);
-            }
-        }
-    }
+/// Identities of the networks the device is on now.
+fn current_networks(policy: BindPolicy, hint: Option<&str>) -> Vec<String> {
+    policy
+        .candidates(hint)
+        .into_iter()
+        .filter_map(|candidate| candidate.network)
+        .collect()
 }
 
 impl Inner {
@@ -388,24 +441,125 @@ impl Inner {
         lock(&self.locked)
     }
 
-    /// Hands the current state to the app.
+    /// Hands the current state to the app. Serializing and handing over happen under one
+    /// lock, so a later state never arrives before an earlier one: a removed device's token
+    /// hash cannot come back with a stale save.
     fn save(&self) {
+        let _saving = lock(&self.saving);
         let saved = self.locked().state.save();
         (self.on_state_change)(saved);
     }
 
-    /// Binds `address` on the server's port and starts accepting there.
+    /// Unpairs a device and ends its open streams. Returns whether it was paired.
+    fn revoke(&self, id: &str) -> bool {
+        let mut locked = self.locked();
+        if let Some(revoked) = locked.revoked.remove(id) {
+            revoked.cancel();
+        }
+        locked.state.remove(id)
+    }
+
+    /// The token that ends a device's streams when it is removed.
+    fn revocation(&self, id: &str) -> CancellationToken {
+        self.locked()
+            .revoked
+            .entry(id.to_owned())
+            .or_default()
+            .clone()
+    }
+
+    /// Listens on exactly the candidate interfaces that are on the home network, announces
+    /// on them, and records why it is paused when there are none.
+    async fn reconcile(self: &Arc<Self>) {
+        let _reconciling = self.reconciling.lock().await;
+        if self.shutdown.is_cancelled() {
+            return;
+        }
+        let hint = lock(&self.network).hint.clone();
+        let candidates = self.policy.candidates(hint.as_deref());
+        let home = self.locked().state.home().to_vec();
+        let wanted: Vec<Ipv4Addr> = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .network
+                    .as_ref()
+                    .is_some_and(|network| home.contains(network))
+            })
+            .map(|candidate| candidate.address)
+            .collect();
+        let gone: Vec<Ipv4Addr> = lock(&self.listeners)
+            .keys()
+            .filter(|address| !wanted.contains(address))
+            .copied()
+            .collect();
+        for address in gone {
+            if let Some(stop) = lock(&self.listeners).remove(&address) {
+                log::info!("lan: no longer serving on {address}");
+                stop.cancel();
+            }
+        }
+        for &address in &wanted {
+            if !lock(&self.listeners).contains_key(&address) {
+                self.bind(address).await;
+            }
+        }
+        let listening: HashSet<IpAddr> = lock(&self.listeners)
+            .keys()
+            .map(|address| IpAddr::V4(*address))
+            .collect();
+        let serving = !listening.is_empty();
+        *lock(&self.served) = listening;
+        lock(&self.network).paused = match (candidates.is_empty(), serving) {
+            (_, true) => None,
+            (true, false) => Some(PauseReason::NoNetwork),
+            (false, false) => Some(PauseReason::OtherNetwork),
+        };
+        let mut announcement = lock(&self.announcement);
+        if !serving {
+            announcement.take();
+        } else if announcement.is_none() && self.policy.announces() {
+            let port = *lock(&self.port);
+            *announcement = Announcement::start(
+                &self.device_name,
+                &self.server_id,
+                port,
+                Arc::clone(&self.served),
+            );
+        }
+    }
+
+    /// Binds `address` on the server's port (choosing it on the first bind) and accepts
+    /// connections there.
     async fn bind(self: &Arc<Self>, address: Ipv4Addr) {
         if self.policy.check(IpAddr::V4(address)).is_err() {
             return;
         }
-        match TcpListener::bind((address, self.port)).await {
-            Ok(listener) => self.listen(address, listener),
-            Err(error) => log::warn!("lan: cannot listen on {address}:{}: {error}", self.port),
+        let port = *lock(&self.port);
+        let bound = if port != 0 {
+            TcpListener::bind((address, port)).await
+        } else {
+            match TcpListener::bind((address, DEFAULT_PORT)).await {
+                Ok(listener) => Ok(listener),
+                Err(error) => {
+                    log::info!("lan: port {DEFAULT_PORT} unavailable ({error}); using another");
+                    TcpListener::bind((address, 0)).await
+                }
+            }
+        };
+        let listener = match bound {
+            Ok(listener) => listener,
+            Err(error) => {
+                log::warn!("lan: cannot listen on {address}: {error}");
+                return;
+            }
+        };
+        if port == 0
+            && let Ok(local) = listener.local_addr()
+        {
+            *lock(&self.port) = local.port();
         }
-    }
-
-    fn listen(self: &Arc<Self>, address: Ipv4Addr, listener: TcpListener) {
+        log::info!("lan: serving on {address}");
         let stop = self.shutdown.child_token();
         if let Some(previous) = lock(&self.listeners).insert(address, stop.clone()) {
             previous.cancel();
@@ -430,27 +584,11 @@ impl Inner {
             if !net::is_allowed_peer(self.policy, peer.ip()) {
                 continue;
             }
-            let Some(slot) = self.admit(peer.ip()) else {
+            let Some(slot) = self.limits.admit(peer.ip()) else {
                 continue;
             };
             tokio::spawn(Arc::clone(&self).serve_connection(stream, peer, slot, stop.clone()));
         }
-    }
-
-    /// A slot for a connection from `peer`, unless the server or the peer is at its limit.
-    fn admit(&self, peer: IpAddr) -> Option<Slot> {
-        let mut per_peer = lock(&self.per_peer);
-        let count = per_peer.entry(peer).or_default();
-        if *count >= MAX_CONNECTIONS_PER_PEER {
-            return None;
-        }
-        let permit = Arc::clone(&self.connections).try_acquire_owned().ok()?;
-        *count += 1;
-        Some(Slot {
-            peer,
-            per_peer: Arc::clone(&self.per_peer),
-            _permit: permit,
-        })
     }
 
     async fn serve_connection(
@@ -460,16 +598,21 @@ impl Inner {
         slot: Slot,
         stop: CancellationToken,
     ) {
-        let _slot = slot;
-        let Ok(Ok(tls)) =
-            tokio::time::timeout(HANDSHAKE_TIMEOUT, self.acceptor.accept(stream)).await
-        else {
-            return;
+        let slot = Arc::new(slot);
+        let closed = slot.closed().clone();
+        let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.acceptor.accept(stream));
+        let tls = tokio::select! {
+            () = closed.cancelled() => return,
+            tls = handshake => match tls {
+                Ok(Ok(tls)) => tls,
+                _ => return,
+            },
         };
         let inner = Arc::clone(&self);
         let service = service_fn(move |request| {
             let inner = Arc::clone(&inner);
-            async move { Ok::<_, Infallible>(inner.handle(request).await) }
+            let slot = Arc::clone(&slot);
+            async move { Ok::<_, Infallible>(inner.handle(request, peer.ip(), &slot).await) }
         });
         let connection = http1::Builder::new()
             .timer(TokioTimer::new())
@@ -477,6 +620,7 @@ impl Inner {
             .serve_connection(TokioIo::new(tls), service);
         tokio::select! {
             () = stop.cancelled() => {}
+            () = closed.cancelled() => {}
             result = connection => {
                 if let Err(error) = result {
                     log::debug!("lan: connection from {} ended: {error}", peer.ip());
@@ -486,22 +630,34 @@ impl Inner {
     }
 
     /// Routes a request. Only pairing works without a token.
-    async fn handle(&self, request: Request<Incoming>) -> Response<Body> {
+    async fn handle(
+        &self,
+        request: Request<Incoming>,
+        peer: IpAddr,
+        slot: &Slot,
+    ) -> Response<Body> {
         let path = request.uri().path().to_owned();
         let segments: Vec<&str> = path.split('/').skip(1).collect();
         let method = request.method().clone();
         match (&method, segments.as_slice()) {
-            (&Method::POST, ["v1", "pair", "start"]) => return self.pair_start(request).await,
-            (&Method::POST, ["v1", "pair", "finish"]) => return self.pair_finish(request).await,
+            (&Method::POST, ["v1", "pair", "start"]) => {
+                return self.pair_start(request, peer).await;
+            }
+            (&Method::POST, ["v1", "pair", "finish"]) => {
+                return self.pair_finish(request, peer).await;
+            }
             _ => {}
         }
         let Some(device) = self.authenticate(&request) else {
-            let mut response = failure(StatusCode::UNAUTHORIZED, "unpaired", None);
+            let mut response = failure(StatusCode::UNAUTHORIZED, "unpaired");
             response
                 .headers_mut()
                 .insert(header::CONNECTION, HeaderValue::from_static("close"));
             return response;
         };
+        if !slot.authenticate() {
+            return failure(StatusCode::SERVICE_UNAVAILABLE, "busy");
+        }
         match (&method, segments.as_slice()) {
             (&Method::GET, ["v1", "hello"]) => json(
                 StatusCode::OK,
@@ -511,7 +667,7 @@ impl Inner {
                 },
             ),
             (&Method::DELETE, ["v1", "me"]) => {
-                if self.locked().state.remove(&device) {
+                if self.revoke(&device) {
                     self.save();
                 }
                 self.release_device(&device).await;
@@ -529,7 +685,7 @@ impl Inner {
                 self.stream_file(&device, hash, index, &request).await
             }
             (_, ["v1", "torrents", ..]) => crate::http::method_not_allowed(),
-            _ => failure(StatusCode::NOT_FOUND, "not_found", None),
+            _ => failure(StatusCode::NOT_FOUND, "not_found"),
         }
     }
 
@@ -550,7 +706,7 @@ impl Inner {
             .map(|client| client.id.clone())
     }
 
-    async fn pair_start(&self, request: Request<Incoming>) -> Response<Body> {
+    async fn pair_start(&self, request: Request<Incoming>, peer: IpAddr) -> Response<Body> {
         let start: wire::PairStart = match read_json(request).await {
             Ok(start) => start,
             Err(response) => return *response,
@@ -558,7 +714,7 @@ impl Inner {
         let Some(message) = secret::from_hex(&start.message) else {
             return refusal(Refusal::Malformed);
         };
-        let started = self.locked().pairing.start(Instant::now(), &message);
+        let started = self.locked().pairing.start(Instant::now(), peer, &message);
         match started {
             Ok((exchange, message)) => json(
                 StatusCode::OK,
@@ -571,7 +727,7 @@ impl Inner {
         }
     }
 
-    async fn pair_finish(&self, request: Request<Incoming>) -> Response<Body> {
+    async fn pair_finish(&self, request: Request<Incoming>, peer: IpAddr) -> Response<Body> {
         let finish: wire::PairFinish = match read_json(request).await {
             Ok(finish) => finish,
             Err(response) => return *response,
@@ -581,10 +737,13 @@ impl Inner {
         };
         let paired = {
             let mut locked = self.locked();
-            let key =
-                locked
-                    .pairing
-                    .finish(Instant::now(), &finish.exchange, &proof, &self.fingerprint);
+            let key = locked.pairing.finish(
+                Instant::now(),
+                peer,
+                &finish.exchange,
+                &proof,
+                &self.fingerprint,
+            );
             match key {
                 Ok(key) => locked.state.add(&finish.name).map(|added| (key, added)),
                 Err(refused) => return refusal(refused),
@@ -605,12 +764,11 @@ impl Inner {
                     },
                 )
             }
-            Ok((_, None)) => failure(StatusCode::CONFLICT, "too_many_devices", None),
-            Err(error) => failure(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal",
-                Some(error.to_string()),
-            ),
+            Ok((_, None)) => failure(StatusCode::CONFLICT, "too_many_devices"),
+            Err(error) => {
+                log::warn!("lan: cannot pair: {error}");
+                failure(StatusCode::INTERNAL_SERVER_ERROR, "internal")
+            }
         }
     }
 
@@ -620,17 +778,30 @@ impl Inner {
             Err(response) => return *response,
         };
         if !self.torrents_allowed.load(Ordering::Relaxed) {
-            return failure(StatusCode::SERVICE_UNAVAILABLE, "torrents_paused", None);
+            return failure(StatusCode::SERVICE_UNAVAILABLE, "torrents_paused");
         }
         let Some(hash) = InfoHash::parse(&add.info_hash) else {
-            return failure(StatusCode::BAD_REQUEST, "invalid_info_hash", None);
+            return failure(StatusCode::BAD_REQUEST, "invalid_info_hash");
         };
         let trackers = magnet::public_trackers(magnet::tracker_urls(&add.trackers)).await;
+        let holder = Holder::Device(device.to_owned());
+        // The device may have been removed while the tracker names were resolved; its
+        // earlier torrent beyond the limit is let go of before the holding is recorded, so a
+        // DELETE arriving meanwhile always finds something consistent.
         let evicted = {
+            let locked = self.locked();
+            if !locked.state.is_paired(device) {
+                return failure(StatusCode::UNAUTHORIZED, "unpaired");
+            }
+            oldest_beyond_limit(&locked.holdings, device, hash)
+        };
+        if let Some(evicted) = evicted {
+            self.release(device, evicted).await;
+        }
+        {
             let mut locked = self.locked();
-            let evicted = oldest_beyond_limit(&locked.holdings, device, hash);
-            if let Some(evicted) = evicted {
-                locked.holdings.remove(&(device.to_owned(), evicted));
+            if !locked.state.is_paired(device) {
+                return failure(StatusCode::UNAUTHORIZED, "unpaired");
             }
             locked
                 .holdings
@@ -640,50 +811,56 @@ impl Inner {
                     streams: Arc::new(()),
                 })
                 .last_used = Instant::now();
-            evicted
-        };
-        if let Some(evicted) = evicted {
-            self.stream
-                .shared
-                .release(evicted, &Holder::Device(device.to_owned()))
-                .await;
         }
         let requested = add.file_idx.and_then(|index| usize::try_from(index).ok());
         let added = self
             .stream
             .shared
-            .add_for(
-                hash,
-                Holder::Device(device.to_owned()),
-                requested,
-                &trackers,
-            )
+            .add_for(hash, holder.clone(), requested, &trackers)
             .await;
+        // A DELETE, a removal or the lease may have let go of the holding meanwhile; the
+        // engine must not keep a torrent nobody holds.
+        let still_held = {
+            let locked = self.locked();
+            locked.state.is_paired(device)
+                && locked.holdings.contains_key(&(device.to_owned(), hash))
+        };
         match added {
-            Ok(index) => json(StatusCode::OK, &wire::Added { index }),
+            Ok(index) if still_held => json(StatusCode::OK, &wire::Added { index }),
+            Ok(_) => {
+                self.release(device, hash).await;
+                self.stream.shared.release(hash, &holder).await;
+                failure(StatusCode::GONE, "stopped")
+            }
             Err(error) => {
                 self.release(device, hash).await;
+                // Details stay in this device's log; the other device gets a code.
+                log::warn!("lan: torrent {hash} failed for a paired device: {error}");
                 let code = match error {
                     TorrentError::MetadataTimeout(_) => "metadata_timeout",
                     TorrentError::NoVideoFile => "no_video_file",
+                    TorrentError::Stopped => "stopped",
                     _ => "torrent_failed",
                 };
-                failure(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    code,
-                    Some(error.to_string()),
-                )
+                failure(StatusCode::UNPROCESSABLE_ENTITY, code)
             }
         }
     }
 
     fn torrent_status(&self, device: &str, hash: &str) -> Response<Body> {
-        let Some(hash) = self.touch(device, hash) else {
-            return failure(StatusCode::NOT_FOUND, "not_found", None);
+        let Some(hash) = InfoHash::parse(hash) else {
+            return failure(StatusCode::NOT_FOUND, "not_found");
         };
+        if !self
+            .locked()
+            .holdings
+            .contains_key(&(device.to_owned(), hash))
+        {
+            return failure(StatusCode::NOT_FOUND, "not_found");
+        }
         match self.stream.shared.engine.status(hash) {
             Some(status) => json(StatusCode::OK, &wire::Status::from(status)),
-            None => failure(StatusCode::NOT_FOUND, "not_found", None),
+            None => failure(StatusCode::NOT_FOUND, "not_found"),
         }
     }
 
@@ -695,7 +872,7 @@ impl Inner {
         request: &Request<Incoming>,
     ) -> Response<Body> {
         let Some(parsed) = self.touch(device, hash) else {
-            return failure(StatusCode::NOT_FOUND, "not_found", None);
+            return failure(StatusCode::NOT_FOUND, "not_found");
         };
         let (streams, open) = {
             let locked = self.locked();
@@ -712,10 +889,21 @@ impl Inner {
             (streams, open)
         };
         let Some(streams) = streams else {
-            return failure(StatusCode::NOT_FOUND, "not_found", None);
+            return failure(StatusCode::NOT_FOUND, "not_found");
         };
         if open >= MAX_STREAMS_PER_DEVICE {
-            return failure(StatusCode::SERVICE_UNAVAILABLE, "too_many_streams", None);
+            return failure(StatusCode::SERVICE_UNAVAILABLE, "too_many_streams");
+        }
+        // Another device may have switched the torrent to a different file (two episodes
+        // of one season pack at once): that is a conflict, which the device's relay must not
+        // answer by adding the torrent again. A torrent that is gone or failed is "not
+        // found", which it may.
+        match self.stream.shared.engine.selected_index(parsed) {
+            None => return failure(StatusCode::NOT_FOUND, "not_found"),
+            Some(selected) if index.parse::<usize>().ok() != Some(selected) => {
+                return failure(StatusCode::CONFLICT, "file_switched");
+            }
+            Some(_) => {}
         }
         let range = request
             .headers()
@@ -727,23 +915,21 @@ impl Inner {
             .engine
             .respond(hash, index, request.method(), range)
             .await;
-        if response.status() == StatusCode::NOT_FOUND {
-            // The device holds the torrent, but another one switched it to a different file
-            // (two episodes of one season pack at once). Distinct from "not found" so the
-            // device's relay does not add it back and switch it again.
-            return failure(StatusCode::CONFLICT, "file_switched", None);
-        }
-        // The holding counts as streaming, and so keeps its lease, while the body is open.
+        // The holding counts as streaming, and so keeps its lease, while the body is open;
+        // removing the device ends the body.
+        let revoked = self.revocation(device);
         response.map(|body| {
-            body.map_frame(move |frame| {
-                let _streaming = &streams;
-                frame
-            })
-            .boxed_unsync()
+            let frames = BodyStream::new(body)
+                .take_until(revoked.cancelled_owned())
+                .map(move |frame| {
+                    let _streaming = &streams;
+                    frame
+                });
+            StreamBody::new(frames).boxed_unsync()
         })
     }
 
-    /// Marks a device's torrent as just used and returns its hash, if the device holds it.
+    /// Marks a device's torrent as just streamed and returns its hash, if the device holds it.
     fn touch(&self, device: &str, hash: &str) -> Option<InfoHash> {
         let hash = InfoHash::parse(hash)?;
         let mut locked = self.locked();
@@ -828,33 +1014,18 @@ impl Inner {
         }
     }
 
-    /// Follows address changes: listens on new home-network addresses, drops gone ones.
-    async fn watch_interfaces(self: Arc<Self>) {
+    /// Follows address and network changes: serves new home-network addresses, stops on
+    /// gone ones, and pauses on other networks.
+    async fn watch_network(self: Arc<Self>) {
         let mut ticks = tokio::time::interval(INTERFACE_CHECK_INTERVAL);
         ticks.tick().await;
         loop {
             tokio::select! {
                 () = self.shutdown.cancelled() => return,
                 _ = ticks.tick() => {}
+                () = self.network_changed.notified() => {}
             }
-            let current = self.policy.addresses();
-            let gone: Vec<Ipv4Addr> = lock(&self.listeners)
-                .keys()
-                .filter(|address| !current.contains(address))
-                .copied()
-                .collect();
-            for address in gone {
-                if let Some(stop) = lock(&self.listeners).remove(&address) {
-                    log::info!("lan: {address} went away");
-                    stop.cancel();
-                }
-            }
-            for address in current {
-                if !lock(&self.listeners).contains_key(&address) {
-                    log::info!("lan: listening on new address {address}");
-                    self.bind(address).await;
-                }
-            }
+            self.reconcile().await;
         }
     }
 }
@@ -891,10 +1062,10 @@ async fn read_json<T: DeserializeOwned>(
     let body = Limited::new(request.into_body(), MAX_BODY_BYTES);
     let collected = tokio::time::timeout(BODY_TIMEOUT, body.collect())
         .await
-        .map_err(|_| Box::new(failure(StatusCode::REQUEST_TIMEOUT, "timeout", None)))?
-        .map_err(|_| Box::new(failure(StatusCode::PAYLOAD_TOO_LARGE, "too_large", None)))?;
+        .map_err(|_| Box::new(failure(StatusCode::REQUEST_TIMEOUT, "timeout")))?
+        .map_err(|_| Box::new(failure(StatusCode::PAYLOAD_TOO_LARGE, "too_large")))?;
     serde_json::from_slice(&collected.to_bytes())
-        .map_err(|_| Box::new(failure(StatusCode::BAD_REQUEST, "malformed", None)))
+        .map_err(|_| Box::new(failure(StatusCode::BAD_REQUEST, "malformed")))
 }
 
 fn json<T: Serialize>(status: StatusCode, value: &T) -> Response<Body> {
@@ -915,12 +1086,13 @@ fn json<T: Serialize>(status: StatusCode, value: &T) -> Response<Body> {
     response
 }
 
-fn failure(status: StatusCode, error: &str, message: Option<String>) -> Response<Body> {
+/// An error answer. Only a code: what went wrong in detail stays in this device's log.
+fn failure(status: StatusCode, error: &str) -> Response<Body> {
     json(
         status,
         &wire::Failure {
             error: error.to_owned(),
-            message,
+            message: None,
         },
     )
 }
@@ -932,7 +1104,7 @@ fn refusal(refused: Refusal) -> Response<Body> {
         Refusal::WrongCode => StatusCode::FORBIDDEN,
         Refusal::Malformed => StatusCode::BAD_REQUEST,
     };
-    let mut response = failure(status, refused.code(), None);
+    let mut response = failure(status, refused.code());
     if let Refusal::TooSoon(wait) = refused {
         let seconds = wait.as_secs().max(1);
         if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {

@@ -11,6 +11,10 @@ const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
 const SERVE_TO_DEVICES: &str = "serve_to_devices";
+const SERVE_NAME: &str = "serve_name";
+
+/// Longest name for this device as a server, in characters.
+const MAX_SERVE_NAME_CHARS: usize = 40;
 /// Cache sizes the user can pick, in MiB. The first one is the smallest allowed.
 pub const TORRENT_CACHE_CHOICES_MB: [u32; 5] = [1024, 2048, 5120, 10240, 20480];
 const DEFAULT_TORRENT_CACHE_MB: u32 = 2048;
@@ -32,6 +36,9 @@ pub struct AppSettings {
     pub onboarded: bool,
     /// Serve torrents to other devices on the home network while the app runs (ADR 0008).
     pub serve_to_devices: bool,
+    /// The name other devices see for this one when it serves, announced on the network;
+    /// empty until the user turns serving on, when the app sets a neutral default.
+    pub serve_name: String,
 }
 
 impl Default for AppSettings {
@@ -44,6 +51,7 @@ impl Default for AppSettings {
             max_resolution: 0,
             onboarded: false,
             serve_to_devices: false,
+            serve_name: String::new(),
         }
     }
 }
@@ -76,6 +84,9 @@ impl StremioCore {
             serve_to_devices: store
                 .setting(SERVE_TO_DEVICES)?
                 .is_some_and(|value| value == "1"),
+            serve_name: store
+                .setting(SERVE_NAME)?
+                .map_or(defaults.serve_name, |value| serve_name(&value)),
         })
     }
 
@@ -104,6 +115,7 @@ impl StremioCore {
             SERVE_TO_DEVICES,
             if settings.serve_to_devices { "1" } else { "0" },
         )?;
+        store.set_setting(SERVE_NAME, &serve_name(&settings.serve_name))?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
         self.apply_network_policy();
@@ -124,6 +136,18 @@ fn language_code(value: &str) -> String {
     } else {
         String::new()
     }
+}
+
+/// A server name fit to announce: one line, bounded.
+fn serve_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_SERVE_NAME_CHARS)
+        .collect()
 }
 
 /// Keeps a resolution limit to one the ranking understands, or no limit.
@@ -158,6 +182,7 @@ mod tests {
             max_resolution: 1081,
             onboarded: true,
             serve_to_devices: true,
+            serve_name: "  StremioNow\non   TV ".into(),
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -171,5 +196,6 @@ mod tests {
         assert_eq!(saved.max_resolution, 0, "unknown limits mean no limit");
         assert!(saved.onboarded);
         assert!(saved.serve_to_devices);
+        assert_eq!(saved.serve_name, "StremioNow on TV");
     }
 }

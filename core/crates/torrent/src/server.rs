@@ -63,6 +63,9 @@ pub(crate) struct Shared {
     holders: Mutex<HashMap<InfoHash, HashSet<Holder>>>,
     /// Torrents a paired server downloads for this device.
     remote: Mutex<HashMap<InfoHash, Arc<RemoteTorrent>>>,
+    /// How many times each torrent was stopped, so a remote torrent stopped while it was
+    /// still being added is noticed even before it was registered.
+    stops: Mutex<HashMap<InfoHash, u64>>,
     /// Whether this device may download torrents itself right now (see
     /// [`StreamServer::set_local_torrents_allowed`]).
     local_allowed: AtomicBool,
@@ -115,6 +118,7 @@ impl StreamServer {
             proxy,
             holders: Mutex::default(),
             remote: Mutex::default(),
+            stops: Mutex::default(),
             local_allowed: AtomicBool::new(true),
         });
         let handler = {
@@ -178,27 +182,37 @@ impl StreamServer {
         let trackers = magnet::tracker_urls(trackers);
         let token = secret::random_hex().map_err(|_| RemoteError::Protocol)?;
         let torrent = RemoteTorrent::new(server.clone(), hash, token.clone(), trackers);
+        let stops = self.shared.stops(hash);
         // Replacing an earlier request for the same torrent ends its polling.
         if let Some(previous) = self.shared.remote().insert(hash, Arc::clone(&torrent)) {
             previous.stopped.cancel();
         }
-        tokio::spawn(Arc::clone(&torrent).poll());
+        torrent.start_polling();
         let added = server.add(hash, file_idx, &torrent.trackers).await;
+        // The player may have closed, and stopped the torrent, while it was being added.
+        let current = {
+            let remote = self.shared.remote();
+            remote
+                .get(&hash)
+                .is_some_and(|current| Arc::ptr_eq(current, &torrent))
+        };
+        let stopped = !current || self.shared.stops(hash) != stops;
         match added {
-            Ok(index) => {
+            Ok(index) if !stopped => {
                 let _ = torrent.index.set(index);
                 Ok(format!("{}/remote/{token}", self.shared.base_url))
             }
-            Err(error) => {
+            result => {
                 torrent.stopped.cancel();
-                let mut remote = self.shared.remote();
-                if remote
-                    .get(&hash)
-                    .is_some_and(|current| Arc::ptr_eq(current, &torrent))
-                {
-                    remote.remove(&hash);
+                if current {
+                    self.shared.remote().remove(&hash);
                 }
-                Err(error)
+                if result.is_ok() {
+                    // Added for nobody: let the server go of it now rather than at lease end.
+                    server.stop(hash).await;
+                    return Err(RemoteError::Stopped);
+                }
+                result.map(|_| String::new())
             }
         }
     }
@@ -248,6 +262,7 @@ impl StreamServer {
         let Some(hash) = InfoHash::parse(info_hash) else {
             return;
         };
+        *self.shared.stops_mut().entry(hash).or_default() += 1;
         let remote = self.shared.remote().remove(&hash);
         if let Some(torrent) = remote {
             torrent.stopped.cancel();
@@ -369,6 +384,14 @@ impl Shared {
 
     fn remote(&self) -> MutexGuard<'_, HashMap<InfoHash, Arc<RemoteTorrent>>> {
         self.remote.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn stops_mut(&self) -> MutexGuard<'_, HashMap<InfoHash, u64>> {
+        self.stops.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn stops(&self, hash: InfoHash) -> u64 {
+        self.stops_mut().get(&hash).copied().unwrap_or(0)
     }
 
     fn prune_cache(&self) -> Result<u64, TorrentError> {

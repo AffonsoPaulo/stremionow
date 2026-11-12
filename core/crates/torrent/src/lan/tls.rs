@@ -6,8 +6,8 @@
 //! device whose code the user typed (see `pairing`), and every later connection must
 //! present exactly that certificate.
 
+use std::error::Error;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -91,9 +91,6 @@ pub(crate) fn client_config(
 #[derive(Debug)]
 pub(crate) struct PinnedVerifier {
     pinned: Mutex<Option<Fingerprint>>,
-    /// Set when a server presented another certificate: it was reset, or someone is in the
-    /// middle. Either way the user has to pair again.
-    mismatched: AtomicBool,
     algorithms: WebPkiSupportedAlgorithms,
 }
 
@@ -102,7 +99,6 @@ impl PinnedVerifier {
     pub(crate) fn pinned(fingerprint: Fingerprint) -> Arc<Self> {
         Arc::new(Self {
             pinned: Mutex::new(Some(fingerprint)),
-            mismatched: AtomicBool::new(false),
             algorithms: provider().signature_verification_algorithms,
         })
     }
@@ -111,7 +107,6 @@ impl PinnedVerifier {
     pub(crate) fn first_seen() -> Arc<Self> {
         Arc::new(Self {
             pinned: Mutex::new(None),
-            mismatched: AtomicBool::new(false),
             algorithms: provider().signature_verification_algorithms,
         })
     }
@@ -120,11 +115,29 @@ impl PinnedVerifier {
     pub(crate) fn fingerprint(&self) -> Option<Fingerprint> {
         *self.pinned.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
 
-    /// Whether a server presented another certificate since the last call.
-    pub(crate) fn take_mismatch(&self) -> bool {
-        self.mismatched.swap(false, Ordering::Relaxed)
+/// Whether `error`, or one of its causes, is this verifier refusing a certificate other than
+/// the pinned one. Read from the failed request itself, so concurrent requests cannot take
+/// each other's answer.
+pub(crate) fn is_pin_mismatch(error: &(dyn Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if matches!(
+            error.downcast_ref::<rustls::Error>(),
+            Some(rustls::Error::InvalidCertificate(
+                CertificateError::ApplicationVerificationFailure
+            ))
+        ) {
+            return true;
+        }
+        // An I/O error's `source` skips the error it wraps, which is where TLS puts its own.
+        current = match error.downcast_ref::<std::io::Error>() {
+            Some(io) => io.get_ref().map(|inner| inner as &(dyn Error + 'static)),
+            None => error.source(),
+        };
     }
+    false
 }
 
 impl ServerCertVerifier for PinnedVerifier {
@@ -142,12 +155,9 @@ impl ServerCertVerifier for PinnedVerifier {
             Some(expected) if crate::secret::constant_time_eq_bytes(&seen, &expected) => {
                 Ok(ServerCertVerified::assertion())
             }
-            Some(_) => {
-                self.mismatched.store(true, Ordering::Relaxed);
-                Err(rustls::Error::InvalidCertificate(
-                    CertificateError::ApplicationVerificationFailure,
-                ))
-            }
+            Some(_) => Err(rustls::Error::InvalidCertificate(
+                CertificateError::ApplicationVerificationFailure,
+            )),
             None => {
                 *pinned = Some(seen);
                 Ok(ServerCertVerified::assertion())
@@ -208,21 +218,18 @@ mod tests {
         assert!(!check(&other.cert), "a second certificate is refused");
         assert_eq!(verifier.fingerprint(), Some(first.fingerprint()));
 
-        assert!(
-            verifier.take_mismatch(),
-            "the refused certificate is reported"
-        );
         let pinned = PinnedVerifier::pinned(other.fingerprint());
-        assert!(!pinned.take_mismatch());
-        assert!(
-            pinned
-                .verify_server_cert(&first.cert, &[], &name, &[], UnixTime::now())
-                .is_err()
-        );
-        assert!(
-            pinned.take_mismatch(),
-            "a different certificate is reported"
-        );
-        assert!(!pinned.take_mismatch(), "once");
+        let refused = pinned
+            .verify_server_cert(&first.cert, &[], &name, &[], UnixTime::now())
+            .expect_err("another certificate");
+        assert!(is_pin_mismatch(&refused));
+        let wrapped = std::io::Error::other(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            refused,
+        ));
+        assert!(is_pin_mismatch(&wrapped), "found inside nested I/O errors");
+        assert!(!is_pin_mismatch(&std::io::Error::other(
+            "connection refused"
+        )));
     }
 }

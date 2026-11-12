@@ -47,6 +47,8 @@ pub(crate) struct Streaming {
     /// Torrents that should have played from the other device but run here, and why.
     fallbacks: Mutex<HashMap<String, FallbackReason>>,
     on_mobile_data: AtomicBool,
+    /// What the app knows about the current network (Android), for the server.
+    network_hint: Mutex<Option<String>>,
 }
 
 impl Streaming {
@@ -67,6 +69,7 @@ impl Streaming {
             remote: Mutex::default(),
             fallbacks: Mutex::default(),
             on_mobile_data: AtomicBool::new(false),
+            network_hint: Mutex::default(),
         })
     }
 
@@ -133,23 +136,34 @@ impl Streaming {
         std::mem::replace(&mut *lock(&self.remote), remote).map(|(server, _)| server)
     }
 
-    /// Looks for the paired device at another address (its DHCP lease changed). If it
-    /// answers there, uses and saves the new address.
+    /// Looks for the paired device at another address (its DHCP lease changed, or its old
+    /// address now belongs to another device). If it answers at one of the addresses it
+    /// announces, uses and saves that address.
     pub(crate) async fn rediscover(&self) -> Option<RemoteServer> {
         let current = self.remote()?;
         let id = current.server_id().to_owned();
-        let found = self
+        let addresses: Vec<std::net::SocketAddr> = self
             .run(stremionow_torrent::discover(REDISCOVERY_TIMEOUT, None))
             .await
             .ok()?
             .into_iter()
-            .find(|server| server.server_id == id && server.address != current.address())?;
-        let moved = current.at(found.address).ok()?;
-        let check = moved.clone();
-        let health = self.run(async move { check.check().await }).await.ok()?;
-        if health != RemoteHealth::Ready {
-            return None;
+            .filter(|server| server.is_server(&id))
+            .flat_map(|server| server.addresses)
+            .filter(|address| *address != current.address())
+            .collect();
+        let mut moved = None;
+        for address in addresses {
+            let Ok(candidate) = current.at(address) else {
+                continue;
+            };
+            let check = candidate.clone();
+            if self.run(async move { check.check().await }).await.ok() == Some(RemoteHealth::Ready)
+            {
+                moved = Some(candidate);
+                break;
+            }
         }
+        let moved = moved?;
         let mut remote = lock(&self.remote);
         // Unless the user changed the pairing meanwhile.
         let (server, sink) = remote
@@ -159,6 +173,16 @@ impl Streaming {
         sink.save(moved.save());
         log::info!("streaming: the other device moved to a new address");
         Some(moved)
+    }
+
+    pub(crate) fn network_hint(&self) -> Option<String> {
+        lock(&self.network_hint).clone()
+    }
+
+    /// Records what the app knows about the network and passes it to the server.
+    pub(crate) fn set_network_hint(&self, hint: Option<String>) {
+        *lock(&self.network_hint) = hint.clone();
+        self.with_lan(|lan| lan.set_network_hint(hint));
     }
 
     pub(crate) fn set_on_mobile_data(&self, on_mobile_data: bool) {
@@ -292,7 +316,7 @@ impl From<TorrentStatus> for TorrentProgress {
 impl From<&RemoteError> for FallbackReason {
     fn from(error: &RemoteError) -> Self {
         match error {
-            RemoteError::Unpaired => Self::Unpaired,
+            RemoteError::Unpaired | RemoteError::CertificateChanged => Self::Unpaired,
             RemoteError::Paused => Self::Paused,
             _ => Self::Unreachable,
         }
@@ -338,6 +362,11 @@ impl StremioCore {
             {
                 Ok(url) => return Ok(url),
                 Err(RemoteError::Torrent(reason)) => return Err(CoreError::Playback { reason }),
+                Err(RemoteError::Stopped) => {
+                    return Err(CoreError::Playback {
+                        reason: RemoteError::Stopped.to_string(),
+                    });
+                }
                 Err(error) => {
                     log::warn!("streaming: {error}; downloading on this device instead");
                     self.streaming
@@ -426,7 +455,11 @@ impl StremioCore {
             }
         };
         let first = self.streaming.run(attempt(remote)).await?;
-        if first != Err(RemoteError::Unreachable) {
+        // Not answering, or another device at its address: it may have moved.
+        if !matches!(
+            first,
+            Err(RemoteError::Unreachable | RemoteError::CertificateChanged)
+        ) {
             return Ok(first);
         }
         match self.streaming.rediscover().await {

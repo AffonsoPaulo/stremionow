@@ -2,51 +2,17 @@
 //! Which interfaces and addresses serving to other devices may use.
 //!
 //! The server listens on each home-network address of the device, never on `0.0.0.0`, so it
-//! cannot end up reachable on a public interface, a mobile network or a VPN by accident.
+//! cannot end up reachable on a public interface, a mobile network or a VPN by accident;
+//! `network` decides which interfaces are on the home network.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use super::network::Candidate;
 use crate::TorrentError;
 
-/// Interface name prefixes that are never the home network: cellular modems, tunnels, VPNs,
-/// container and virtual-machine bridges. Compared in lowercase.
-const EXCLUDED_PREFIXES: &[&str] = &[
-    "rmnet",
-    "ccmni",
-    "pdp",
-    "wwan",
-    "tun",
-    "tap",
-    "ppp",
-    "wg",
-    "utun",
-    "ipsec",
-    "tailscale",
-    "zt",
-    "docker",
-    "veth",
-    "br-",
-    "virbr",
-    "vmnet",
-    "vboxnet",
-    "vethernet",
-    "llw",
-    "awdl",
-];
-
-/// Words in Windows adapter names that mark virtual or VPN adapters. Compared in lowercase.
-const EXCLUDED_WORDS: &[&str] = &[
-    "virtualbox",
-    "vmware",
-    "hyper-v",
-    "wsl",
-    "vpn",
-    "tailscale",
-    "zerotier",
-    "wireguard",
-    "loopback",
-    "bluetooth",
-];
+/// The network identity of loopback, for tests and the emulator harness.
+#[cfg(any(test, feature = "dev-loopback"))]
+pub(crate) const LOOPBACK_NETWORK: &str = "loopback";
 
 /// Whether `ip` is a home-network address the server may listen on and clients may connect
 /// to: the private IPv4 ranges of RFC 1918. Loopback, link-local, carrier-grade NAT (also used
@@ -61,13 +27,7 @@ pub(crate) fn is_lan_ip(ip: IpAddr) -> bool {
 /// Whether an interface looks like the home network: up, not point-to-point, not a known
 /// tunnel, modem or virtual adapter, and with a home-network address.
 pub(crate) fn is_lan_interface(name: &str, ip: IpAddr, up: bool, point_to_point: bool) -> bool {
-    let name = name.to_ascii_lowercase();
-    up && !point_to_point
-        && is_lan_ip(ip)
-        && !EXCLUDED_PREFIXES
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        && !EXCLUDED_WORDS.iter().any(|word| name.contains(word))
+    up && !point_to_point && is_lan_ip(ip) && !super::network::is_excluded_name(name)
 }
 
 /// Who the server may listen on.
@@ -83,12 +43,18 @@ pub(crate) enum BindPolicy {
 }
 
 impl BindPolicy {
-    /// Addresses to listen on now.
-    pub(crate) fn addresses(self) -> Vec<Ipv4Addr> {
+    /// Interfaces that may be served now, with the network each is on (see `network`).
+    pub(crate) fn candidates(self, hint: Option<&str>) -> Vec<Candidate> {
         match self {
-            Self::Lan => lan_addresses(),
+            Self::Lan => super::network::candidates(hint),
             #[cfg(any(test, feature = "dev-loopback"))]
-            Self::Loopback => vec![Ipv4Addr::LOCALHOST],
+            // The hint stands in for the network, so tests can move "between networks".
+            Self::Loopback => vec![Candidate {
+                address: Ipv4Addr::LOCALHOST,
+                network: Some(crate::secret::to_hex(&super::tls::fingerprint(
+                    hint.unwrap_or(LOOPBACK_NETWORK).as_bytes(),
+                ))),
+            }],
         }
     }
 
@@ -109,35 +75,6 @@ impl BindPolicy {
     pub(crate) fn announces(self) -> bool {
         self == Self::Lan
     }
-}
-
-/// The device's home-network IPv4 addresses, in a stable order.
-fn lan_addresses() -> Vec<Ipv4Addr> {
-    let interfaces = match if_addrs::get_if_addrs() {
-        Ok(interfaces) => interfaces,
-        Err(error) => {
-            log::warn!("lan: cannot list network interfaces: {error}");
-            return Vec::new();
-        }
-    };
-    let mut addresses: Vec<Ipv4Addr> = interfaces
-        .iter()
-        .filter(|interface| {
-            is_lan_interface(
-                &interface.name,
-                interface.ip(),
-                interface.is_oper_up(),
-                interface.is_p2p,
-            )
-        })
-        .filter_map(|interface| match interface.ip() {
-            IpAddr::V4(ip) => Some(ip),
-            IpAddr::V6(_) => None,
-        })
-        .collect();
-    addresses.sort_unstable();
-    addresses.dedup();
-    addresses
 }
 
 /// Whether a client may connect from `peer`: a home-network address, as the server's own.
@@ -278,10 +215,13 @@ mod tests {
     }
 
     #[test]
-    fn lan_addresses_are_all_private() {
-        for address in BindPolicy::Lan.addresses() {
-            assert!(address.is_private(), "{address}");
+    fn candidates_are_all_private() {
+        for candidate in BindPolicy::Lan.candidates(None) {
+            assert!(candidate.address.is_private(), "{candidate:?}");
         }
+        let loopback = BindPolicy::Loopback.candidates(None);
+        assert_eq!(loopback.len(), 1);
+        assert_eq!(loopback[0].address, Ipv4Addr::LOCALHOST);
     }
 
     #[test]

@@ -37,11 +37,13 @@ pub(crate) struct Client {
     pub(crate) paired_at: u64,
 }
 
-/// The server's lasting state: its id, certificate and paired devices.
+/// The server's lasting state: its id, certificate, paired devices and home network.
 pub(crate) struct ServerState {
     pub(crate) server_id: String,
     pub(crate) identity: Identity,
     clients: Vec<Client>,
+    /// Identities of the network where the user turned serving on (see `network`).
+    home: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,6 +53,8 @@ struct Saved {
     cert: String,
     key: String,
     clients: Vec<SavedClient>,
+    #[serde(default)]
+    home: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -68,6 +72,7 @@ impl ServerState {
             server_id: secret::random_hex()?,
             identity: Identity::generate()?,
             clients: Vec::new(),
+            home: Vec::new(),
         })
     }
 
@@ -97,10 +102,17 @@ impl ServerState {
                 })
             })
             .collect();
+        let home = saved
+            .home
+            .into_iter()
+            .filter(|network| secret::from_hex(network).is_some_and(|bytes| bytes.len() == 32))
+            .take(8)
+            .collect();
         Some(Self {
             server_id: saved.server_id,
             identity,
             clients,
+            home,
         })
     }
 
@@ -121,6 +133,7 @@ impl ServerState {
                     paired_at: client.paired_at,
                 })
                 .collect(),
+            home: self.home.clone(),
         };
         // Plain strings and numbers always serialize.
         serde_json::to_string(&saved).unwrap_or_default()
@@ -128,6 +141,26 @@ impl ServerState {
 
     pub(crate) fn clients(&self) -> &[Client] {
         &self.clients
+    }
+
+    /// Whether the device with this id is still paired.
+    pub(crate) fn is_paired(&self, id: &str) -> bool {
+        self.clients.iter().any(|client| client.id == id)
+    }
+
+    /// The home network's identities; empty until the user chooses one.
+    pub(crate) fn home(&self) -> &[String] {
+        &self.home
+    }
+
+    /// Makes `networks` the home network. Returns whether that changed anything.
+    pub(crate) fn set_home(&mut self, mut networks: Vec<String>) -> bool {
+        networks.sort_unstable();
+        networks.dedup();
+        networks.truncate(8);
+        let changed = networks != self.home;
+        self.home = networks;
+        changed
     }
 
     /// The device `token` belongs to. Every stored hash is compared in full, so timing does
@@ -219,11 +252,14 @@ mod tests {
     #[test]
     fn state_round_trips_without_tokens() {
         let mut state = ServerState::generate().expect("state");
+        assert!(state.set_home(vec!["ab".repeat(32)]));
+        assert!(!state.set_home(vec!["ab".repeat(32)]), "unchanged");
         let (_, token) = state.add("TV").expect("add").expect("room");
         let saved = state.save();
         assert!(!saved.contains(&token), "only the token's hash is saved");
 
         let loaded = ServerState::load(&saved).expect("loads");
+        assert_eq!(loaded.home(), state.home());
         assert_eq!(loaded.server_id, state.server_id);
         assert_eq!(loaded.identity.fingerprint(), state.identity.fingerprint());
         assert_eq!(loaded.clients(), state.clients());

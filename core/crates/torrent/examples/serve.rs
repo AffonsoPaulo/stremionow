@@ -2,15 +2,15 @@
 //! Serves torrents to other devices without the app, for testing pairing and streaming.
 //!
 //! ```text
-//! cargo run -p stremionow-torrent --features dev-loopback --example serve -- [--lan] [NAME]
+//! cargo run -p stremionow-torrent --features dev-loopback --example serve -- [--lan] [--repeat-codes] [NAME]
 //! ```
 //!
 //! By default it listens on 127.0.0.1 only, which the Android emulator reaches as
 //! `10.0.2.2`: pair the emulator with the address `10.0.2.2` and the code printed here. With
 //! `--lan` it listens on the home-network addresses and announces itself, as the apps do.
 //!
-//! It keeps a pairing code on screen (a new one when the last expires or is used) and prints
-//! the paired devices. Its state, TLS private key included, is kept in plain text in the
+//! It shows one pairing code, or a new one whenever the last expires or is used with
+//! `--repeat-codes`, and prints the paired devices. It serves on the network it starts on. Its state, TLS private key included, is kept in plain text in the
 //! system temp folder under `stremionow-serve-example`: this is a test tool. Stop it with
 //! Ctrl-C.
 
@@ -22,12 +22,13 @@ use stremionow_torrent::{LanConfig, ServerConfig, StreamServer};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut lan = false;
+    let mut repeat_codes = false;
     let mut name = "StremioNow test server".to_owned();
     for arg in std::env::args().skip(1) {
-        if arg == "--lan" {
-            lan = true;
-        } else {
-            name = arg;
+        match arg.as_str() {
+            "--lan" => lan = true,
+            "--repeat-codes" => repeat_codes = true,
+            _ => name = arg,
         }
     }
     let folder = std::env::temp_dir().join("stremionow-serve-example");
@@ -48,6 +49,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("cannot save the state: {error}");
             }
         }),
+        network_hint: None,
+        serve_on_current_network: true,
     };
     let server = if lan {
         stream.serve_lan(config).await?
@@ -55,10 +58,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         stream.serve_loopback(config).await?
     };
 
+    server.new_pairing_code()?;
     let mut shown = String::new();
     loop {
         let mut status = server.status();
-        if status.pairing.is_none() {
+        if status.pairing.is_none() && repeat_codes {
             server.new_pairing_code()?;
             status = server.status();
         }
@@ -75,10 +79,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 format!("{}{streaming}", device.name)
             })
             .collect();
+        let place = match status.paused {
+            None => addresses.join(", "),
+            Some(reason) => format!("paused ({reason:?})"),
+        };
         let line = format!(
             "{} on {} | code {} | paired: {}",
             status.device_name,
-            addresses.join(", "),
+            place,
             status
                 .pairing
                 .map(|pairing| pairing.code)

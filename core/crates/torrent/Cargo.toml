@@ -36,6 +36,9 @@ spake2.workspace = true
 mdns-sd.workspace = true
 if-addrs.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [features]
 # Lets `StreamServer::serve_loopback` listen on 127.0.0.1, for the emulator harness
 # (`examples/serve.rs`). The apps never enable it.

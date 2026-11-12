@@ -2,6 +2,7 @@
 //! Info hashes and magnet links built from what Stremio addons send.
 
 use std::fmt;
+use std::time::Duration;
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -101,6 +102,43 @@ fn parse_tracker(source: &str) -> Option<String> {
     (supported && url.has_host() && !crate::proxy::is_private_host(&url)).then(|| url.into())
 }
 
+/// Time allowed to resolve one tracker's name.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// The `trackers` whose names resolve to public addresses only, for torrents added by paired
+/// devices. An HTTP announce is a GET with a path chosen by whoever sent the stream, so a
+/// name pointing into the server's own network (its loopback, its router) must not get one.
+/// Names that do not resolve are dropped as well. librqbit resolves again when announcing,
+/// so a name that changes its answer in between (DNS rebinding) remains possible; ADR 0008
+/// discusses that gap.
+pub(crate) async fn public_trackers(trackers: Vec<String>) -> Vec<String> {
+    let checks = trackers.into_iter().map(|tracker| async move {
+        let url = url::Url::parse(&tracker).ok()?;
+        if let Some(url::Host::Domain(name)) = url.host() {
+            let port = url.port_or_known_default().unwrap_or(80);
+            let lookup = tokio::net::lookup_host((name, port));
+            let addresses: Vec<_> = tokio::time::timeout(RESOLVE_TIMEOUT, lookup)
+                .await
+                .ok()?
+                .ok()?
+                .collect();
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|address| crate::proxy::is_private_ip(address.ip()))
+            {
+                return None;
+            }
+        }
+        Some(tracker)
+    });
+    futures::future::join_all(checks)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// A magnet link for `info_hash` announcing to `trackers`, which are URL-encoded.
 pub(crate) fn magnet_link(info_hash: InfoHash, trackers: &[String]) -> String {
     let mut link = format!("magnet:?xt=urn:btih:{info_hash}");
@@ -178,6 +216,20 @@ mod tests {
             .map(|i| format!("tracker:udp://t{i}.example.org:80/announce"))
             .collect();
         assert_eq!(tracker_urls(&sources).len(), MAX_TRACKERS);
+    }
+
+    #[tokio::test]
+    async fn trackers_from_other_devices_must_resolve_publicly() {
+        let trackers = strings(&[
+            "udp://localhost:1337/announce",
+            "http://localhost/announce",
+            "udp://name.invalid:1337/announce",
+            "udp://8.8.8.8:1337/announce",
+        ]);
+        assert_eq!(
+            public_trackers(trackers).await,
+            strings(&["udp://8.8.8.8:1337/announce"])
+        );
     }
 
     #[test]

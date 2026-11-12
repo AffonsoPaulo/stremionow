@@ -4,7 +4,7 @@ Date: 2026-11-11
 
 ## Desktop UI: Compose over a native mpv window
 
-**Result: passed on Windows 11, with one known issue (window size when dragging between monitors with different scales). macOS, Linux X11 and Wayland are not tested on this machine.**
+**Result: passed on Windows 11. The known issue found then (window size when dragging between monitors with different scales) has a fix since, see known issue 1. macOS, Linux X11 and Wayland are not tested on this machine; their players were built afterwards and are checked in CI (see "Other platforms").**
 
 This validates [ADR 0005](../adr/0005-desktop-ui.md) on Windows: libmpv renders into its own borderless native window, and the Compose interface runs in a transparent, undecorated window kept exactly on top of it. The proof of concept was a standalone Gradle build in [`desktop/`](../../desktop). Its player, window code and controls have since moved into the shared Kotlin Multiplatform modules ([ADR 0006](../adr/0006-shared-ui.md)): `MpvPlayer` (desktop) in `android/player`, and `WindowPair`, `VideoWindow` and the overlay in `android/ui` under `desktopMain`.
 
@@ -65,7 +65,7 @@ Frames stay on the GPU (`d3d11` pixel format, no copy-back). Process CPU while p
 
 ### Known issues
 
-1. **Drag between monitors with different scales shrinks the window.** Each window receives `WM_DPICHANGED` separately and AWT applies Windows' suggested size; when the shrink moves the window's centre back across the boundary, the scale flips again and the size is applied twice. Alignment recovers within about 300 ms. Fix candidates: handle `WM_DPICHANGED` for the pair natively (subclass the overlay and apply the suggested rectangle to both), or make the video window a plain Win32 window that ignores DPI changes and let only the overlay scale.
+1. **Drag between monitors with different scales shrank the window (fixed).** Each window receives `WM_DPICHANGED` separately and AWT applies Windows' suggested size from whatever size the window has at that moment; when the shrink moved the window's centre back across the boundary, the scale flipped again and the size was applied twice. A later check also showed a live scale change on the window's own monitor that grew neither window, then shrank both on the way back. `WindowPair` now keeps the windowed size in dp (`WindowedSize`): moves use it at the scale of the monitor under the window, and 300 ms after any scale change both windows get that size at the new scale. Covered by unit tests; it has not been re-run against live scale changes, which are no longer changed on the test machine.
 2. **Transparent rendering path.** With Skiko's default Direct3D renderer the overlay is a layered window (`WS_EX_LAYERED`) whose content is a Skia child window; input reaches it everywhere, including fully transparent pixels. The OpenGL renderer produced an opaque black overlay and was dropped; the software renderer works but costs more CPU. Keep Direct3D, and measure the overlay's cost at 4K during animations before release.
 3. **Pitfalls found and handled in `WindowPair`**, worth keeping in mind when this moves to the real app: Compose's built-in resizer for undecorated windows resizes the overlay alone and has no minimum size (disabled with `isResizable = false`); calling `requestFocus()` on the overlay window itself starves Compose of key events (focus goes back to the most recent focus owner instead); a minimized video window left the hidden overlay holding the keyboard (minimizing now activates the video window first, so the system hands focus to the next app); Compose restarts pointer handlers when the density changes, which dropped drags across monitors (gestures now follow the mouse button through `GetAsyncKeyState` until it is released); hover moves on desktop report `previousPosition == position`.
 4. **Launches from a background process start behind the foreground window** (Windows foreground lock). Normal launches from Explorer or the Start menu get the foreground; the harness activated the app with an Alt tap.
@@ -74,7 +74,18 @@ Frames stay on the GPU (`d3d11` pixel format, no copy-back). Process CPU while p
 7. Two Gradle deprecation warnings come from the Compose plugin (hot reload attribute type, `Configuration.setVisible`), not from this build.
 8. `7z` extraction relies on Windows' own `%SystemRoot%\System32\tar.exe` (libarchive `bsdtar`, Windows 10 1803 and later): the archive uses the BCJ2 filter, which Apache Commons Compress cannot read, and Git Bash's GNU tar has no 7z support.
 
+### Since the proof of concept
+
+- **Controls**: hover tooltips with the keyboard shortcut (Space, ←, →, F, N, Esc) on the player's buttons; N plays the next episode.
+- **Mouse back button** (`XButton1`): one step back, like Esc, in the app window and in the player.
+- **Media keys**: play/pause, play, pause, stop, next and previous while the player is focused (Windows `WM_APPCOMMAND`, read by subclassing the overlay's window procedure). The system media overlay (SMTC on Windows, MPRIS on Linux, Now Playing on macOS) is still to do: SMTC needs WinRT activation and an app identity, which wait for the installer.
+- **Missing libmpv**: the player window says so and offers the way back, instead of failing.
+- **`--smoke-test`**: composes the app window, plays a generated test pattern through libmpv in the player's window and exits 0 when it worked; CI runs it on Windows, macOS and Linux.
+- **HDR and refresh rate switching** with the user's consent (ADR 0005).
+
 ### Other platforms
+
+Since this was written, macOS and Linux have players (ADR 0005, "Update: macOS, Linux and libmpv per system"): `--wid` on X11 (and XWayland), the render API into a `CAOpenGLLayer` on macOS. They compile, pass the shared tests and the start-up smoke test in CI; nobody has used them by hand yet. The notes below are the analysis that led there.
 
 **macOS: not tested on this machine.** The pieces exist but the embedding is the risk:
 - AWT on macOS has no native view per component: a heavyweight `Canvas` is drawn into the window's layer tree, and JAWT hands out a `CALayer` attachment, not an `NSView`. mpv's `wid` expects an `NSView`, so the Windows path does not carry over as is. Options: a native `NSWindow` (or `NSView`) created through JNA and the Objective-C runtime for mpv, or mpv's render API drawing into a `CAMetalLayer`/OpenGL layer attached through JAWT (still no frame copy through the CPU).

@@ -2,7 +2,7 @@
 
 A fast, native client for the Stremio addon ecosystem, built for Android phones, Android TV, Fire TV and the desktop (Windows, macOS, Linux).
 
-> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account. The desktop app shares their interface and plays through mpv; it is tested on Windows only so far.
+> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account. The desktop app shares their interface and plays through mpv; it is tested by hand on Windows, and builds, passes its tests and plays a test pattern in CI on macOS and Linux.
 
 StremioNow does not host or provide any content. It plays what the addons you install point to. By default it installs the same addons as the official Stremio app: catalogs, metadata, subtitles and links to streaming services, but no source of copyrighted content.
 
@@ -63,14 +63,15 @@ cd android
 
 The APKs land in `android/app-mobile/build/outputs/apk/debug/` (phone) and `android/app-tv/build/outputs/apk/debug/` (Android TV and Fire TV): one per ABI (`arm64-v8a` for most phones and TVs, `armeabi-v7a` for older or low-end devices, `x86_64` for emulators) and a universal one. Release builds and signing are described in [`docs/RELEASING.md`](docs/RELEASING.md).
 
-Desktop app (needs the Android SDK too, since it includes the `android/` build for the shared modules; cargo-ndk and the NDK are not needed). Gradle builds the core for the machine, and on Windows downloads a pinned libmpv; on macOS and Linux, install libmpv from the system (`brew install mpv`, `libmpv2`):
+Desktop app (needs the Android SDK too, since it includes the `android/` build for the shared modules; cargo-ndk and the NDK are not needed). Gradle builds the core for the machine, and on Windows downloads a pinned, checksum-verified libmpv. The app only ever loads the libmpv it bundles; until macOS and Linux packages bundle one, development runs there use the system's: `brew install mpv` on macOS, `sudo apt install libmpv2` (Debian, Ubuntu) on Linux. On a Wayland session the app runs through XWayland.
 
 ```
 cd desktop
-./gradlew run                 # add --args="--verbose" for mpv's detailed logs
+./gradlew run                       # add --args="--verbose" for mpv's detailed logs
+./gradlew run --args="--smoke-test" # start, play a test pattern through libmpv, exit 0 when it worked
 ```
 
-It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux).
+It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux), and the Stremio session key in the system's secret store (DPAPI, the login keychain, or the Secret Service through libsecret; without one, the session lasts until the app closes).
 
 ## Languages
 

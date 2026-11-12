@@ -14,6 +14,7 @@ One page per decision that is hard to reverse. Copy the template below into `NNN
 | [0008](0008-serve-to-other-devices.md) | Serve torrents to other devices on the home network | Accepted |
 | [0009](0009-aniskip.md) | Skip anime openings and endings with AniSkip | Accepted |
 | [0010](0010-discover-addons.md) | Discover addons from Stremio's lists | Accepted |
+| [0011](0011-home-curation.md) | Pick the home screen's rows on the device | Accepted |
 
 ## Template
 

@@ -73,8 +73,9 @@ fun SnButton(
         modifier =
             modifier
                 .heightIn(min = SnSize.controlLg)
-                .alpha(if (enabled) 1f else 0.45f)
+                // The ring stays at full strength on a dimmed (disabled) button.
                 .snClickable(Pill, enabled = enabled, onClick = onClick)
+                .alpha(if (enabled) 1f else 0.45f)
                 .background(background, Pill)
                 .padding(horizontal = SnSpacing.space6),
         verticalAlignment = Alignment.CenterVertically,
@@ -112,9 +113,9 @@ fun SnIconButton(
         modifier =
             modifier
                 .size(SnSize.controlMd)
-                .alpha(if (enabled) 1f else 0.45f)
                 .semantics { contentDescription = label }
                 .snClickable(Pill, enabled = enabled, onClick = onClick)
+                .alpha(if (enabled) 1f else 0.45f)
                 .background(background, Pill),
         contentAlignment = Alignment.Center,
     ) {
@@ -184,9 +185,15 @@ fun SnTabs(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
-        // Scrolls when translated labels do not fit, instead of squeezing them.
+        // Scrolls when translated labels do not fit, instead of squeezing them. The scroll clips
+        // at its sides, so it leaves room for the focus ring there; the offset keeps the labels
+        // where they were.
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            modifier =
+                Modifier
+                    .offset(x = -FocusRingSpace)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = FocusRingSpace),
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
         ) {
             tabs.forEachIndexed { index, title ->

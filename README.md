@@ -55,7 +55,7 @@ cd core
 cargo test --workspace
 ```
 
-To try serving to other devices without the app, run the headless server from `core/` and pair a device with the code it prints (by default it listens on loopback, which the Android emulator reaches as `10.0.2.2`; add `--lan` to serve the home network):
+To try serving to other devices without the app, run the headless server from `core/` and pair a device with the code it prints (by default it listens on loopback, which the Android emulator reaches as `10.0.2.2`; add `--lan` to serve the network it starts on, and `--repeat-codes` for a new code after each one is used or expires):
 
 ```
 cargo run -p stremionow-torrent --features dev-loopback --example serve

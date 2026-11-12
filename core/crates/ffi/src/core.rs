@@ -10,12 +10,14 @@ use futures::{StreamExt, stream};
 use serde::de::DeserializeOwned;
 use stremionow_addons::{AddonClient, AddonError, InstalledAddon};
 use stremionow_library::{LibraryEntry, Store};
+use stremionow_markers::AniSkip;
 use stremionow_protocol::{AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse};
 
 use crate::account::Account;
 use crate::records::{
     AddonInfo, CatalogInfo, CatalogRow, CoreError, LibraryItem, MetaDetails, MetaItem,
 };
+use crate::skips;
 use crate::streaming::Streaming;
 
 /// Addons installed by default, the same ones the official Stremio app starts with, each with
@@ -57,6 +59,7 @@ pub struct StremioCore {
     pub(crate) client: AddonClient,
     pub(crate) streaming: Streaming,
     pub(crate) account: Account,
+    pub(crate) aniskip: AniSkip,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -374,6 +377,15 @@ impl StremioCore {
 impl StremioCore {
     /// Opens the core with the given account client; tests point it at a fake server.
     pub(crate) fn open(data_dir: String, account: Account) -> Result<Arc<Self>, CoreError> {
+        Self::open_with(data_dir, account, skips::new_client()?)
+    }
+
+    /// Opens the core with the given account and AniSkip clients; tests point them at fakes.
+    pub(crate) fn open_with(
+        data_dir: String,
+        account: Account,
+        aniskip: AniSkip,
+    ) -> Result<Arc<Self>, CoreError> {
         let directory = PathBuf::from(data_dir);
         std::fs::create_dir_all(&directory).map_err(|e| CoreError::Storage {
             reason: e.to_string(),
@@ -385,6 +397,7 @@ impl StremioCore {
             client: AddonClient::new(ADDON_TIMEOUT)?,
             streaming: Streaming::new(directory.join("streams"))?,
             account,
+            aniskip,
         }))
     }
 

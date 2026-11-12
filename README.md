@@ -12,6 +12,7 @@ StremioNow does not host or provide any content. It plays what the addons you in
 - **Plays everything**: libmpv on every platform, so MKV, HEVC, HDR, DTS and styled ASS subtitles work without transcoding.
 - **Picks the right source for you**: your first-run preferences rank the sources; switching is always one click away, even during playback.
 - **Built for the remote**: full D-pad navigation with a visible focus everywhere on TV.
+- **Skips what you've seen before**: intros, recaps and credits, found in the file's chapters and, for anime, on [AniSkip](https://aniskip.com), which you can turn off in Settings ([ADR 0009](docs/adr/0009-aniskip.md)).
 - **Your choice of account**: use your Stremio account to sync addons, library and progress, or keep everything on the device.
 
 ## Architecture
@@ -21,7 +22,7 @@ StremioNow does not host or provide any content. It plays what the addons you in
 | Android (phone, Android TV, Fire TV) | Kotlin, Jetpack Compose, Compose for TV |
 | Desktop (Windows, macOS, Linux) | Compose Multiplatform over a native mpv window ([ADR 0005](docs/adr/0005-desktop-ui.md)) |
 | Player | libmpv |
-| Core | Rust: addons, Stremio account sync, library and progress, source ranking, torrent streaming (librqbit) behind a local HTTP server |
+| Core | Rust: addons, Stremio account sync, library and progress, source ranking, torrent streaming (librqbit) behind a local HTTP server, AniSkip markers |
 | Bridge | UniFFI (Kotlin) |
 
 See [`docs/adr`](docs/adr) for the reasoning behind each decision.

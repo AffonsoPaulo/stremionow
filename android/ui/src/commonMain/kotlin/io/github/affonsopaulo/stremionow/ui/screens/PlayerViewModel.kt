@@ -8,6 +8,7 @@ import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.SubtitleTrack
 import io.github.affonsopaulo.stremionow.core.TorrentProgress
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.player.Markers
 import io.github.affonsopaulo.stremionow.player.PlayerOptions
 import io.github.affonsopaulo.stremionow.player.Track
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
@@ -19,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -83,6 +85,13 @@ class PlayerViewModel<out P : VideoPlayer>(
 
     /** The source could not be prepared (no peers, no video file, engine error). */
     val prepareFailed = mutablePrepareFailed.asStateFlow()
+    private val mutableSkips = MutableStateFlow(Markers())
+
+    /**
+     * Openings, recaps and endings from AniSkip, for anime episodes when the setting is on.
+     * Empty until the answer arrives, and for everything else; the file's chapters come first.
+     */
+    val skips = mutableSkips.asStateFlow()
 
     init {
         source.infoHash?.let { hash ->
@@ -116,12 +125,37 @@ class PlayerViewModel<out P : VideoPlayer>(
             addSubtitles()
             selectSubtitleIfMissing()
         }
+        if (settings?.aniskip != false) viewModelScope.launch { findSkips() }
         viewModelScope.launch {
             while (isActive) {
                 delay(PROGRESS_INTERVAL_MS)
                 if (!player.state.value.isPaused) saveProgress()
             }
         }
+    }
+
+    /**
+     * Asks AniSkip once the file's length is known: AniSkip picks the timings submitted for a
+     * file of the same length. Playback never waits for it, and a failure only means no buttons.
+     */
+    private suspend fun findSkips() {
+        val duration =
+            player.state
+                .mapNotNull { state ->
+                    state.durationSeconds?.takeIf { state.isLoaded && it > 0 }
+                }.first()
+        val episode = selection.episode
+        val segments =
+            runCatching {
+                core.skipSegments(
+                    selection.details.item.id,
+                    selection.videoId,
+                    episode?.season,
+                    episode?.episode,
+                    duration,
+                )
+            }.getOrDefault(emptyList())
+        mutableSkips.value = segments.toMarkers()
     }
 
     /** Adds the source's subtitles and the addons' ones in the device language and English. */

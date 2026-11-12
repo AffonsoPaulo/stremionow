@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -148,19 +148,14 @@ private fun AddonHeading(
                 addon.name,
                 modifier = Modifier.weight(1f, fill = false),
                 style = SnTypography.sectionTitle.copy(color = if (dimmed) SnColors.fgMuted else SnColors.fg),
-                maxLines = 1,
+                // Two lines before it is cut: names are what people look for in the list.
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (addon.version.isNotBlank()) {
-                BasicText(
-                    stringResource(Res.string.addons_version, addon.version),
-                    style = SnTypography.caption.copy(color = SnColors.fgMuted),
-                    maxLines = 1,
-                )
-            }
             badge?.invoke()
         }
-        val line = listOfNotNull(typesText(addon), providesText(addon)).joinToString(" · ")
+        val version = addon.version.takeIf { it.isNotBlank() }?.let { stringResource(Res.string.addons_version, it) }
+        val line = listOfNotNull(version, typesText(addon), providesText(addon)).joinToString(" · ")
         if (line.isNotEmpty()) {
             BasicText(
                 line,
@@ -350,17 +345,17 @@ private fun CardAction(
 internal fun DiscoverAddonCard(
     entry: CatalogAddon,
     installed: Boolean,
-    installing: Boolean,
+    checking: Boolean,
     failed: Boolean,
     onInstall: () -> Unit,
     onConfigure: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val addon = entry.addon
     val shape = RoundedCornerShape(SnRadius.radiusLg)
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .fillMaxHeight()
             .background(SnColors.surface, shape)
             .border(1.dp, SnColors.border, shape)
             .padding(SnSpacing.space4),
@@ -375,14 +370,16 @@ internal fun DiscoverAddonCard(
                 badge = if (entry.official) ({ Badge(stringResource(Res.string.addons_official)) }) else null,
             )
         }
-        // Three lines held even when shorter, so cards side by side line up.
-        BasicText(
-            addon.description,
-            style = SnTypography.body.copy(color = SnColors.fgMuted),
-            minLines = 3,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (addon.description.isNotBlank()) {
+            BasicText(
+                addon.description,
+                style = SnTypography.body.copy(color = SnColors.fgMuted),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // The row's cards share a height; the actions sit at the bottom so they line up.
+        Spacer(Modifier.weight(1f))
         if (failed) {
             BasicText(
                 stringResource(Res.string.addons_install_failed),
@@ -408,7 +405,7 @@ internal fun DiscoverAddonCard(
                         when {
                             installed -> Res.string.addons_installed
                             needsSetup -> Res.string.addons_configure
-                            installing -> Res.string.addons_installing
+                            checking -> Res.string.addons_checking
                             else -> Res.string.addons_install_action
                         },
                     ),
@@ -420,7 +417,7 @@ internal fun DiscoverAddonCard(
                         needsSetup -> SnIcons.Settings
                         else -> SnIcons.Plus
                     },
-                enabled = !installed && !installing,
+                enabled = !installed && !checking,
                 modifier = Modifier.semantics { contentDescription = mainLabel },
             )
             if (!installed && !needsSetup && addon.configurable) {

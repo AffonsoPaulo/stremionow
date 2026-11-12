@@ -46,6 +46,7 @@ import io.github.affonsopaulo.stremionow.ui.platform.shareText
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
+import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
@@ -285,7 +286,16 @@ internal fun ShareAddonDialog(
         }
         if (isTv) TextBesideCode(url, stringResource(Res.string.addons_qr_description), text) else text()
         SnDialogActions {
-            // A TV has no use for its clipboard, and its share sheet rarely leads anywhere.
+            // A TV has no use for its clipboard, and its share sheet rarely leads anywhere, so
+            // Close is its one action. Elsewhere sharing leads: the share sheet where there is
+            // one (phones), else copying (the desktop).
+            val canShare = !isTv && canShareText(context)
+            SnButton(
+                text = stringResource(Res.string.action_close),
+                onClick = onDismiss,
+                style = if (isTv) SnButtonStyle.Primary else SnButtonStyle.Ghost,
+                modifier = Modifier.focusRequester(closeFocus),
+            )
             if (!isTv) {
                 SnButton(
                     text = stringResource(if (copied) Res.string.addons_copied else Res.string.addons_copy_link),
@@ -293,21 +303,16 @@ internal fun ShareAddonDialog(
                         copyToClipboard(context, clipLabel, url, sensitive = addon.linkHasSettings)
                         copied = true
                     },
-                    style = SnButtonStyle.Tonal,
+                    style = if (canShare) SnButtonStyle.Tonal else SnButtonStyle.Primary,
                 )
-                if (canShareText(context)) {
-                    SnButton(
-                        text = stringResource(Res.string.addons_share),
-                        onClick = { shareText(context, addon.name, url) },
-                        style = SnButtonStyle.Tonal,
-                    )
-                }
             }
-            SnButton(
-                text = stringResource(Res.string.action_close),
-                onClick = onDismiss,
-                modifier = Modifier.focusRequester(closeFocus),
-            )
+            if (canShare) {
+                SnButton(
+                    text = stringResource(Res.string.addons_share),
+                    onClick = { shareText(context, addon.name, url) },
+                    icon = SnIcons.Share,
+                )
+            }
         }
     }
 }

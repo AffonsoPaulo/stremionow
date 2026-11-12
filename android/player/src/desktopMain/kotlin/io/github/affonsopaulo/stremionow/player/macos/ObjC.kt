@@ -123,6 +123,12 @@ internal object ObjC {
             argument: Double,
         )
 
+        fun voidRect(
+            receiver: Pointer,
+            selector: Pointer,
+            rect: NSRect.ByValue,
+        )
+
         fun voidBool(
             receiver: Pointer,
             selector: Pointer,

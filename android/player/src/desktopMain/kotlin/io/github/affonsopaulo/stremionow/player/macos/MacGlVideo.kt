@@ -17,6 +17,8 @@ import io.github.affonsopaulo.stremionow.player.MpvConstants
 import io.github.affonsopaulo.stremionow.player.MpvGetProcAddress
 import io.github.affonsopaulo.stremionow.player.MpvRenderUpdateCallback
 import java.awt.Window
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -52,6 +54,17 @@ internal class MacGlVideo private constructor(
     private var layer: Pointer? = null
     private var view: Pointer? = null
     private var scale = 0.0
+
+    /**
+     * Keeps the video view the size of the content view. Its autoresizing mask is not enough:
+     * AWT's content view does not resize its subviews when the window changes size, so the view
+     * kept its first size and the window cropped the video.
+     */
+    private val resizeListener =
+        object : ComponentAdapter() {
+            override fun componentResized(event: ComponentEvent) = MainThread.post { fitView() }
+        }
+    private var awtWindow: Window? = null
 
     private val redrawPending = AtomicBoolean(false)
     private val drawn = AtomicLong()
@@ -125,6 +138,14 @@ internal class MacGlVideo private constructor(
         send.void(layer, ObjC.sel("setNeedsDisplay"))
     }
 
+    /** Main thread: gives the video view the bounds of its superview, the window's content view. */
+    private fun fitView() {
+        val view = view ?: return
+        val content = ObjC.send.id(view, ObjC.sel("superview")) ?: return
+        val bounds = structSend.rect(content, ObjC.sel("bounds"))
+        ObjC.send.voidRect(view, ObjC.sel("setFrame:"), ObjC.NSRect.ByValue(bounds.width, bounds.height))
+    }
+
     /** Any thread: asks Core Animation for a new frame, once per batch of mpv updates. */
     private fun requestRedraw() {
         if (!redrawPending.compareAndSet(false, true)) return
@@ -170,6 +191,8 @@ internal class MacGlVideo private constructor(
      * on the main thread. Frames requested meanwhile are drawn black.
      */
     private fun release() {
+        awtWindow?.removeComponentListener(resizeListener)
+        awtWindow = null
         gl.CGLLockContext(glContext)
         try {
             lock.withLock {
@@ -331,7 +354,13 @@ internal class MacGlVideo private constructor(
                 throw failure
             }
             mpv.onClose(video::release)
-            MainThread.post { video.attachView(nsWindow) }
+            video.awtWindow = window
+            window.addComponentListener(video.resizeListener)
+            MainThread.post {
+                video.attachView(nsWindow)
+                // In case the window changed size before the view existed.
+                video.fitView()
+            }
             return video
         }
 

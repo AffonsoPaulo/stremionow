@@ -5,10 +5,12 @@
 //! - `net`: which interfaces and addresses may be used.
 //! - `tls`, `pairing`, `clients`: the server's certificate, pairing codes and paired devices.
 //! - `server`: the API paired devices use.
+//! - `discovery`: mDNS announcements and browsing.
 //! - `client`, `relay`: pairing from the other side, and streaming through the paired server.
 
 mod client;
 mod clients;
+mod discovery;
 mod net;
 mod pairing;
 mod relay;
@@ -17,6 +19,7 @@ mod tls;
 mod wire;
 
 pub use client::{PairError, RemoteError, RemoteHealth, RemoteServer, pair};
+pub use discovery::{DiscoveredServer, discover};
 pub(crate) use relay::RemoteTorrent;
 pub use relay::TorrentRoute;
 pub(crate) use server::DEFAULT_PORT;

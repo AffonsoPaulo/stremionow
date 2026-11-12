@@ -104,6 +104,11 @@ impl BindPolicy {
             _ => Err(TorrentError::NotLocalNetwork),
         }
     }
+
+    /// Whether mDNS announces the server. Never for loopback, which no other device reaches.
+    pub(crate) fn announces(self) -> bool {
+        self == Self::Lan
+    }
 }
 
 /// The device's home-network IPv4 addresses, in a stable order.
@@ -262,6 +267,7 @@ mod tests {
         assert!(BindPolicy::Lan.check(ip("192.168.0.7")).is_ok());
         assert!(BindPolicy::Loopback.check(ip("127.0.0.1")).is_ok());
         assert!(BindPolicy::Loopback.check(ip("192.168.0.7")).is_err());
+        assert!(!BindPolicy::Loopback.announces());
     }
 
     #[test]

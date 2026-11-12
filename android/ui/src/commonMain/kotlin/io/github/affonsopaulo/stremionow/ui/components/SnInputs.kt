@@ -108,6 +108,7 @@ fun SnSearchField(
                     Modifier
                         .fillMaxWidth()
                         .focusRequester(focusRequester)
+                        .trackTextInputFocus()
                         .dpadExits()
                         .semantics { contentDescription = label },
                 textStyle = SnTypography.sectionTitle.copy(color = SnColors.fg),
@@ -228,6 +229,7 @@ fun SnTextField(
                 Modifier
                     .fillMaxWidth()
                     .focusRequester(requester)
+                    .trackTextInputFocus()
                     .onFocusChanged { if (!it.isFocused && isTv && !refocusing[0]) keyboardOnFocus = false }
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

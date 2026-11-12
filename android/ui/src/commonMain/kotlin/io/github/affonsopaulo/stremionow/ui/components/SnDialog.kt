@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -84,6 +85,11 @@ fun SnDialogFrame(
 ) {
     // The platform's default width would cap a widened panel.
     val platformWidth = !wide && maxWidth <= 440.dp
+    // Shortcuts that reach for the header leave it alone while a dialog is in front.
+    DisposableEffect(Unit) {
+        OpenDialogs.count++
+        onDispose { OpenDialogs.count-- }
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = platformWidth)) {
         val shape = RoundedCornerShape(SnRadius.radiusXl)
         Column(

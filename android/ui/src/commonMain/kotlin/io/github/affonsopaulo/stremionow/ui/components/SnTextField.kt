@@ -69,7 +69,7 @@ fun SnTextField(
                 onValueChange = onValueChange,
                 enabled = enabled,
                 modifier =
-                    Modifier.fillMaxWidth().dpadExits().semantics {
+                    Modifier.fillMaxWidth().trackTextInputFocus().dpadExits().semantics {
                         contentDescription = label
                         if (error != null) error(error)
                     },

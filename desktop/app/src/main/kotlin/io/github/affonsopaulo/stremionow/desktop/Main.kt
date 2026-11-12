@@ -13,6 +13,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.affonsopaulo.stremionow.ui.StremioNowApp
+import io.github.affonsopaulo.stremionow.ui.components.AppShortcuts
 import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
@@ -75,11 +76,13 @@ fun main(args: Array<String>) {
         val windowState =
             rememberWindowState(size = DpSize(1280.dp, 800.dp), position = WindowPosition(Alignment.Center))
         val input = remember { DesktopInput() }
+        // Seen at the window, so they work even when nothing in it has focus yet.
+        val shortcuts = remember { AppShortcuts() }
         Window(
             onCloseRequest = ::exitApplication,
             state = windowState,
             title = APP_NAME,
-            onPreviewKeyEvent = input::onPreviewKeyEvent,
+            onPreviewKeyEvent = { event -> input.onPreviewKeyEvent(event) || shortcuts.onPreviewKeyEvent(event) },
         ) {
             LaunchedEffect(window) {
                 window.iconImages = AppIcon.images
@@ -113,7 +116,7 @@ fun main(args: Array<String>) {
                 }
             }
             CompositionLocalProvider(LocalDesktopHost provides host) {
-                ProvideDesktopInput(input) { StremioNowApp(isTv = false) }
+                ProvideDesktopInput(input) { StremioNowApp(isTv = false, shortcuts = shortcuts) }
             }
         }
     }

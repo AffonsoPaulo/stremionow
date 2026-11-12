@@ -15,14 +15,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +38,8 @@ import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
+import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.SnArtwork
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
@@ -49,7 +50,10 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
+import io.github.affonsopaulo.stremionow.ui.components.belowHeader
+import io.github.affonsopaulo.stremionow.ui.components.headerScrim
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.components.startScrim
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -63,7 +67,6 @@ import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
-import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -130,25 +133,29 @@ fun HomeScreen(
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshContinueWatching() }
 
-    when (val rows = state) {
-        Loadable.Loading -> {
-            SnLoading()
-        }
+    val rows = (state as? Loadable.Ready)?.value
+    if (!rows.isNullOrEmpty()) {
+        HomeContent(rows, continueWatching, onOpenTitle, onOpenProgress)
+        return
+    }
+    // Without the hero the page starts below the header, like any other.
+    Box(Modifier.fillMaxSize().belowHeader()) {
+        when (state) {
+            Loadable.Loading -> {
+                SnLoading()
+            }
 
-        is Loadable.Failed -> {
-            SnLoadError(onRetry = viewModel::load)
-        }
+            is Loadable.Failed -> {
+                SnLoadError(onRetry = viewModel::load)
+            }
 
-        is Loadable.Ready -> {
-            if (rows.value.isEmpty()) {
+            is Loadable.Ready -> {
                 SnMessage(
                     title = stringResource(Res.string.home_empty_title),
                     body = stringResource(Res.string.home_empty_body),
                     actionText = stringResource(Res.string.action_open_addons),
                     onAction = onOpenAddons,
                 )
-            } else {
-                HomeContent(rows.value, continueWatching, onOpenTitle, onOpenProgress)
             }
         }
     }
@@ -170,17 +177,24 @@ private fun HomeContent(
                 .keys
         }
     val featured = rows.firstNotNullOfOrNull { row -> row.items.firstOrNull { it.background != null } }
-    SnMinimalScroll {
+    val listState = rememberLazyListState()
+    // The hero's art runs under the header, which stays clear until it scrolls away.
+    if (featured != null) ClearHeaderOverHero(listState)
+    val headerInset = LocalHeaderInset.current
+    SnMinimalScroll(topInset = headerInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = SnSpacing.space16),
+            state = listState,
+            contentPadding =
+                PaddingValues(top = if (featured == null) headerInset else 0.dp, bottom = SnSpacing.space16),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space10),
         ) {
             if (featured != null) {
                 item(key = "hero") { Hero(featured, onOpenTitle) }
             }
+            // Rows scroll sideways without the header's inset.
             if (continueWatching.isNotEmpty()) {
-                item(key = "continue") { ContinueWatchingRow(continueWatching, onOpenProgress) }
+                item(key = "continue") { SnMinimalScroll { ContinueWatchingRow(continueWatching, onOpenProgress) } }
             }
             items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
                 // Cinemeta names its movie and series catalogs alike ("Popular"); add the type then.
@@ -192,7 +206,7 @@ private fun HomeContent(
                     } else {
                         row.catalog.name
                     }
-                CatalogRowSection(title, row, onOpenTitle)
+                SnMinimalScroll { CatalogRowSection(title, row, onOpenTitle) }
             }
         }
     }
@@ -203,37 +217,36 @@ private fun Hero(
     item: MetaItem,
     onOpenTitle: (MetaItem) -> Unit,
 ) {
-    val shape = RoundedCornerShape(SnRadius.radiusXl)
-    // On TV the whole hero must fit under the header, logo included, with the first row peeking.
+    // On TV the whole hero must fit on screen, logo included, with the first row peeking.
     val height =
         when (SnLayout.formFactor) {
             FormFactor.Phone -> 360.dp
             FormFactor.Large -> 470.dp
             FormFactor.Tv -> (screenHeightDp() * 0.62f).dp
         }
+    // The art starts at the top of the window, under the header, so the hero grows by the
+    // header's height and keeps its content, and the rows below it, where they were.
+    val headerInset = LocalHeaderInset.current
     Box(
         Modifier
-            .padding(horizontal = SnLayout.gutter)
             .fillMaxWidth()
             // At least this tall, and taller when the logo and synopsis need it.
-            .heightIn(min = height)
-            .clip(shape),
+            .heightIn(min = height + headerInset),
     ) {
-        SnArtwork(url = item.background, fallbackTitle = "", modifier = Modifier.matchParentSize())
+        SnArtwork(url = item.background, fallbackTitle = "", modifier = Modifier.matchParentSize().headerScrim())
         Box(
-            Modifier.matchParentSize().background(
-                Brush.horizontalGradient(
-                    0f to SnColors.bg.copy(alpha = 0.95f),
-                    0.4f to SnColors.bg.copy(alpha = 0.7f),
-                    0.75f to SnColors.bg.copy(alpha = 0f),
-                ),
+            Modifier.matchParentSize().startScrim(
+                0f to SnColors.bg.copy(alpha = 0.95f),
+                0.4f to SnColors.bg.copy(alpha = 0.7f),
+                0.75f to SnColors.bg.copy(alpha = 0f),
             ),
         )
+        // Fades into the page, so the art has no edge where the rows begin.
         Box(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
-                    0.6f to SnColors.bg.copy(alpha = 0f),
-                    1f to SnColors.bg.copy(alpha = 0.6f),
+                    0.55f to SnColors.bg.copy(alpha = 0f),
+                    1f to SnColors.bg,
                 ),
             ),
         )
@@ -242,7 +255,8 @@ private fun Hero(
                 Modifier
                     .align(Alignment.BottomStart)
                     .widthIn(max = 640.dp)
-                    .padding(SnSpacing.space8),
+                    .padding(top = headerInset)
+                    .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space8),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
         ) {
             TitleLogo(item)

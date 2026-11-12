@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -14,14 +18,21 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -32,10 +43,15 @@ import androidx.navigation.navArgument
 import androidx.savedstate.read
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.MetaDetails
+import io.github.affonsopaulo.stremionow.ui.components.HeaderOverlay
+import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
+import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderOverlay
+import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderPage
 import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
+import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.crash.crashReportPrompt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
@@ -58,6 +74,8 @@ import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
+import kotlinx.coroutines.flow.collectLatest
+import kotlin.math.abs
 
 private object Routes {
     const val HOME = "home"
@@ -130,7 +148,6 @@ fun StremioNowApp(
                 Routes.PROFILE -> TopDestination.Profile
                 else -> null
             }
-        // The tab whose stack the user is in, so it stays highlighted on inner pages too.
         // The tab whose stack the user is in, so it stays highlighted on inner pages too. Kept
         // here rather than read from the back stack, whose API is internal to Navigation.
         var sectionRoute by rememberSaveable { mutableStateOf(Routes.HOME) }
@@ -162,146 +179,50 @@ fun StremioNowApp(
         }
         // While typing, the keyboard takes the tab bar's place instead of stacking above it.
         val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        // No chrome over the video or the first-run setup.
+        val chrome = !immersive && !setup
+        val headerOverlay = remember { HeaderOverlay() }
+        val headerOpacity = rememberHeaderOpacity(headerOverlay, entry)
         Column(
             Modifier
                 .fillMaxSize()
                 .background(SnColors.bg)
-                // On phones the tab bar pads itself so its background reaches the screen edge.
+                // The header pads itself for the status bar, so title art can run under both;
+                // on phones the tab bar does the same for the navigation bar.
                 .windowInsetsPadding(
                     if (immersive) {
                         WindowInsets(0)
-                    } else if (phone) {
-                        WindowInsets.safeDrawing
-                            .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-                            .union(WindowInsets.ime)
                     } else {
-                        WindowInsets.safeDrawing
+                        var sides = WindowInsetsSides.Horizontal
+                        if (!chrome) sides += WindowInsetsSides.Top
+                        if (phone) {
+                            WindowInsets.safeDrawing.only(sides).union(WindowInsets.ime)
+                        } else {
+                            WindowInsets.safeDrawing.only(sides + WindowInsetsSides.Bottom)
+                        }
                     },
                 ),
         ) {
-            if (immersive || setup) {
-                // No chrome over the video or the first-run setup.
-            } else if (phone) {
-                SnPhoneHeader(
-                    title = phoneTitle(entry?.destination?.route, entry?.arguments?.read { getStringOrNull("genre") }),
-                    onBack = if (current == null) ({ navController.navigateUp() }) else null,
-                    profileSelected = section == TopDestination.Profile,
-                    onOpenProfile = { openTab(TopDestination.Profile) },
-                )
-            } else {
-                SnHeader(
-                    current = section,
-                    onNavigate = openTab,
-                    onBack =
-                        if (current == null && SnLayout.formFactor != FormFactor.Tv) {
-                            { navController.navigateUp() }
-                        } else {
-                            null
-                        },
-                )
-            }
-            NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.weight(1f)) {
-                val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
-                val watch = { details: MetaDetails, episode: Episode? ->
-                    PlaybackSession.select(PlaybackSession.Selection(details, episode))
-                    navController.navigate(Routes.SOURCES) { launchSingleTop = true }
-                }
-                composable(Routes.HOME) {
-                    HomeScreen(
-                        onOpenTitle = { openTitle(it.kind, it.id) },
-                        onOpenProgress = { openTitle(it.kind, it.id) },
-                        onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
-                    )
-                }
-                composable(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
-                composable(Routes.MOVIES) { ExploreScreen("movie", onOpenTitle = { openTitle(it.kind, it.id) }) }
-                composable(Routes.SEARCH) {
-                    SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }, focusRequests = searchFocusRequests)
-                }
-                composable(
-                    Routes.GENRE,
-                    arguments =
-                        listOf(
-                            navArgument("kind") { type = NavType.StringType },
-                            navArgument("genre") { type = NavType.StringType },
-                        ),
-                ) { backStack ->
-                    ExploreScreen(
-                        kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
-                        initialGenre = backStack.arguments?.read { getStringOrNull("genre") },
-                        onOpenTitle = { openTitle(it.kind, it.id) },
-                    )
-                }
-                composable(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
-                    SearchScreen(
-                        initialQuery = it.arguments?.read { getStringOrNull("name") }.orEmpty(),
-                        onOpenTitle = { item -> openTitle(item.kind, item.id) },
-                    )
-                }
-                composable(Routes.LIBRARY) {
-                    LibraryScreen(onOpenTitle = openTitle, onExplore = { openTab(TopDestination.Series) })
-                }
-                composable(Routes.PROFILE) {
-                    ProfileScreen(
-                        onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
-                        onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
-                        onSignIn = { navController.navigate(Routes.SIGN_IN) { launchSingleTop = true } },
-                    )
-                }
-                composable(Routes.ADDONS) { AddonsScreen() }
-                composable(Routes.SETTINGS) { SettingsScreen() }
-                composable(Routes.SIGN_IN) {
-                    OnboardingScreen(onFinished = { navController.popBackStack() }, signInOnly = true)
-                }
-                composable(Routes.ONBOARDING) {
-                    OnboardingScreen(
-                        onFinished = {
-                            navController.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
-                        },
-                    )
-                }
-                composable(
-                    Routes.DETAILS,
-                    arguments =
-                        listOf(
-                            navArgument("kind") { type = NavType.StringType },
-                            navArgument("id") { type = NavType.StringType },
-                        ),
-                ) { backStack ->
-                    DetailsScreen(
-                        kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
-                        id = backStack.arguments?.read { getStringOrNull("id") }.orEmpty(),
-                        onOpenTitle = { openTitle(it.kind, it.id) },
-                        onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
-                        onSearchPerson = { navController.navigate(Routes.person(it)) },
-                        onPlay = watch,
-                    )
-                }
-                composable(Routes.SOURCES) {
-                    SourcesScreen(
-                        // The picker gives way to the player, so Back from the player returns
-                        // to the title rather than to the list.
-                        onPlay = {
-                            navController.navigate(
-                                Routes.PLAYER,
-                            ) { popUpTo(Routes.SOURCES) { inclusive = true } }
-                        },
-                        onGone = { navController.popBackStack() },
-                    )
-                }
-                composable(Routes.PLAYER) {
-                    PlayerScreen(
-                        onBack = { navController.popBackStack() },
-                        onChangeSource = {
-                            navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
-                        },
-                        onOpenEpisode = { episode ->
-                            val current = PlaybackSession.selection ?: return@PlayerScreen
-                            PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
-                            PlaybackSession.select(current.copy(episode = episode))
-                            navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
-                        },
-                    )
+            HeaderOverPages(
+                modifier = Modifier.weight(1f),
+                header =
+                    if (chrome) {
+                        {
+                            AppHeader(
+                                entry,
+                                current,
+                                section,
+                                navController,
+                                openTab,
+                                opacity = { headerOpacity.value },
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            ) {
+                CompositionLocalProvider(LocalHeaderOverlay provides headerOverlay) {
+                    AppNavHost(navController, startRoute, searchFocusRequests, openTab)
                 }
             }
             // A link from outside (the TV home screen) opens its title over whatever is showing.
@@ -317,6 +238,236 @@ fun StremioNowApp(
         }
     }
 }
+
+/**
+ * The phone top bar or the large-screen header, over a background at [opacity] that also
+ * covers the status bar.
+ */
+@Composable
+private fun AppHeader(
+    entry: NavBackStackEntry?,
+    current: TopDestination?,
+    section: TopDestination?,
+    navController: NavHostController,
+    openTab: (TopDestination) -> Unit,
+    opacity: () -> Float,
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .drawBehind { drawRect(SnColors.bg.copy(alpha = opacity())) }
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+    ) {
+        if (SnLayout.formFactor == FormFactor.Phone) {
+            SnPhoneHeader(
+                title = phoneTitle(entry?.destination?.route, entry?.arguments?.read { getStringOrNull("genre") }),
+                onBack = if (current == null) ({ navController.navigateUp() }) else null,
+                profileSelected = section == TopDestination.Profile,
+                onOpenProfile = { openTab(TopDestination.Profile) },
+            )
+        } else {
+            SnHeader(
+                current = section,
+                onNavigate = openTab,
+                onBack =
+                    if (current == null && SnLayout.formFactor != FormFactor.Tv) {
+                        { navController.navigateUp() }
+                    } else {
+                        null
+                    },
+            )
+        }
+    }
+}
+
+/** The app's pages. Those with title art at the top (home, a title) run under the header. */
+@Composable
+private fun AppNavHost(
+    navController: NavHostController,
+    startRoute: String,
+    searchFocusRequests: Int,
+    openTab: (TopDestination) -> Unit,
+) {
+    NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
+        val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
+        val watch = { details: MetaDetails, episode: Episode? ->
+            PlaybackSession.select(PlaybackSession.Selection(details, episode))
+            navController.navigate(Routes.SOURCES) { launchSingleTop = true }
+        }
+        page(Routes.HOME, underHeader = true) {
+            HomeScreen(
+                onOpenTitle = { openTitle(it.kind, it.id) },
+                onOpenProgress = { openTitle(it.kind, it.id) },
+                onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
+            )
+        }
+        page(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
+        page(Routes.MOVIES) { ExploreScreen("movie", onOpenTitle = { openTitle(it.kind, it.id) }) }
+        page(Routes.SEARCH) {
+            SearchScreen(onOpenTitle = { openTitle(it.kind, it.id) }, focusRequests = searchFocusRequests)
+        }
+        page(
+            Routes.GENRE,
+            arguments =
+                listOf(
+                    navArgument("kind") { type = NavType.StringType },
+                    navArgument("genre") { type = NavType.StringType },
+                ),
+        ) { backStack ->
+            ExploreScreen(
+                kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
+                initialGenre = backStack.arguments?.read { getStringOrNull("genre") },
+                onOpenTitle = { openTitle(it.kind, it.id) },
+            )
+        }
+        page(Routes.PERSON, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+            SearchScreen(
+                initialQuery = it.arguments?.read { getStringOrNull("name") }.orEmpty(),
+                onOpenTitle = { item -> openTitle(item.kind, item.id) },
+            )
+        }
+        page(Routes.LIBRARY) {
+            LibraryScreen(onOpenTitle = openTitle, onExplore = { openTab(TopDestination.Series) })
+        }
+        page(Routes.PROFILE) {
+            ProfileScreen(
+                onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
+                onSignIn = { navController.navigate(Routes.SIGN_IN) { launchSingleTop = true } },
+            )
+        }
+        page(Routes.ADDONS) { AddonsScreen() }
+        page(Routes.SETTINGS) { SettingsScreen() }
+        page(Routes.SIGN_IN) {
+            OnboardingScreen(onFinished = { navController.popBackStack() }, signInOnly = true)
+        }
+        page(Routes.ONBOARDING) {
+            OnboardingScreen(
+                onFinished = {
+                    navController.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
+                },
+            )
+        }
+        page(
+            Routes.DETAILS,
+            arguments =
+                listOf(
+                    navArgument("kind") { type = NavType.StringType },
+                    navArgument("id") { type = NavType.StringType },
+                ),
+            underHeader = true,
+        ) { backStack ->
+            DetailsScreen(
+                kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
+                id = backStack.arguments?.read { getStringOrNull("id") }.orEmpty(),
+                onOpenTitle = { openTitle(it.kind, it.id) },
+                onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
+                onSearchPerson = { navController.navigate(Routes.person(it)) },
+                onPlay = watch,
+            )
+        }
+        page(Routes.SOURCES) {
+            SourcesScreen(
+                // The picker gives way to the player, so Back from the player returns
+                // to the title rather than to the list.
+                onPlay = {
+                    navController.navigate(
+                        Routes.PLAYER,
+                    ) { popUpTo(Routes.SOURCES) { inclusive = true } }
+                },
+                onGone = { navController.popBackStack() },
+            )
+        }
+        page(Routes.PLAYER) {
+            PlayerScreen(
+                onBack = { navController.popBackStack() },
+                onChangeSource = {
+                    navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                },
+                onOpenEpisode = { episode ->
+                    val current = PlaybackSession.selection ?: return@PlayerScreen
+                    PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
+                    PlaybackSession.select(current.copy(episode = episode))
+                    navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * A destination of [AppNavHost]. Pages start below the header unless [underHeader] is set,
+ * in which case they run under it and keep their own content clear of it.
+ */
+private fun NavGraphBuilder.page(
+    route: String,
+    arguments: List<NamedNavArgument> = emptyList(),
+    underHeader: Boolean = false,
+    content: @Composable (NavBackStackEntry) -> Unit,
+) {
+    composable(route, arguments) { entry ->
+        CompositionLocalProvider(LocalHeaderPage provides entry) {
+            Box(if (underHeader) Modifier.fillMaxSize() else Modifier.fillMaxSize().belowHeader()) { content(entry) }
+        }
+    }
+}
+
+/**
+ * Lays the header over the pages, measuring it first so the pages learn its height through
+ * [LocalHeaderInset] in the same frame, even as it changes with the window.
+ */
+@Composable
+private fun HeaderOverPages(
+    header: (@Composable () -> Unit)?,
+    modifier: Modifier = Modifier,
+    pages: @Composable () -> Unit,
+) {
+    SubcomposeLayout(modifier) { constraints ->
+        val loose = constraints.copy(minHeight = 0)
+        val headerPlaceables = header?.let { subcompose(HeaderSlot.Header, it).map { part -> part.measure(loose) } }
+        val inset = (headerPlaceables?.maxOfOrNull { it.height } ?: 0).toDp()
+        val pagePlaceables =
+            subcompose(HeaderSlot.Pages) {
+                CompositionLocalProvider(LocalHeaderInset provides inset, content = pages)
+            }.map { it.measure(constraints) }
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            pagePlaceables.forEach { it.place(0, 0) }
+            // Placed over the pages, so it draws on top and takes touches first; composed
+            // before them, so it still comes first in focus order.
+            headerPlaceables?.forEach { it.place(0, 0, zIndex = 1f) }
+        }
+    }
+}
+
+private enum class HeaderSlot { Header, Pages }
+
+/**
+ * The header background's opacity over the current page. It follows the page's scroll frame
+ * by frame and eases over [HEADER_FADE_MS] when it would otherwise jump, as when another page
+ * opens or the page's art appears, so the header never flickers.
+ */
+@Composable
+private fun rememberHeaderOpacity(
+    overlay: HeaderOverlay,
+    entry: NavBackStackEntry?,
+): State<Float> {
+    val opacity = remember { Animatable(1f) }
+    LaunchedEffect(overlay, entry) {
+        snapshotFlow { overlay.opacityOver(entry) }.collectLatest { target ->
+            if (abs(target - opacity.value) < HEADER_SNAP) {
+                opacity.snapTo(target)
+            } else {
+                opacity.animateTo(target, tween(HEADER_FADE_MS))
+            }
+        }
+    }
+    return opacity.asState()
+}
+
+/** Largest opacity change applied at once; a scroll moves less than this in a frame. */
+private const val HEADER_SNAP = 0.34f
+
+private const val HEADER_FADE_MS = 180
 
 /**
  * Title for the phone top bar: null shows the wordmark (Home), an empty string shows nothing

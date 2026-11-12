@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.platform.isLargeScreen
 
 /** The device family the interface runs on. */
@@ -24,6 +25,13 @@ object SnLayout {
                 isLargeScreen() -> FormFactor.Large
                 else -> FormFactor.Phone
             }
+
+    /**
+     * Narrowest width of a card in a list grid (sources, addons). Lists fill the page and wrap
+     * into as many columns as fit, so wide windows never leave half the page empty, while a
+     * phone keeps a single column.
+     */
+    val listCellMin: Dp = 400.dp
 
     /** Side margin of every page: TV safe area, desktop-like margin or phone margin. */
     val gutter: Dp

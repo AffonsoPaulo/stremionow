@@ -13,8 +13,9 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~')
     .remove(b':');
 
-/// A path segment at least this long is taken for settings or a key: real addon paths
-/// (`stremio/v1`, `addon`) are short words, while keys and encoded options are long.
+/// A path segment at least this long, with a digit or a capital in it, is taken for a key or
+/// encoded settings: keys, UUIDs and base64 mix them, while real addon paths (`stremio/v1`,
+/// `publicdomainmovies.now.sh`) are short or lowercase words.
 const SETTINGS_SEGMENT_LEN: usize = 16;
 
 /// Why an addon URL was rejected.
@@ -77,8 +78,8 @@ impl AddonUrl {
     /// Whether the URL seems to hold the user's settings rather than only the addon's
     /// location. Configured addons keep their options, and often a debrid or account key, in
     /// the path before `/manifest.json` (or, rarely, in the query), so sharing the link shares
-    /// them. Errs on the side of yes: a long or encoded path segment, a `key=value` pair, a
-    /// query or credentials all count.
+    /// them. Errs on the side of yes: a long key-like or encoded path segment, a `key=value`
+    /// pair, a query or credentials all count.
     pub fn carries_settings(&self) -> bool {
         if !self.manifest.username().is_empty()
             || self.manifest.password().is_some()
@@ -95,7 +96,10 @@ impl AddonUrl {
             .split('/')
             .filter(|segment| !segment.is_empty())
             .any(|segment| {
-                segment.len() >= SETTINGS_SEGMENT_LEN
+                (segment.len() >= SETTINGS_SEGMENT_LEN
+                    && segment
+                        .bytes()
+                        .any(|b| b.is_ascii_digit() || b.is_ascii_uppercase()))
                     || !segment
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
@@ -258,6 +262,8 @@ mod tests {
             "https://v3-cinemeta.strem.io/manifest.json",
             "https://opensubtitles.strem.io/stremio/v1/manifest.json",
             "https://addon.example/1.0.0/manifest.json",
+            "https://caching.stremio.net/publicdomainmovies.now.sh/manifest.json",
+            "https://addon.example/a-long-lowercase-addon-name/manifest.json",
         ];
         for link in plain {
             assert!(
@@ -273,6 +279,7 @@ mod tests {
             "https://addon.example/manifest.json?token=abc",
             "https://user:secret@addon.example/manifest.json",
             "https://addon.example/a,b/manifest.json",
+            "https://addon.example/3f2a9c0d1e4b5a6f7c8d/manifest.json",
         ];
         for link in personal {
             assert!(

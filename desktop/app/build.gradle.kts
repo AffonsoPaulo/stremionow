@@ -42,6 +42,19 @@ compose.desktop {
         providers.gradleProperty("stremionow.packaging.javaHome").orNull?.let { javaHome = it }
         // JNA calls native code; JDK 25 warns (and later releases refuse) without this.
         jvmArgs += listOf("--enable-native-access=ALL-UNNAMED", "-Dstremionow.version=$appVersion")
+        // Memory: the interface keeps a few tens of MB of objects (images and video live in native
+        // memory), but the JVM's defaults size the heap from the machine's RAM: a quarter of it as
+        // the limit, a large first commit and G1's tables to match. With a heap this small the
+        // serial collector pauses for a few milliseconds and needs no tables; together with a
+        // small start and a cap, the JVM's own memory went from about 420 MB to 115 MB.
+        jvmArgs +=
+            listOf(
+                "-Xms32m",
+                "-Xmx1g",
+                "-XX:+UseSerialGC",
+                "-XX:MinHeapFreeRatio=10",
+                "-XX:MaxHeapFreeRatio=30",
+            )
         // macOS: the player reads the NSWindow behind its video window from AWT's peer, which has
         // no public accessor (see android/player/.../macos/MacWindows.kt). Builds run on the OS
         // they package for, so this is decided here.

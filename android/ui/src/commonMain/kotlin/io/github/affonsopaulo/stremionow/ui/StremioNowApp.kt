@@ -189,7 +189,16 @@ fun StremioNowApp(
                     onOpenProfile = { openTab(TopDestination.Profile) },
                 )
             } else {
-                SnHeader(current = section, onNavigate = openTab)
+                SnHeader(
+                    current = section,
+                    onNavigate = openTab,
+                    onBack =
+                        if (current == null && SnLayout.formFactor != FormFactor.Tv) {
+                            { navController.navigateUp() }
+                        } else {
+                            null
+                        },
+                )
             }
             NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.weight(1f)) {
                 val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }

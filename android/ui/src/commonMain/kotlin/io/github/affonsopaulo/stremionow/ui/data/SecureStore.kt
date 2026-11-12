@@ -4,9 +4,10 @@ package io.github.affonsopaulo.stremionow.ui.data
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 
 /**
- * Small secrets, such as the Stremio session key, encrypted with a key the operating system
- * keeps for the app or the user: the Android Keystore on Android, DPAPI on Windows. Where no
- * such store is available the secret is not kept at all, never written in plain text.
+ * Small secrets, such as the Stremio session key, kept by the operating system's own secret
+ * storage: the Android Keystore on Android; DPAPI, the macOS Keychain or the Secret Service
+ * (libsecret) on the desktop. Where no such store is available, or it refuses, the secret is not
+ * kept at all, never written in plain text.
  */
 object SecureStore {
     /** The Stremio session key, when signed in. */

@@ -3,14 +3,13 @@ package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,17 +29,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
-import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
+import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
@@ -55,6 +58,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.SnPointerTooltip
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -82,6 +86,8 @@ data class SourcesState(
     val addonsAnswered: Int = 0,
     /** Every addon has answered (or there were none to ask). */
     val finished: Boolean = false,
+    /** Identity of the source last played for this video, to offer it first. */
+    val played: String? = null,
 ) {
     val searching: Boolean get() = !finished
 
@@ -92,11 +98,11 @@ data class SourcesState(
 /**
  * Asks every stream addon for one video's sources at once, ranking each answer with the rest
  * as it arrives, so the list fills in while slower addons are still answering. It runs on
- * [scope] until [cancel] or the scope ends.
+ * [scope] until [cancel] or the scope ends. It also reads which source was played last time.
  */
 class SourcesLoader(
     private val core: StremioCore,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     kind: String,
     val videoId: String,
 ) {
@@ -108,6 +114,11 @@ class SourcesLoader(
     private val merge = Mutex()
     private val job =
         scope.launch {
+            launch {
+                val played = runCatching { io { core.playedSource(videoId) } }.getOrNull()
+                // A source played meanwhile is newer than the one read.
+                if (played != null) mutableState.update { if (it.played == null) it.copy(played = played) else it }
+            }
             val addons = runCatching { io { core.streamAddons(kind, videoId) } }.getOrDefault(emptyList())
             mutableState.update { it.copy(addonsAsked = addons.size, finished = addons.isEmpty()) }
             addons.forEach { addon ->
@@ -135,6 +146,16 @@ class SourcesLoader(
             }
         }
 
+    /**
+     * Remembers [source] as the one played for this video, so it is offered first from now
+     * on and next time. Only its identity is kept, never its address.
+     */
+    fun remember(source: StreamSource) {
+        val identity = source.identity ?: return
+        mutableState.update { it.copy(played = identity) }
+        scope.launch { runCatching { io { core.rememberPlayedSource(videoId, identity) } } }
+    }
+
     fun cancel() = job.cancel()
 }
 
@@ -147,26 +168,34 @@ data class SourcesSubject(
 )
 
 /**
- * The sources of a video in place of the episodes: a header with the way back (series) and
- * the addon filter, then the sources, best first, in as many [columns] as fit, then how many
- * addons are still answering. [firstFocus] reaches the first source.
+ * The sources of a video in place of the episodes: a header with the way back (series), the
+ * search, filters and order; then the source played last time, when it is among them; then
+ * the rest in a grid of [columns], the recommended one first in the app's order; then how
+ * many addons are still answering. [firstFocus] reaches the first source; [progress] is how
+ * far into this video the user got, if anywhere.
  */
 internal fun LazyListScope.sourcesItems(
     state: SourcesState,
     subject: SourcesSubject?,
-    filter: String?,
-    onFilter: (String?) -> Unit,
+    filters: SourceFilters,
+    onFilters: (SourceFilters) -> Unit,
+    progress: WatchProgress?,
     columns: Int,
+    phone: Boolean,
     firstFocus: FocusRequester,
     onChoose: (StreamSource) -> Unit,
 ) {
-    val counts = addonCounts(state.sources)
-    // A filter whose addon has no sources (any more) shows them all.
-    val addon = filter?.takeIf { name -> counts.any { it.first == name } }
-    val shown = state.sources.fromAddon(addon)
     item(key = "sources-header") {
-        // The filter is a row of its own, which scrolls without the page header's inset.
-        SnMinimalScroll { SourcesHeader(subject, counts, state.sources.size, addon, onFilter) }
+        // The phone's chips are a row of their own, which scrolls without the page header's inset.
+        SnMinimalScroll {
+            Column(
+                Modifier.padding(bottom = SnSpacing.space4),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+            ) {
+                if (subject != null) SubjectRow(subject)
+                if (state.sources.isNotEmpty()) SourcesToolbar(state.sources, filters, onFilters, phone)
+            }
+        }
     }
     when {
         state.sources.isEmpty() && state.searching -> {
@@ -185,18 +214,45 @@ internal fun LazyListScope.sourcesItems(
         }
 
         else -> {
-            val best = state.sources.firstOrNull()?.takeIf { it.playsInApp }
-            val rows = shown.withIndex().chunked(columns.coerceAtLeast(1))
+            val shown = shownSources(state.sources, filters)
+            val best = bestSource(state.sources)
+            val layout = sourcesLayout(shown, state.played)
+            if (shown.isEmpty()) {
+                item(key = "sources-no-match") {
+                    Box(Modifier.fillMaxWidth().heightIn(min = SourcesMessageHeight)) {
+                        SnMessage(
+                            title = stringResource(Res.string.sources_no_match_title),
+                            body = stringResource(Res.string.sources_no_match_body),
+                            actionText = stringResource(Res.string.sources_clear_filters),
+                            onAction = { onFilters(SourceFilters(sort = filters.sort)) },
+                        )
+                    }
+                }
+            }
+            layout.continueWith?.let { source ->
+                item(key = "sources-continue-${state.videoId}") {
+                    ContinueCard(
+                        source = source,
+                        best = source === best,
+                        progress = progress,
+                        onClick = { onChoose(source) },
+                        modifier = Modifier.focusRequester(firstFocus),
+                    )
+                }
+            }
+            val rows = layout.grid.chunked(columns.coerceAtLeast(1))
             rows.forEachIndexed { rowIndex, row ->
-                item(key = "sources-row-${state.videoId}-$addon-$rowIndex") {
+                item(key = "sources-row-${state.videoId}-$rowIndex") {
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .height(IntrinsicSize.Min)
                             .padding(horizontal = SnLayout.gutter)
                             .padding(bottom = SnSpacing.space3),
                         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
                     ) {
-                        row.forEach { (index, source) ->
+                        row.forEachIndexed { index, source ->
+                            val first = layout.continueWith == null && rowIndex == 0 && index == 0
                             SourceCard(
                                 source = source,
                                 best = source === best,
@@ -204,7 +260,8 @@ internal fun LazyListScope.sourcesItems(
                                 modifier =
                                     Modifier
                                         .weight(1f)
-                                        .then(if (index == 0) Modifier.focusRequester(firstFocus) else Modifier),
+                                        .fillMaxHeight()
+                                        .then(if (first) Modifier.focusRequester(firstFocus) else Modifier),
                             )
                         }
                         // Keeps the last row's cards as wide as the others.
@@ -221,58 +278,28 @@ internal fun LazyListScope.sourcesItems(
 
 private val SourcesMessageHeight = 240.dp
 
+/** The way back to the episodes, and which episode these sources are for. */
 @Composable
-private fun SourcesHeader(
-    subject: SourcesSubject?,
-    counts: List<Pair<String, Int>>,
-    total: Int,
-    filter: String?,
-    onFilter: (String?) -> Unit,
-) {
-    Column(
-        Modifier.padding(bottom = SnSpacing.space3),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+private fun SubjectRow(subject: SourcesSubject) {
+    Row(
+        Modifier.padding(horizontal = SnLayout.gutter),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {
-        if (subject != null) {
-            Row(
-                Modifier.padding(horizontal = SnLayout.gutter),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-            ) {
-                SnIconButton(
-                    icon = SnIcons.ChevronLeft,
-                    label = stringResource(Res.string.sources_back_to_episodes),
-                    onClick = subject.onBack,
-                    modifier = Modifier.focusRequester(subject.backFocus),
-                    background = SnColors.surfaceMuted,
-                )
-                BasicText(
-                    subject.label,
-                    modifier = Modifier.weight(1f).semantics { heading() },
-                    style = SnTypography.sectionTitle.copy(color = SnColors.fg),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        // Only worth a filter when more than one addon answered with sources.
-        if (counts.size > 1) {
-            val options: List<String?> = listOf(null) + counts.map { it.first }
-            val allLabel = stringResource(Res.string.sources_filter_all, total)
-            SnChipRow(
-                options = options,
-                selected = filter,
-                label = { name ->
-                    if (name == null) {
-                        allLabel
-                    } else {
-                        stringResource(Res.string.sources_filter_addon, name, counts.first { it.first == name }.second)
-                    }
-                },
-                onSelect = onFilter,
-                modifier = Modifier.padding(horizontal = SnLayout.gutter),
-            )
-        }
+        SnIconButton(
+            icon = SnIcons.ChevronLeft,
+            label = stringResource(Res.string.sources_back_to_episodes),
+            onClick = subject.onBack,
+            modifier = Modifier.focusRequester(subject.backFocus),
+            background = SnColors.surfaceMuted,
+        )
+        BasicText(
+            subject.label,
+            modifier = Modifier.weight(1f).semantics { heading() },
+            style = SnTypography.sectionTitle.copy(color = SnColors.fg),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -291,29 +318,36 @@ private fun LoadingFooter(state: SourcesState) {
             style = SnTypography.caption.copy(color = SnColors.fgMuted),
         )
         val share = if (state.addonsAsked == 0) 0f else state.addonsAnswered.toFloat() / state.addonsAsked
+        ProgressBar(share)
+    }
+}
+
+@Composable
+private fun ProgressBar(
+    share: Float,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(RoundedCornerShape(SnRadius.radiusFull))
+            .background(SnColors.progressTrack),
+    ) {
         Box(
             Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(share.coerceIn(0f, 1f))
                 .height(4.dp)
-                .clip(RoundedCornerShape(SnRadius.radiusFull))
-                .background(SnColors.progressTrack),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(share.coerceIn(0f, 1f))
-                    .height(4.dp)
-                    .background(SnColors.accent),
-            )
-        }
+                .background(SnColors.accent),
+        )
     }
 }
 
 /**
- * One source: its addon and quality, the title or file name, the details the core read from
- * it (seeds, size, release group) and its badges. Sources that open in another app say so
- * and show the service they open on.
+ * One source in the grid, as tall as every other: its resolution, its name in two lines at
+ * most (all of it in a tooltip and for screen readers), one line of what it is, and its addon
+ * with how it plays. The recommended one is marked.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SourceCard(
     source: StreamSource,
@@ -321,102 +355,243 @@ private fun SourceCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(SnRadius.radiusLg)
-    val interaction = remember { MutableInteractionSource() }
-    val state = interaction.collectSnInteraction()
+    val title = remember(source) { sourceTitle(source) }
+    val details = remember(source) { sourceDetailsLine(source) }
+    CardFrame(best, onClick, modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+                ResolutionPill(source.quality)
+                SourceName(title, maxLines = 2, modifier = Modifier.weight(1f))
+                if (best) Badge(stringResource(Res.string.sources_best))
+            }
+            BasicText(
+                details,
+                style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+                minLines = 1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = ServiceTileSize),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            ) {
+                BasicText(
+                    source.addonName,
+                    modifier = Modifier.weight(1f),
+                    style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                SourceStatusLabel(source)
+            }
+        }
+    }
+}
+
+/**
+ * The source played last time for this video, across the whole width under its label: its
+ * resolution, name, details and addon, how it plays, and how much of the video is left.
+ */
+@Composable
+private fun ContinueCard(
+    source: StreamSource,
+    best: Boolean,
+    progress: WatchProgress?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = remember(source) { sourceTitle(source) }
+    val details = remember(source) { listOf(sourceDetailsLine(source), source.addonName).filter { it.isNotEmpty() } }
     Column(
-        modifier =
-            modifier
-                .snClickable(shape, lift = true, highlight = false, interactionSource = interaction, onClick = onClick)
-                .snStateBackground(if (best) SnColors.accentSurface else SnColors.surface, shape, state)
-                .snStateBorder(if (best) SnColors.accentBorder else SnColors.border, shape, state)
-                .padding(SnSpacing.space4),
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = SnLayout.gutter)
+            .padding(bottom = SnSpacing.space6),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
         ) {
-            if (!source.playsInApp) ServiceTile(source)
+            Image(SnIcons.Play, null, Modifier.size(14.dp), colorFilter = ColorFilter.tint(SnColors.accentText))
             BasicText(
-                listOfNotNull(source.addonName, source.quality).joinToString(" · "),
-                modifier = Modifier.weight(1f),
-                style = SnTypography.label.copy(color = SnColors.fgSecondary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                stringResource(Res.string.sources_continue),
+                modifier = Modifier.semantics { heading() },
+                style = SnTypography.label.copy(color = SnColors.fg),
             )
-            if (best) Badge(stringResource(Res.string.sources_best), accent = true)
+            Box(Modifier.weight(1f).height(1.dp).background(SnColors.border))
         }
-        val lines = descriptionLines(source.description).ifEmpty { descriptionLines(source.name).drop(1) }
-        if (lines.isNotEmpty()) {
-            BasicText(
-                lines.joinToString("\n"),
-                style = SnTypography.body.copy(color = SnColors.fg),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        SourceDetails(source)
-        val badges = source.badges
-        if (badges.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-                verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-            ) {
-                badges.forEach { Badge(it, accent = false) }
-            }
-        }
-        if (!source.playsInApp) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-            ) {
-                Image(
-                    SnIcons.ExternalLink,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    colorFilter = ColorFilter.tint(SnColors.fgMuted),
-                )
-                BasicText(
-                    stringResource(Res.string.sources_opens_outside),
-                    style = SnTypography.caption.copy(color = SnColors.fgMuted),
-                )
+        CardFrame(best = false, onClick = onClick, modifier = modifier.fillMaxWidth(), border = SnColors.borderStrong) {
+            Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                ) {
+                    ResolutionPill(source.quality)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+                        SourceName(title, maxLines = 1, modifier = Modifier.fillMaxWidth())
+                        BasicText(
+                            details.joinToString(" · "),
+                            style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (best) Badge(stringResource(Res.string.sources_best))
+                    SourceStatusLabel(source)
+                }
+                val share = progress?.fraction()?.takeIf { it > 0f }
+                val left = progress?.let(::minutesLeft)
+                if (share != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                    ) {
+                        ProgressBar(share, Modifier.weight(1f))
+                        if (left != null) {
+                            BasicText(
+                                stringResource(Res.string.time_left, "$left min"),
+                                style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-/** Seeds, size and release group, as far as the source tells them. */
+/**
+ * A source's card with the shared feedback: it lifts under the pointer, lightens its border,
+ * and the recommended one has the accent's colors.
+ */
 @Composable
-private fun SourceDetails(source: StreamSource) {
-    // The size is usually a badge already; a size known only from the addon's hints is not.
-    val size = source.size?.takeIf { it !in source.badges }
-    if (source.seeders == null && size == null && source.releaseGroup == null) return
-    val style = SnTypography.caption.copy(color = SnColors.fgSecondary)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+private fun CardFrame(
+    best: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    border: Color = SnColors.border,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(SnRadius.radiusLg)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    Box(
+        modifier =
+            modifier
+                .snClickable(shape, lift = true, highlight = false, interactionSource = interaction, onClick = onClick)
+                .snStateBackground(if (best) SnColors.accentSurface else SnColors.surface, shape, state)
+                .snStateBorder(if (best) SnColors.accentBorder else border, shape, state)
+                .padding(SnSpacing.space4),
     ) {
-        source.seeders?.let { seeders ->
-            val label = pluralStringResource(Res.plurals.sources_seeders, seeders.toInt(), seeders.toInt())
+        content()
+    }
+}
+
+/**
+ * A source's name, cut to [maxLines] with an ellipsis; it always takes that many lines, so
+ * cards line up. All of it shows in a tooltip under the pointer and goes to screen readers.
+ */
+@Composable
+private fun SourceName(
+    title: String,
+    maxLines: Int,
+    modifier: Modifier,
+) {
+    Box(modifier) {
+        SnPointerTooltip(title) {
+            BasicText(
+                title,
+                modifier = Modifier.fillMaxWidth(),
+                style = SnTypography.body.copy(color = SnColors.fg),
+                minLines = maxLines,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The resolution as a pill: 4K and 8K light, the rest muted. Nothing when unknown. */
+@Composable
+private fun ResolutionPill(quality: String?) {
+    if (quality == null) return
+    val high = quality == "4K" || quality == "8K"
+    BasicText(
+        quality,
+        modifier =
+            Modifier
+                .widthIn(min = ResolutionPillWidth)
+                .background(if (high) SnColors.fg else SnColors.surfaceMuted, RoundedCornerShape(SnRadius.radiusSm))
+                .padding(horizontal = SnSpacing.space2, vertical = 2.dp),
+        style =
+            SnTypography.badge.copy(
+                color = if (high) SnColors.onInverse else SnColors.fgSecondary,
+                textAlign = TextAlign.Center,
+            ),
+        maxLines = 1,
+    )
+}
+
+private val ResolutionPillWidth = 44.dp
+
+/**
+ * How a source plays, at the end of its card: a torrent's seeds; whether a debrid service has
+ * the file ready, when the addon says; or, for a link to another app, the service and that it
+ * opens outside.
+ */
+@Composable
+private fun SourceStatusLabel(source: StreamSource) {
+    when (sourceStatus(source)) {
+        SourceStatus.Seeds -> {
+            val seeds = source.seeders?.toInt() ?: 0
+            val label = pluralStringResource(Res.plurals.sources_seeders, seeds, seeds)
+            StatusText(
+                pluralStringResource(Res.plurals.sources_seeds, seeds, seeds),
+                SnIcons.Peers,
+                SnColors.success,
+                Modifier.clearAndSetSemantics { contentDescription = label },
+            )
+        }
+
+        SourceStatus.Cached -> {
+            StatusText(stringResource(Res.string.sources_cached), SnIcons.Bolt, SnColors.success)
+        }
+
+        SourceStatus.NotCached -> {
+            StatusText(stringResource(Res.string.sources_not_cached), null, SnColors.fgMuted)
+        }
+
+        SourceStatus.Outside -> {
             Row(
-                Modifier.semantics(mergeDescendants = true) { contentDescription = label },
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
             ) {
-                Image(
-                    SnIcons.Seeds,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    colorFilter = ColorFilter.tint(SnColors.success),
-                )
-                BasicText(seeders.toString(), style = style)
+                ServiceTile(source)
+                StatusText(stringResource(Res.string.sources_opens_outside), null, SnColors.fgMuted)
             }
         }
-        size?.let { BasicText(it, style = style) }
-        source.releaseGroup?.let {
-            BasicText(it, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+
+        SourceStatus.None -> {}
+    }
+}
+
+@Composable
+private fun StatusText(
+    text: String,
+    icon: ImageVector?,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+    ) {
+        if (icon != null) Image(icon, null, Modifier.size(14.dp), colorFilter = ColorFilter.tint(tint))
+        BasicText(text, style = SnTypography.caption.copy(color = SnColors.fgSecondary), maxLines = 1)
     }
 }
 
@@ -476,20 +651,16 @@ private object ServiceIcons {
     }
 }
 
+/** The small accent mark of the recommended source. */
 @Composable
-private fun Badge(
-    text: String,
-    accent: Boolean,
-) {
+private fun Badge(text: String) {
     BasicText(
         text,
         modifier =
             Modifier
-                .background(
-                    if (accent) SnColors.accent else SnColors.surfaceMuted,
-                    RoundedCornerShape(SnRadius.radiusSm),
-                ).padding(horizontal = SnSpacing.space2, vertical = 2.dp),
-        style = SnTypography.badge.copy(color = if (accent) SnColors.onAccent else SnColors.fgSecondary),
+                .background(SnColors.accent, RoundedCornerShape(SnRadius.radiusSm))
+                .padding(horizontal = SnSpacing.space2, vertical = 2.dp),
+        style = SnTypography.badge.copy(color = SnColors.onAccent),
         maxLines = 1,
     )
 }

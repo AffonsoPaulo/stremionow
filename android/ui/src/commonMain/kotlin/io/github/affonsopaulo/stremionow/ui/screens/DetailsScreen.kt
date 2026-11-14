@@ -211,6 +211,14 @@ class DetailsViewModel(
         if (reveal) mutableReveal.value = true
     }
 
+    /** Remembers [source] as the one played for [videoId], to offer it first next time. */
+    fun rememberSource(
+        videoId: String,
+        source: StreamSource,
+    ) {
+        loaders[videoId]?.remember(source)
+    }
+
     /** Back to the episodes; a movie keeps its sources. */
     fun closeSources() {
         val details = (mutableDetails.value as? Loadable.Ready)?.value ?: return
@@ -367,7 +375,8 @@ private fun DetailsContent(
     val rowStates = remember(item.id) { mutableMapOf<Long, LazyListState>() }
     val sourcesEpisode = details.episodes.firstOrNull { it.id == sourcesFor }
     var focusEpisode by remember(item.id) { mutableStateOf<String?>(null) }
-    var filter by remember(sourcesFor) { mutableStateOf<String?>(null) }
+    // The search, filters and order of the sources hold for every video of the page.
+    var sourceFilters by remember(item.id) { mutableStateOf(SourceFilters()) }
     var confirmMobileData by remember { mutableStateOf<StreamSource?>(null) }
     var watchedChoices by remember { mutableStateOf<List<WatchedChoice>?>(null) }
     var sharing by remember { mutableStateOf(false) }
@@ -406,6 +415,7 @@ private fun DetailsContent(
     val play = { source: StreamSource ->
         // The episode these sources are for; none for a movie.
         val episode = details.episodes.firstOrNull { it.id == sources.videoId }
+        sources.videoId?.let { viewModel.rememberSource(it, source) }
         PlaybackSession.select(PlaybackSession.Selection(details, episode))
         PlaybackSession.source = source
         PlaybackSession.alternatives = sources.sources
@@ -504,7 +514,8 @@ private fun DetailsContent(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val page = DpSize(maxWidth, maxHeight)
-        val columns = sourceColumns(page.width - SnLayout.gutter * 2)
+        val phone = SnLayout.formFactor == FormFactor.Phone
+        val columns = sourceGridColumns((page.width - SnLayout.gutter * 2).value, SnSpacing.space3.value, phone)
         SnMinimalScroll(topInset = headerInset) {
             LazyColumn(
                 Modifier.fillMaxSize(),
@@ -579,7 +590,17 @@ private fun DetailsContent(
                 if (showingSources) {
                     val subject =
                         sourcesHeading?.let { SourcesSubject(it, onBack = ::closeSources, backFocus = backFocus) }
-                    sourcesItems(sources, subject, filter, { filter = it }, columns, firstSourceFocus, choose)
+                    sourcesItems(
+                        state = sources,
+                        subject = subject,
+                        filters = sourceFilters,
+                        onFilters = { sourceFilters = it },
+                        progress = progress?.takeIf { it.videoId == sources.videoId },
+                        columns = columns,
+                        phone = phone,
+                        firstFocus = firstSourceFocus,
+                        onChoose = choose,
+                    )
                 } else {
                     item(key = "tab-content-$tab") {
                         SnMinimalScroll {
@@ -619,10 +640,6 @@ private fun DetailsContent(
 
 /** How wide the title's logo, facts, buttons and synopsis may grow over its art. */
 private val DetailsTextWidth = 580.dp
-
-/** As many columns of sources as fit [width], one at least. */
-private fun sourceColumns(width: Dp): Int =
-    ((width + SnSpacing.space3) / (SnLayout.listCellMin + SnSpacing.space3)).toInt().coerceAtLeast(1)
 
 @Composable
 private fun DetailsTab.label(): String =

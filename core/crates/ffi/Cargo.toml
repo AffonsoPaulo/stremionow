@@ -30,6 +30,9 @@ thiserror.workspace = true
 log.workspace = true
 # The random state of a browser sign-in (128 bits, as the official app's).
 getrandom.workspace = true
+# SHA-256 of a source's address, so the source last played is recognized without keeping
+# the address (debrid addresses carry the user's key).
+ring.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

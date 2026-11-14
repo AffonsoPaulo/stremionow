@@ -18,6 +18,7 @@ mod records;
 mod settings;
 mod sharing;
 mod skips;
+mod source_memory;
 mod streaming;
 mod watched_sync;
 

@@ -6,7 +6,7 @@ use stremionow_addons::InstalledAddon;
 use stremionow_library::ProgressEntry;
 use stremionow_protocol::{Stream, Subtitle};
 
-use stremionow_ranking::{Preferences, Resolution, SourceText, badges, parse};
+use stremionow_ranking::{Preferences, Resolution, SourceText, badges, format_size, parse};
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::{AddonInfo, CoreError};
@@ -35,8 +35,16 @@ pub struct StreamSource {
     /// HTTP(S) page to open outside the app.
     pub external_url: Option<String>,
     pub yt_id: Option<String>,
-    /// Technical labels for the source picker, like `4K` or `HDR10`.
+    /// Technical labels for the source picker, like `4K` or `HDR10`; the size is the last one.
     pub badges: Vec<String>,
+    /// Resolution label, such as `4K` or `1080p`, when the text names one.
+    pub quality: Option<String>,
+    /// Seeders the addon reported, for torrents.
+    pub seeders: Option<u32>,
+    /// File size for display, such as `14.2 GB`, as in [`StreamSource::badges`].
+    pub size: Option<String>,
+    /// Group that made the release, from a scene-style file name.
+    pub release_group: Option<String>,
     /// Subtitles that come with this source.
     pub subtitles: Vec<SubtitleTrack>,
     /// Sources of the same group can replace each other from one episode to the next.
@@ -256,6 +264,10 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
         external_url,
         yt_id,
         badges: Vec::new(),
+        quality: None,
+        seeders: None,
+        size: None,
+        release_group: None,
         subtitles: stream
             .subtitles
             .into_iter()
@@ -268,7 +280,23 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
             .filter(|tracker| tracker.len() <= 512)
             .collect(),
     };
-    source.badges = badges(&parse(&source_text(&source)));
+    let traits = parse(&source_text(&source));
+    source.badges = badges(&traits);
+    source.quality = traits.resolution.map(|r| r.label().to_owned());
+    source.seeders = traits.seeders;
+    source.size = traits
+        .size_bytes
+        .or(stream.behavior_hints.video_size)
+        .map(format_size);
+    source.release_group = traits.release_group.or_else(|| {
+        let filename = stream.behavior_hints.filename.as_deref()?;
+        parse(&SourceText {
+            name: "",
+            title: filename,
+            description: "",
+        })
+        .release_group
+    });
     Some(source)
 }
 
@@ -434,10 +462,52 @@ mod tests {
             external_url: external.map(Into::into),
             yt_id: None,
             badges: Vec::new(),
+            quality: None,
+            seeders: None,
+            size: None,
+            release_group: None,
             subtitles: Vec::new(),
             binge_group: None,
             trackers: Vec::new(),
         }
+    }
+
+    fn addon() -> InstalledAddon {
+        InstalledAddon {
+            url: stremionow_protocol::AddonUrl::parse("https://addon.example/manifest.json")
+                .expect("valid url"),
+            manifest: serde_json::from_value(serde_json::json!({
+                "id": "a", "version": "1.0.0", "name": "Addon", "resources": ["stream"]
+            }))
+            .expect("valid manifest"),
+        }
+    }
+
+    #[test]
+    fn sources_carry_their_parsed_details() {
+        let stream: Stream = serde_json::from_value(serde_json::json!({
+            "name": "Addon\n4k",
+            "title": "Movie.2023.2160p.WEB-DL.DV.H265-GRP\n👤 154 💾 14.2 GB",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }))
+        .expect("valid stream");
+        let source = stream_source(&addon(), stream).expect("usable");
+        assert_eq!(source.quality.as_deref(), Some("4K"));
+        assert_eq!(source.seeders, Some(154));
+        assert_eq!(source.size.as_deref(), Some("14.2 GB"));
+        assert_eq!(source.release_group.as_deref(), Some("GRP"));
+        assert_eq!(source.badges.last(), source.size.as_ref());
+
+        // A web source tells its size and file name in its hints instead.
+        let stream: Stream = serde_json::from_value(serde_json::json!({
+            "url": "https://cdn.example/v.mkv",
+            "behaviorHints": {"videoSize": 1_073_741_824u64, "filename": "Movie.2023.1080p.WEB.x264-OTHER.mkv"}
+        }))
+        .expect("valid stream");
+        let source = stream_source(&addon(), stream).expect("usable");
+        assert_eq!(source.size.as_deref(), Some("1.0 GB"));
+        assert_eq!(source.release_group.as_deref(), Some("OTHER"));
+        assert_eq!(source.seeders, None);
     }
 
     #[test]

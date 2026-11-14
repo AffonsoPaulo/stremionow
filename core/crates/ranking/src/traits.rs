@@ -205,4 +205,7 @@ pub struct Traits {
     pub multi_audio: bool,
     /// Indexer or tracker the source came from, such as `"ThePirateBay"`.
     pub provider: Option<String>,
+    /// Group that made the release, from a scene-style name such as
+    /// `Movie.2023.1080p.WEB-DL.H264-GRP`.
+    pub release_group: Option<String>,
 }

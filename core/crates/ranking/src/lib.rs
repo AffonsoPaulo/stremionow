@@ -41,7 +41,7 @@ mod score;
 mod text;
 mod traits;
 
-pub use badges::badges;
+pub use badges::{badges, format_size};
 pub use parse::{MAX_INSPECTED_BYTES, parse};
 pub use score::{Preferences, rank, score, weights};
 pub use traits::{Audio, Codec, Hdr, ReleaseQuality, Resolution, SourceText, Traits};

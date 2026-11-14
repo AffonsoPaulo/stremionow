@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Everything around watching: sources from stream addons, subtitles and playback progress.
 
+use std::collections::HashSet;
+
 use futures::future::join_all;
 use stremionow_addons::InstalledAddon;
 use stremionow_library::ProgressEntry;
@@ -153,20 +155,33 @@ impl StremioCore {
 
     /// Records playback position. Near the end the video counts as watched and leaves
     /// "Continue watching"; the first seconds are not worth an entry.
+    ///
+    /// Each time a video is watched to the end counts once in the title's times watched
+    /// (Stremio's `timesWatched`): finishing a video that was in progress, or one not watched
+    /// before. Reports that keep coming after the end do not count again.
     pub fn save_progress(&self, progress: WatchProgress) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
+        let same_video = store
+            .progress(&progress.id)?
+            .is_some_and(|saved| saved.video_id == progress.video_id);
         if is_finished(progress.position_ms, progress.duration_ms) {
+            let watched_before = store
+                .watched_videos(&progress.id)?
+                .contains(&progress.video_id);
+            if same_video || !watched_before {
+                store.count_watch(&progress.id, now)?;
+            } else {
+                store.note_watching(&progress.id, now)?;
+            }
             store.mark_watched(&progress.id, &progress.video_id, now)?;
             store.remove_progress(&progress.id)?;
             return Ok(());
         }
-        let same_video = store
-            .progress(&progress.id)?
-            .is_some_and(|saved| saved.video_id == progress.video_id);
         if progress.position_ms < MIN_PROGRESS_MS && !same_video {
             return Ok(());
         }
+        store.note_watching(&progress.id, now)?;
         store.save_progress(&ProgressEntry {
             id: progress.id,
             kind: progress.kind,
@@ -212,6 +227,10 @@ impl StremioCore {
     /// Marks videos of title `id` as watched or not, as "Mark as watched" does: `video_ids`
     /// are episode ids, or the title's own id for a movie. A video marked watched while in
     /// progress leaves "Continue watching"; unmarking leaves the progress alone.
+    ///
+    /// As in Stremio, marking a movie watched counts one watch of it, and marking episodes
+    /// does not. Unmarking a movie, or the last watched videos of a series, forgets its
+    /// times watched, so it reads as not watched again.
     pub fn set_watched(
         &self,
         id: String,
@@ -220,7 +239,14 @@ impl StremioCore {
     ) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
-        for video_id in video_ids.iter().take(MAX_MARKED_VIDEOS) {
+        let video_ids: Vec<String> = video_ids.into_iter().take(MAX_MARKED_VIDEOS).collect();
+        let before: HashSet<String> = store.watched_videos(&id)?.into_iter().collect();
+        if watched && video_ids.contains(&id) && !before.contains(&id) {
+            store.count_watch(&id, now)?;
+        }
+        let unmarked_movie = !watched && video_ids.contains(&id);
+        let unmarked_any = !watched && video_ids.iter().any(|video| before.contains(video));
+        for video_id in &video_ids {
             if watched {
                 store.mark_watched(&id, video_id, now)?;
             } else {
@@ -233,6 +259,9 @@ impl StremioCore {
                 .is_some_and(|saved| video_ids.contains(&saved.video_id))
         {
             store.remove_progress(&id)?;
+        }
+        if unmarked_movie || (unmarked_any && store.watched_videos(&id)?.is_empty()) {
+            store.reset_times_watched(&id, now)?;
         }
         Ok(())
     }
@@ -516,6 +545,81 @@ mod tests {
             core.watched_videos("tt1".into()).expect("reads"),
             ["tt1:1:2"]
         );
+    }
+
+    fn times_watched(core: &StremioCore, id: &str) -> u32 {
+        core.store()
+            .expect("store")
+            .watch_stats(id)
+            .expect("reads")
+            .map_or(0, |stats| stats.times_watched)
+    }
+
+    #[test]
+    fn finishing_a_video_counts_one_watch() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+
+        core.save_progress(progress("tt1:1:1", 300_000))
+            .expect("saves");
+        assert_eq!(times_watched(&core, "tt1"), 0, "playing is not a watch");
+        let last = core
+            .store()
+            .expect("store")
+            .watch_stats("tt1")
+            .expect("reads")
+            .and_then(|stats| stats.last_watched);
+        assert!(last.is_some(), "playing sets the last watch");
+
+        core.save_progress(progress("tt1:1:1", 950_000))
+            .expect("finishes");
+        core.save_progress(progress("tt1:1:1", 990_000))
+            .expect("reports after the end");
+        assert_eq!(times_watched(&core, "tt1"), 1, "the end counts once");
+
+        // Watching it again from the start counts again.
+        core.save_progress(progress("tt1:1:1", 60_000))
+            .expect("rewatches");
+        core.save_progress(progress("tt1:1:1", 960_000))
+            .expect("finishes again");
+        assert_eq!(times_watched(&core, "tt1"), 2);
+
+        // Jumping straight to the end of a new episode counts too.
+        core.save_progress(progress("tt1:1:2", 960_000))
+            .expect("finishes");
+        assert_eq!(times_watched(&core, "tt1"), 3);
+    }
+
+    #[test]
+    fn marking_counts_movies_and_unmarking_forgets() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+
+        core.set_watched("tt9".into(), vec!["tt9".into()], true)
+            .expect("marks a movie");
+        core.set_watched("tt9".into(), vec!["tt9".into()], true)
+            .expect("marks it again");
+        assert_eq!(times_watched(&core, "tt9"), 1, "an already watched movie");
+        core.set_watched("tt9".into(), vec!["tt9".into()], false)
+            .expect("unmarks");
+        assert_eq!(times_watched(&core, "tt9"), 0);
+
+        // Episodes marked by hand are watched without counting as watches, as in Stremio.
+        core.save_progress(progress("tt1:1:1", 960_000))
+            .expect("finishes");
+        core.set_watched("tt1".into(), vec!["tt1:1:2".into(), "tt1:1:3".into()], true)
+            .expect("marks episodes");
+        assert_eq!(times_watched(&core, "tt1"), 1);
+        core.set_watched("tt1".into(), vec!["tt1:1:1".into()], false)
+            .expect("unmarks one");
+        assert_eq!(times_watched(&core, "tt1"), 1, "others are still watched");
+        core.set_watched(
+            "tt1".into(),
+            vec!["tt1:1:2".into(), "tt1:1:3".into()],
+            false,
+        )
+        .expect("unmarks the rest");
+        assert_eq!(times_watched(&core, "tt1"), 0);
     }
 
     fn source(name: &str, url: Option<&str>, external: Option<&str>) -> StreamSource {

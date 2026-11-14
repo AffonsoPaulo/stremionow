@@ -106,6 +106,8 @@ private val CONTROLS_CLEARANCE = 128.dp
 /** How long it fades back in once restored, while the system's restore animation plays. */
 private const val FADE_IN_MS = 250
 
+private const val NANOS_PER_MILLI = 1_000_000L
+
 /** Step of the ±10 s buttons and of the arrow keys. */
 private const val SEEK_STEP_SECONDS = 10.0
 
@@ -461,6 +463,10 @@ private fun PlayerUnavailable(
 /**
  * The video itself: click to play or pause, double-click for full screen, and, with a borderless
  * video window, drag to move the window.
+ *
+ * A click plays or pauses at once, rather than after waiting to see whether a second click
+ * follows; the second click of a double-click undoes it, so a double-click only changes full
+ * screen.
  */
 @Composable
 private fun VideoArea(
@@ -471,9 +477,19 @@ private fun VideoArea(
         Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
+                var lastTap = 0L
                 detectTapGestures(
-                    onTap = { player.togglePause() },
-                    onDoubleTap = { pair.toggleFullScreen() },
+                    onTap = {
+                        val now = System.nanoTime()
+                        player.togglePause()
+                        if (now - lastTap <= viewConfiguration.doubleTapTimeoutMillis * NANOS_PER_MILLI) {
+                            player.togglePause()
+                            pair.toggleFullScreen()
+                            lastTap = 0L
+                        } else {
+                            lastTap = now
+                        }
+                    },
                 )
             }.pointerInput(pair.isFullScreen) {
                 if (pair.isFullScreen || pair.framed) return@pointerInput

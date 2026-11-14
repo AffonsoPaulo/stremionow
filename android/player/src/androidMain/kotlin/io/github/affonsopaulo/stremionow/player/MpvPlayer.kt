@@ -102,8 +102,7 @@ class MpvPlayer private constructor(
         if (!released) mpv.setPropertyDouble("sub-delay", seconds)
     }
 
-    /** Scales subtitle text, where 1.0 is the default size. */
-    fun setSubtitleScale(scale: Double) {
+    override fun setSubtitleScale(scale: Double) {
         if (!released) mpv.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 3.0))
     }
 

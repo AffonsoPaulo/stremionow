@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +17,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -25,12 +32,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
 private val CardShape = RoundedCornerShape(SnRadius.radiusMd)
+
+/** How much a poster's picture zooms, inside its frame, under the pointer. */
+private const val POSTER_ZOOM = 1.06f
 
 /**
  * Artwork with a fallback: while the image loads, or when there is none, the box shows the
@@ -67,7 +78,10 @@ val PosterCardWidth = 160.dp
 /** Width of an episode card. */
 val EpisodeCardWidth = 280.dp
 
-/** 2:3 poster card with the title and a short line underneath. */
+/**
+ * 2:3 poster card with the title and a short line underneath. Under the pointer it grows,
+ * lifts and zooms its picture a little; with reduced motion it stays still.
+ */
 @Composable
 fun SnPosterCard(
     title: String,
@@ -77,21 +91,37 @@ fun SnPosterCard(
     modifier: Modifier = Modifier,
     width: Dp? = PosterCardWidth,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    val motion = snCardMotion(state, growOnFocus = true, liftOnHover = true, reducedMotion = rememberReducedMotion())
+    val zoom by animateFloatAsState(if (motion.lift) POSTER_ZOOM else 1f, tween(FEEDBACK_MS), label = "poster-zoom")
     Column(
         modifier = (if (width != null) modifier.width(width) else modifier),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
     ) {
-        SnArtwork(
-            url = poster,
-            fallbackTitle = title,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(2f / 3f)
-                    .semantics { contentDescription = title }
-                    .snClickable(CardShape, grow = true, onClick = onClick)
-                    .clip(CardShape),
-        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .semantics { contentDescription = title }
+                .snClickable(
+                    CardShape,
+                    grow = true,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).clip(CardShape),
+        ) {
+            SnArtwork(
+                url = poster,
+                fallbackTitle = title,
+                modifier =
+                    Modifier.fillMaxSize().graphicsLayer {
+                        scaleX = zoom
+                        scaleY = zoom
+                    },
+            )
+        }
         BasicText(
             text = title,
             style = SnTypography.label.copy(color = SnColors.fg),
@@ -109,7 +139,10 @@ fun SnPosterCard(
     }
 }
 
-/** 16:9 card for episodes, with an optional progress bar. */
+/**
+ * 16:9 card for episodes, with an optional progress bar. Under the pointer it grows, lifts and
+ * gets a light border.
+ */
 @Composable
 fun SnEpisodeCard(
     title: String,
@@ -121,14 +154,23 @@ fun SnEpisodeCard(
     progress: Float? = null,
     highlighted: Boolean = false,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Column(modifier.width(EpisodeCardWidth), verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
         Box(
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .semantics { contentDescription = title }
-                .snClickable(CardShape, grow = true, onClick = onClick)
-                .clip(CardShape),
+                .snClickable(
+                    CardShape,
+                    grow = true,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).clip(CardShape)
+                // Drawn over the picture.
+                .snStateBorder(Color.Transparent, CardShape, state),
         ) {
             SnArtwork(url = thumbnail, fallbackTitle = "", modifier = Modifier.fillMaxSize())
             if (progress != null && progress > 0f) {

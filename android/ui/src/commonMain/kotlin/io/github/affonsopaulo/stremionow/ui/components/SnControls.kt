@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -36,6 +41,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -70,14 +77,21 @@ fun SnButton(
             SnButtonStyle.Ghost -> Color.Transparent to SnColors.fgSecondary
             SnButtonStyle.Danger -> SnColors.dangerSurface to SnColors.danger
         }
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction(enabled)
     Row(
         modifier =
             modifier
                 .heightIn(min = SnSize.controlLg)
                 // The ring stays at full strength on a dimmed (disabled) button.
-                .snClickable(Pill, enabled = enabled, onClick = onClick)
-                .alpha(if (enabled) 1f else 0.45f)
-                .background(background, Pill)
+                .snClickable(
+                    Pill,
+                    enabled = enabled,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).alpha(if (enabled) 1f else 0.45f)
+                .snStateBackground(background, Pill, state)
                 .padding(horizontal = SnSpacing.space6),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
@@ -99,7 +113,11 @@ fun SnButton(
     }
 }
 
-/** Round button with only an icon; [label] is announced by screen readers. */
+/**
+ * Round button with only an icon; [label] is announced by screen readers. Under the pointer a
+ * translucent circle shows behind the icon (over [background], when there is one), and a press
+ * darkens it.
+ */
 @Composable
 fun SnIconButton(
     icon: ImageVector,
@@ -110,19 +128,77 @@ fun SnIconButton(
     background: Color = Color.Transparent,
     enabled: Boolean = true,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction(enabled)
     Box(
         modifier =
             modifier
                 .size(SnSize.controlMd)
                 .semantics { contentDescription = label }
-                .snClickable(Pill, enabled = enabled, onClick = onClick)
-                .alpha(if (enabled) 1f else 0.45f)
-                .background(background, Pill),
+                .snClickable(
+                    Pill,
+                    enabled = enabled,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).alpha(if (enabled) 1f else 0.45f)
+                .snStateBackground(background, Pill, state),
         contentAlignment = Alignment.Center,
     ) {
         Image(icon, contentDescription = null, modifier = Modifier.size(22.dp), colorFilter = ColorFilter.tint(tint))
     }
 }
+
+/**
+ * A link in running text, such as a genre or a cast member: [color] at rest, brighter and
+ * underlined under the pointer. Like a link on the web, it shows nothing more when pressed.
+ * A [style] that is already underlined stays so, for touch screens, where nothing hovers.
+ */
+@Composable
+fun SnTextLink(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: TextStyle = SnTypography.body,
+    color: Color = SnColors.fgSecondary,
+    onClickLabel: String? = null,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    val shown by animateColorAsState(snLinkColor(color, state), tween(FEEDBACK_MS), label = "link")
+    BasicText(
+        text,
+        modifier =
+            modifier.snClickable(
+                RoundedCornerShape(SnRadius.radiusSm),
+                onClickLabel = onClickLabel,
+                highlight = false,
+                interactionSource = interaction,
+                onClick = onClick,
+            ),
+        style = style.copy(color = shown, textDecoration = snLinkDecoration(style.textDecoration, state)),
+    )
+}
+
+/**
+ * A link's color: [color] at rest; under the pointer the main text color, or pure white for a
+ * link that already uses the main text color.
+ */
+internal fun snLinkColor(
+    color: Color,
+    state: SnInteractionState,
+): Color =
+    when {
+        !state.hover -> color
+        color == SnColors.fg -> SnColors.inverse
+        else -> SnColors.fg
+    }
+
+/** A link's decoration: underlined under the pointer, otherwise [decoration]. */
+internal fun snLinkDecoration(
+    decoration: TextDecoration?,
+    state: SnInteractionState,
+): TextDecoration? = if (state.hover) TextDecoration.Underline else decoration
 
 /** Filter pill. Selected chips use the light fill. */
 @Composable
@@ -132,13 +208,20 @@ fun SnChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Box(
         modifier =
             modifier
                 .heightIn(min = SnSize.controlSm)
                 .semantics { this.selected = selected }
-                .snClickable(Pill, role = Role.Tab, onClick = onClick)
-                .background(if (selected) SnColors.fg else SnColors.surfaceMuted, Pill)
+                .snClickable(
+                    Pill,
+                    role = Role.Tab,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).snStateBackground(if (selected) SnColors.fg else SnColors.surfaceMuted, Pill, state)
                 .padding(horizontal = SnSpacing.space4),
         contentAlignment = Alignment.Center,
     ) {

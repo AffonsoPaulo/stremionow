@@ -77,7 +77,7 @@ fun ProvideDesktopInput(
         },
     ) {
         CompositionLocalProvider(
-            LocalSnFeedback provides SnFeedback(showFocus = input.isKeyboard, showHover = true),
+            LocalSnFeedback provides SnFeedback(showFocus = input.isKeyboard, mouseFirst = true),
             content = content,
         )
     }

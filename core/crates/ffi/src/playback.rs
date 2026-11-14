@@ -25,6 +25,9 @@ const CONTINUE_WATCHING_LIMIT: usize = 20;
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StreamSource {
     pub addon_name: String,
+    /// The manifest id of the addon that offered it, which survives reinstalling and
+    /// reconfiguring the addon, to ask the same addon again (see `source_memory.rs`).
+    pub addon_id: String,
     /// Short label from the addon, often its name and the quality (`Torrentio\n4k`).
     pub name: String,
     /// Longer description: release name, size, seeders, languages.
@@ -370,6 +373,7 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
         .unwrap_or_default();
     let mut source = StreamSource {
         addon_name: addon.manifest.name.clone(),
+        addon_id: addon.manifest.id.clone(),
         name: stream.name.unwrap_or_else(|| addon.manifest.name.clone()),
         description,
         url,
@@ -435,7 +439,7 @@ fn labels<T: Copy>(values: &[T], label: impl Fn(T) -> &'static str) -> Vec<Strin
 }
 
 /// Longest addon id kept in an identity; manifest ids are short (`com.stremio.torrentio`).
-const MAX_ADDON_ID_LEN: usize = 200;
+pub(crate) const MAX_ADDON_ID_LEN: usize = 200;
 
 /// What recognizes a source the app plays in a later search: the addon's id with the info
 /// hash and file of a torrent, or with a SHA-256 digest of a web address. The address itself
@@ -759,6 +763,7 @@ mod tests {
     fn source(name: &str, url: Option<&str>, external: Option<&str>) -> StreamSource {
         StreamSource {
             addon_name: "A".into(),
+            addon_id: "a".into(),
             name: name.into(),
             description: String::new(),
             url: url.map(Into::into),

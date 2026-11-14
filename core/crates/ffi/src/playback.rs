@@ -208,7 +208,38 @@ impl StremioCore {
     pub fn watched_videos(&self, id: String) -> Result<Vec<String>, CoreError> {
         Ok(self.store()?.watched_videos(&id)?)
     }
+
+    /// Marks videos of title `id` as watched or not, as "Mark as watched" does: `video_ids`
+    /// are episode ids, or the title's own id for a movie. A video marked watched while in
+    /// progress leaves "Continue watching"; unmarking leaves the progress alone.
+    pub fn set_watched(
+        &self,
+        id: String,
+        video_ids: Vec<String>,
+        watched: bool,
+    ) -> Result<(), CoreError> {
+        let store = self.store()?;
+        let now = now_millis();
+        for video_id in video_ids.iter().take(MAX_MARKED_VIDEOS) {
+            if watched {
+                store.mark_watched(&id, video_id, now)?;
+            } else {
+                store.unmark_watched(&id, video_id)?;
+            }
+        }
+        if watched
+            && store
+                .progress(&id)?
+                .is_some_and(|saved| video_ids.contains(&saved.video_id))
+        {
+            store.remove_progress(&id)?;
+        }
+        Ok(())
+    }
 }
+
+/// Most videos marked at once; the longest-running series have a few thousand episodes.
+const MAX_MARKED_VIDEOS: usize = 20_000;
 
 impl From<ProgressEntry> for WatchProgress {
     fn from(entry: ProgressEntry) -> Self {
@@ -448,6 +479,42 @@ mod tests {
         assert_eq!(
             core.watched_videos("tt1".into()).expect("reads"),
             ["tt1:1:1"]
+        );
+    }
+
+    #[test]
+    fn marks_and_unmarks_videos() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        core.save_progress(progress("tt1:1:2", 300_000))
+            .expect("saves");
+
+        core.set_watched("tt1".into(), vec!["tt1:1:1".into()], true)
+            .expect("marks");
+        assert!(
+            core.progress("tt1".into()).expect("reads").is_some(),
+            "another episode keeps its progress"
+        );
+        core.set_watched("tt1".into(), vec!["tt1:1:2".into(), "tt1:1:3".into()], true)
+            .expect("marks");
+        assert_eq!(
+            core.watched_videos("tt1".into()).expect("reads"),
+            ["tt1:1:1", "tt1:1:2", "tt1:1:3"]
+        );
+        assert!(
+            core.progress("tt1".into()).expect("reads").is_none(),
+            "the episode in progress is done"
+        );
+
+        core.set_watched(
+            "tt1".into(),
+            vec!["tt1:1:1".into(), "tt1:1:3".into()],
+            false,
+        )
+        .expect("unmarks");
+        assert_eq!(
+            core.watched_videos("tt1".into()).expect("reads"),
+            ["tt1:1:2"]
         );
     }
 

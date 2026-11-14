@@ -84,8 +84,9 @@ val PosterCardWidth = 160.dp
 val EpisodeCardWidth = 280.dp
 
 /**
- * 2:3 poster card with the title and a short line underneath. Under the pointer it grows,
- * lifts and zooms its picture a little; with reduced motion it stays still.
+ * 2:3 poster card with the title and a short line underneath, and a progress bar along the
+ * bottom of the picture when [progress] is given. Under the pointer it grows, lifts and zooms
+ * its picture a little; with reduced motion it stays still.
  */
 @Composable
 fun SnPosterCard(
@@ -95,6 +96,7 @@ fun SnPosterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     width: Dp? = PosterCardWidth,
+    progress: Float? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
@@ -126,6 +128,9 @@ fun SnPosterCard(
                         scaleY = zoom
                     },
             )
+            if (progress != null && progress > 0f) {
+                ProgressBar(progress, Modifier.align(Alignment.BottomStart))
+            }
         }
         BasicText(
             text = title,
@@ -236,5 +241,26 @@ fun SnEpisodeCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/** How far into a video the user is, drawn along the bottom edge of its picture. */
+@Composable
+private fun ProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .background(SnColors.progressTrack),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .height(4.dp)
+                .background(SnColors.accent),
+        )
     }
 }

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -687,9 +691,16 @@ private fun Hero(
                 },
             ),
     ) {
-        Crossfade(
+        // Both titles stay anchored to the bottom while they cross-fade: a Crossfade puts them at
+        // the top of a box as tall as the taller one, so a shorter title showed high up, then
+        // dropped into place once the taller one had gone.
+        AnimatedContent(
             targetState = pick.current,
-            animationSpec = tween(HERO_CROSSFADE_MS),
+            transitionSpec = {
+                fadeIn(tween(HERO_CROSSFADE_MS)) togetherWith fadeOut(tween(HERO_CROSSFADE_MS)) using
+                    null
+            },
+            contentAlignment = Alignment.BottomStart,
             modifier = Modifier.align(Alignment.BottomStart),
             label = "hero-text",
         ) { item ->

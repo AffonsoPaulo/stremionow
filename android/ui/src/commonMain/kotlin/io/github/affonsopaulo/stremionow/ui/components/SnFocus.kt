@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
@@ -177,34 +176,6 @@ private fun Modifier.drawStateFill(
         if (fill.alpha > 0f) drawOutline(shape.createOutline(size, layoutDirection, this), fill)
         drawContent()
     }
-
-/**
- * Makes a card that is not itself clickable, such as an addon's, which holds buttons and a
- * switch, respond to the mouse as clickable cards do: it grows by a few dp and lifts. It is
- * not a button, so there is no hand cursor and no press. Tint its border with
- * [snStateBorder] and the state of the same [interactionSource].
- */
-@Composable
-fun Modifier.snHoverCard(
-    shape: Shape,
-    interactionSource: MutableInteractionSource,
-): Modifier {
-    val state = interactionSource.collectSnInteraction()
-    val reducedMotion = rememberReducedMotion()
-    val motion = snCardMotion(state, growOnFocus = false, liftOnHover = true, reducedMotion = reducedMotion)
-    val growth by animateFloatAsState(if (motion.lift) 1f else 0f, tween(FEEDBACK_MS), label = "card-lift")
-    val maxGrowth = with(LocalDensity.current) { LiftMaxGrowth.toPx() }
-    return this
-        .graphicsLayer {
-            val scale = 1f + snGrowFraction(size.width, maxGrowth, capped = true) * growth
-            scaleX = scale
-            scaleY = scale
-            if (growth > 0f) {
-                shadowElevation = LiftShadow.toPx() * growth
-                this.shape = shape
-            }
-        }.hoverable(interactionSource)
-}
 
 /**
  * Draws the focus ring around a container while [interaction] reports focus inside it, such

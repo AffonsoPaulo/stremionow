@@ -91,7 +91,7 @@ fun SnButton(
                     interactionSource = interaction,
                     onClick = onClick,
                 ).alpha(if (enabled) 1f else 0.45f)
-                .snStateBackground(background, Pill, state)
+                .snStateBackground(background, Pill, state, darkenLightOnHover = true)
                 .padding(horizontal = SnSpacing.space6),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
@@ -287,6 +287,8 @@ fun SnTabs(
         ) {
             tabs.forEachIndexed { index, title ->
                 val selected = index == selectedIndex
+                val interaction = remember { MutableInteractionSource() }
+                val state = interaction.collectSnInteraction()
                 Column(
                     modifier =
                         Modifier
@@ -299,18 +301,34 @@ fun SnTabs(
                                     Modifier
                                 },
                             ).semantics { this.selected = selected }
-                            .snClickable(RoundedCornerShape(SnRadius.radiusSm), role = Role.Tab) { onSelect(index) }
-                            .padding(horizontal = SnSpacing.space4),
+                            .snClickable(
+                                RoundedCornerShape(SnRadius.radiusSm),
+                                role = Role.Tab,
+                                highlight = false,
+                                interactionSource = interaction,
+                            ) { onSelect(index) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // The highlight covers the label only, clear of the indicator and of the
+                    // line under the tabs.
                     BasicText(
                         text = title,
-                        modifier = Modifier.padding(vertical = SnSpacing.space3),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .snStateBackground(Color.Transparent, RoundedCornerShape(SnRadius.radiusSm), state)
+                                .padding(
+                                    start = SnSpacing.space4,
+                                    end = SnSpacing.space4,
+                                    top = SnSpacing.space3,
+                                    bottom = SnSpacing.space2,
+                                ),
                         style = SnTypography.tab.copy(color = if (selected) SnColors.fg else SnColors.fgMuted),
                         maxLines = 1,
                     )
                     Box(
                         Modifier
+                            .padding(start = SnSpacing.space4, end = SnSpacing.space4, top = SnSpacing.space1)
                             .height(3.dp)
                             .fillMaxWidth()
                             .background(if (selected) SnColors.fg else Color.Transparent),

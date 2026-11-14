@@ -242,8 +242,10 @@ impl StremioCore {
                 return Ok(());
             };
             if watched {
-                // As stremio-core's `LibraryItem::mark_as_watched`.
-                item.state.times_watched = item.state.times_watched.saturating_add(1);
+                // As stremio-core's `LibraryItem::mark_as_watched`, which adds one watch. The
+                // watch statistics already counted this one when it was marked here (and
+                // wrote the count into the item), so only make sure the item reads watched.
+                item.state.times_watched = item.state.times_watched.max(1);
                 item.state.last_watched = Some(format_timestamp(now));
                 item.state.time_offset = 0;
             } else {

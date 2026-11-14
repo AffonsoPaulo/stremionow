@@ -14,7 +14,9 @@
   <string name="action_more_info">Mais informações</string>
   <string name="action_resume_episode">Retomar %1$s</string>
   <string name="action_add_to_list">Minha lista</string>
-  <string name="action_in_list">Na minha lista</string>
+  <string name="action_in_list">Na lista</string>
+  <string name="action_add_to_list_description">Adicionar à Minha lista</string>
+  <string name="action_remove_from_list_description">Tirar da Minha lista</string>
   <string name="action_retry">Tentar de novo</string>
   <string name="action_cancel">Cancelar</string>
   <string name="action_open_addons">Abrir Addons</string>
@@ -89,9 +91,11 @@
   <string name="action_watch_episode">Assistir %1$s</string>
   <string name="action_start_over">Começar do início</string>
   <string name="action_trailer">Trailer</string>
+  <string name="action_trailer_description">Ver o trailer</string>
   <string name="action_mark_watched">Marcar como assistido</string>
+  <string name="action_mark_unwatched">Marcar como não assistido</string>
   <string name="action_watched">Assistido</string>
-  <string name="action_like">Gostei</string>
+  <string name="action_like">Curtir</string>
   <string name="action_love">Amei</string>
   <string name="action_share">Compartilhar</string>
   <string name="watched_title">Marcar como assistido</string>
@@ -114,6 +118,17 @@
 
   <string name="library_empty_title">Sua lista está vazia</string>
   <string name="library_empty_body">Use “Minha lista” em qualquer filme ou série para guardar aqui.</string>
+  <string name="library_type_menu">Tipo</string>
+  <string name="library_type_all">Todos</string>
+  <string name="library_sort_last_watched">Assistidos recentemente</string>
+  <string name="library_sort_a_to_z">A–Z</string>
+  <string name="library_sort_z_to_a">Z–A</string>
+  <string name="library_sort_most_watched">Mais assistidos</string>
+  <string name="library_sort_watched">Assistidos</string>
+  <string name="library_sort_not_watched">Não assistidos</string>
+  <string name="library_status_watched">Assistido</string>
+  <string name="library_filtered_empty_title">Nada por aqui</string>
+  <string name="library_filtered_empty_body">Nenhum título da sua lista combina com essa escolha.</string>
 
   <string name="addons_intro">Addons trazem catálogos, informações, fontes e legendas. A ordem define a prioridade.</string>
   <string name="addons_install_label">Link do addon</string>
@@ -228,8 +243,40 @@
   <string name="sources_empty_title">Nenhuma fonte encontrada</string>
   <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
   <string name="sources_back_to_episodes">Voltar aos episódios</string>
-  <string name="sources_filter_all">Todas (%1$d)</string>
-  <string name="sources_filter_addon">%1$s (%2$d)</string>
+  <string name="sources_search">Buscar fontes</string>
+  <string name="sources_search_clear">Limpar busca</string>
+  <string name="sources_facet_resolution">Resolução</string>
+  <string name="sources_facet_addon">Addon</string>
+  <string name="sources_facet_hdr">HDR</string>
+  <string name="sources_facet_language">Idioma</string>
+  <string name="sources_facet_type">Tipo</string>
+  <string name="sources_facet_chosen">%1$s · %2$d</string>
+  <plurals name="sources_facet_chosen_count">
+    <item quantity="one">%1$d selecionado</item>
+    <item quantity="many">%1$d selecionados</item>
+    <item quantity="other">%1$d selecionados</item>
+  </plurals>
+  <string name="sources_hdr_dolby_vision">Dolby Vision</string>
+  <string name="sources_hdr_sdr">SDR</string>
+  <string name="sources_type_in_app">No app</string>
+  <string name="sources_type_torrent">Torrent</string>
+  <string name="sources_type_outside">Abre fora</string>
+  <string name="sources_clear_filters">Limpar filtros</string>
+  <string name="sources_sort">Ordenar: %1$s</string>
+  <string name="sources_sort_best">Melhores</string>
+  <string name="sources_sort_size">Tamanho</string>
+  <string name="sources_sort_seeds">Seeds</string>
+  <string name="sources_sort_resolution">Resolução</string>
+  <string name="sources_no_match_title">Nenhuma fonte corresponde</string>
+  <string name="sources_no_match_body">Tente outra busca ou limpe os filtros.</string>
+  <string name="sources_continue">Continuar com esta fonte</string>
+  <string name="sources_cached">Em cache</string>
+  <string name="sources_not_cached">Fora do cache</string>
+  <plurals name="sources_seeds">
+    <item quantity="one">%1$d seed</item>
+    <item quantity="many">%1$d seeds</item>
+    <item quantity="other">%1$d seeds</item>
+  </plurals>
   <plurals name="sources_addons_loading">
     <item quantity="one">%1$d addon ainda carregando</item>
     <item quantity="many">%1$d addons ainda carregando</item>
@@ -501,7 +548,6 @@
   <string name="account_sync_failed">Não foi possível sincronizar. Verifique sua conexão e tente de novo.</string>
 
   <string name="signin_body">Seus addons, sua lista e seu progresso vêm junto. Escolha como entrar na sua conta do Stremio.</string>
-  <string name="signin_with_browser">Entrar pelo navegador</string>
   <string name="signin_with_code">Entrar com um código</string>
   <string name="signin_facebook">Continuar com o Facebook</string>
   <string name="signin_apple">Continuar com a Apple</string>
@@ -521,5 +567,9 @@
   <string name="signin_browser_timeout">Não terminou a tempo.</string>
   <string name="signin_failed">Não foi possível entrar. Verifique sua conexão e tente de novo.</string>
   <string name="signin_other_ways">Outras formas de entrar</string>
+  <string name="signin_intro">Seus addons, sua lista e seu progresso vêm junto.</string>
+  <string name="signin_submit">Entrar</string>
+  <string name="signin_or">ou</string>
+  <string name="signin_with_browser_qr">Entrar pelo navegador (QR code)</string>
 
 </resources>

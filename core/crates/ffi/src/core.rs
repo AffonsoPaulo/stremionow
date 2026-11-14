@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The core service the app interfaces talk to.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -11,14 +12,15 @@ use stremionow_addons::{
     AddonClient, AddonError, AddonList, DISCOVER_SOURCE, IconClient, InstalledAddon, discoverable,
     manifest_fingerprint,
 };
-use stremionow_library::{LibraryEntry, Store};
+use stremionow_library::{LibraryEntry, ProgressEntry, Store, WatchStats, WatchedTitle};
 use stremionow_markers::AniSkip;
 use stremionow_protocol::{
-    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse,
+    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaDetail, MetaResponse,
 };
 
 use crate::account::Account;
 use crate::home::RecentHome;
+use crate::playback::WatchProgress;
 use crate::records::{
     AddonInfo, AddonPreview, CatalogAddon, CatalogInfo, CatalogRow, CoreError, LibraryItem,
     MetaDetails, MetaItem,
@@ -347,28 +349,55 @@ impl StremioCore {
 
     /// Full details of a title from the first addon that provides metadata for it.
     pub async fn meta(&self, kind: String, id: String) -> Result<MetaDetails, CoreError> {
-        let addon = self
-            .enabled()?
-            .into_iter()
-            .find(|addon| addon.manifest.supports("meta", &kind, &id))
-            .ok_or(CoreError::NotFound)?;
-        let url = addon.url.resource("meta", &kind, &id, &Extra::new());
-        let response: MetaResponse = self.cached_json(&url, META_FRESHNESS).await?;
-        Ok(response.meta.into())
+        Ok(self.meta_detail(&kind, &id).await?.into())
     }
 
-    /// Titles saved to "My list", most recent first.
+    /// Titles saved to "My list", most recently added first, each with how much it has been
+    /// watched and any progress, so the app can sort and filter it as Stremio does.
     pub fn library(&self) -> Result<Vec<LibraryItem>, CoreError> {
-        Ok(self
-            .store()?
+        let store = self.store()?;
+        let mut stats: HashMap<String, WatchStats> = store
+            .all_watch_stats()?
+            .into_iter()
+            .map(|stats| (stats.id.clone(), stats))
+            .collect();
+        let mut progress: HashMap<String, ProgressEntry> = store
+            .progress_list(usize::MAX)?
+            .into_iter()
+            .map(|entry| (entry.id.clone(), entry))
+            .collect();
+        let watched: HashMap<String, WatchedTitle> = store
+            .watched_titles(usize::MAX)?
+            .into_iter()
+            .map(|title| (title.id.clone(), title))
+            .collect();
+        Ok(store
             .library()?
             .into_iter()
-            .map(|entry| LibraryItem {
-                id: entry.id,
-                kind: entry.kind,
-                name: entry.name,
-                poster: entry.poster,
-                added_at: entry.added_at,
+            .map(|entry| {
+                let stats = stats.remove(&entry.id);
+                let progress = progress.remove(&entry.id);
+                let watched = watched.get(&entry.id);
+                let last_watched_at = [
+                    stats.as_ref().and_then(|s| s.last_watched),
+                    progress.as_ref().map(|p| p.updated_at),
+                    watched.map(|w| w.watched_at),
+                ]
+                .into_iter()
+                .flatten()
+                .max();
+                let times_watched = stats.map_or(0, |s| s.times_watched);
+                LibraryItem {
+                    id: entry.id,
+                    kind: entry.kind,
+                    name: entry.name,
+                    poster: entry.poster,
+                    added_at: entry.added_at,
+                    last_watched_at,
+                    times_watched,
+                    watched: times_watched > 0 || watched.is_some_and(|w| w.videos > 0),
+                    progress: progress.map(WatchProgress::from),
+                }
             })
             .collect())
     }
@@ -547,6 +576,19 @@ impl StremioCore {
             .into_iter()
             .filter_map(|(addon, enabled)| enabled.then_some(addon))
             .collect())
+    }
+
+    /// A title's details as the first addon that provides metadata for it sends them, through
+    /// the cache.
+    pub(crate) async fn meta_detail(&self, kind: &str, id: &str) -> Result<MetaDetail, CoreError> {
+        let addon = self
+            .enabled()?
+            .into_iter()
+            .find(|addon| addon.manifest.supports("meta", kind, id))
+            .ok_or(CoreError::NotFound)?;
+        let url = addon.url.resource("meta", kind, id, &Extra::new());
+        let response: MetaResponse = self.cached_json(&url, META_FRESHNESS).await?;
+        Ok(response.meta)
     }
 
     pub(crate) fn find_addon(&self, manifest_url: &str) -> Result<InstalledAddon, CoreError> {
@@ -770,6 +812,69 @@ mod tests {
         assert_eq!(core.library().expect("lists").len(), 1);
         core.remove_from_library("tt1".into()).expect("removes");
         assert!(core.library().expect("lists").is_empty());
+    }
+
+    #[tokio::test]
+    async fn library_tells_how_much_each_title_was_watched() {
+        let (core, _dir) = core();
+        let meta = |id: &str, kind: &str| MetaItem {
+            id: id.into(),
+            kind: kind.into(),
+            name: id.into(),
+            poster: None,
+            background: None,
+            logo: None,
+            description: None,
+            release_info: None,
+            imdb_rating: None,
+            genres: vec![],
+        };
+        for (id, kind) in [("movie", "movie"), ("series", "series"), ("new", "movie")] {
+            core.add_to_library(meta(id, kind)).expect("adds");
+        }
+        core.set_watched("movie".into(), vec!["movie".into()], true)
+            .expect("marks");
+        core.set_watched("series".into(), vec!["series:1:1".into()], true)
+            .expect("marks an episode");
+        core.save_progress(WatchProgress {
+            id: "series".into(),
+            kind: "series".into(),
+            name: "series".into(),
+            poster: None,
+            background: None,
+            video_id: "series:1:2".into(),
+            season: Some(1),
+            episode: Some(2),
+            position_ms: 300_000,
+            duration_ms: 1_000_000,
+            updated_at: 0,
+        })
+        .expect("saves");
+
+        let items = core.library().expect("lists");
+        let item = |id: &str| items.iter().find(|i| i.id == id).expect("listed");
+        assert_eq!(item("movie").times_watched, 1);
+        assert!(item("movie").watched);
+        assert!(item("movie").last_watched_at.is_some());
+        assert!(item("movie").progress.is_none());
+
+        let series = item("series");
+        assert_eq!(
+            series.times_watched, 0,
+            "episodes marked by hand do not count"
+        );
+        assert!(series.watched, "but a watched episode makes it watched");
+        assert_eq!(
+            series.progress.as_ref().map(|p| p.video_id.as_str()),
+            Some("series:1:2")
+        );
+        assert_eq!(
+            series.last_watched_at,
+            series.progress.as_ref().map(|p| p.updated_at)
+        );
+
+        assert_eq!(item("new").last_watched_at, None);
+        assert!(!item("new").watched);
     }
 
     /// A server for Discover's lists, answering the official and community lists.

@@ -3282,6 +3282,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "log",
+ "ring",
  "serde",
  "serde_json",
  "stremionow-addons",
@@ -3343,6 +3344,8 @@ version = "0.0.1"
 name = "stremionow-sync"
 version = "0.0.1"
 dependencies = [
+ "base64 0.23.1",
+ "flate2",
  "log",
  "reqwest",
  "rustls",

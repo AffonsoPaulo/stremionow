@@ -21,10 +21,13 @@
   <string name="action_more_info">More info</string>
   <!-- %1$s is the season and episode label, for example "S1 E5". -->
   <string name="action_resume_episode">Resume %1$s</string>
-  <!-- Button that adds a title to My list. -->
+  <!-- Button that adds a title to My list. Short: a tile of the details page's action row, one line. -->
   <string name="action_add_to_list">My list</string>
-  <!-- Same button once the title is in My list. -->
-  <string name="action_in_list">In my list</string>
+  <!-- Same button once the title is in My list. Short, one line. -->
+  <string name="action_in_list">In My list</string>
+  <!-- Read by screen readers for the My list action. -->
+  <string name="action_add_to_list_description">Add to My list</string>
+  <string name="action_remove_from_list_description">Remove from My list</string>
   <string name="action_retry">Try again</string>
   <string name="action_cancel">Cancel</string>
   <string name="action_open_addons">Open Addons</string>
@@ -123,10 +126,16 @@
   <string name="action_watch_episode">Watch %1$s</string>
   <!-- Second button of a series the user has started: plays it again from its first episode. -->
   <string name="action_start_over">Start over</string>
-  <!-- Actions under a title's buttons, each an icon with this label. -->
+  <!-- Actions under a title's buttons, each an icon over this label in a tile of fixed width:
+       keep them short, one line (a longer one is cut with an ellipsis). -->
   <string name="action_trailer">Trailer</string>
+  <!-- Read by screen readers for the Trailer action. -->
+  <string name="action_trailer_description">Play the trailer</string>
+  <!-- Read by screen readers for the Watched action, which marks the title (or, on a series, opens a choice). -->
   <string name="action_mark_watched">Mark as watched</string>
-  <!-- Same action on a movie already watched; choosing it marks the movie as not watched. -->
+  <!-- Read by screen readers for the Watched action once everything is watched. -->
+  <string name="action_mark_unwatched">Mark as not watched</string>
+  <!-- Label of the Watched action, filled in once the title is watched. -->
   <string name="action_watched">Watched</string>
   <string name="action_like">Like</string>
   <string name="action_love">Love</string>
@@ -159,6 +168,22 @@
   <!-- My list. -->
   <string name="library_empty_title">Your list is empty</string>
   <string name="library_empty_body">Use “My list” on any movie or series to keep it here.</string>
+  <!-- Menu at the start of the filters that picks the kind of titles shown; it reads the choice, such as "All". -->
+  <string name="library_type_menu">Type</string>
+  <!-- The type menu's choice that shows every title. -->
+  <string name="library_type_all">All</string>
+  <!-- Pills that sort or filter My list, as on Stremio's library. -->
+  <string name="library_sort_last_watched">Last watched</string>
+  <string name="library_sort_a_to_z">A–Z</string>
+  <string name="library_sort_z_to_a">Z–A</string>
+  <string name="library_sort_most_watched">Most watched</string>
+  <string name="library_sort_watched">Watched</string>
+  <string name="library_sort_not_watched">Not watched</string>
+  <!-- Line under a poster in My list for a title the user has watched. -->
+  <string name="library_status_watched">Watched</string>
+  <!-- Shown when the list has titles but none of them fit the chosen type and pill. -->
+  <string name="library_filtered_empty_title">Nothing here</string>
+  <string name="library_filtered_empty_body">No title in your list fits this choice.</string>
 
   <!-- Addons screen. -->
   <string name="addons_intro">Addons provide catalogs, information, sources and subtitles. Their order sets the priority.</string>
@@ -325,10 +350,51 @@
   <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
   <!-- Button at the start of an episode's sources that returns to the list of episodes. -->
   <string name="sources_back_to_episodes">Back to episodes</string>
-  <!-- Filter showing every source. %1$d is how many there are. -->
-  <string name="sources_filter_all">All (%1$d)</string>
-  <!-- Filter showing one addon's sources. %1$s is the addon's name, %2$d how many it found. -->
-  <string name="sources_filter_addon">%1$s (%2$d)</string>
+  <!-- Field over a video's sources that narrows them to those whose name has the words typed. -->
+  <string name="sources_search">Search sources</string>
+  <string name="sources_search_clear">Clear search</string>
+  <!-- Filter chips over the sources; each opens a list of options to tick. -->
+  <string name="sources_facet_resolution">Resolution</string>
+  <string name="sources_facet_addon">Addon</string>
+  <string name="sources_facet_hdr">HDR</string>
+  <string name="sources_facet_language">Language</string>
+  <string name="sources_facet_type">Type</string>
+  <!-- A filter chip with options ticked. %1$s is the filter, such as "Resolution"; %2$d how many options are ticked. -->
+  <string name="sources_facet_chosen">%1$s · %2$d</string>
+  <!-- Screen reader state of a filter chip: how many of its options are ticked. -->
+  <plurals name="sources_facet_chosen_count">
+    <item quantity="one">%1$d selected</item>
+    <item quantity="other">%1$d selected</item>
+  </plurals>
+  <!-- HDR options: sources in Dolby Vision, and sources that name no HDR format. -->
+  <string name="sources_hdr_dolby_vision">Dolby Vision</string>
+  <string name="sources_hdr_sdr">SDR</string>
+  <!-- Type options: sources the app plays from a direct or debrid link, torrents, and links to other apps. -->
+  <string name="sources_type_in_app">In the app</string>
+  <string name="sources_type_torrent">Torrent</string>
+  <string name="sources_type_outside">Opens outside</string>
+  <!-- Removes every filter over the sources. -->
+  <string name="sources_clear_filters">Clear filters</string>
+  <!-- The menu that orders the sources. %1$s is the order chosen, such as "Best". -->
+  <string name="sources_sort">Sort: %1$s</string>
+  <!-- Orders of the sources: the app's ranking, the largest files, the most seeds, the highest resolution. -->
+  <string name="sources_sort_best">Best</string>
+  <string name="sources_sort_size">Size</string>
+  <string name="sources_sort_seeds">Seeds</string>
+  <string name="sources_sort_resolution">Resolution</string>
+  <string name="sources_no_match_title">No sources match</string>
+  <string name="sources_no_match_body">Try another search, or clear the filters.</string>
+  <!-- Over the source the user played last time for this movie or episode, offered first. -->
+  <string name="sources_continue">Continue with this source</string>
+  <!-- On a debrid link the service has ready to play at once. -->
+  <string name="sources_cached">Cached</string>
+  <!-- On a debrid link the service must download before it plays. -->
+  <string name="sources_not_cached">Not cached</string>
+  <!-- Seeds of a torrent, on its card. %1$d is how many. -->
+  <plurals name="sources_seeds">
+    <item quantity="one">%1$d seed</item>
+    <item quantity="other">%1$d seeds</item>
+  </plurals>
   <!-- Under the sources while some addons have not answered yet. -->
   <plurals name="sources_addons_loading">
     <item quantity="one">%1$d addon still loading</item>
@@ -682,9 +748,7 @@
 
   <!-- Sign-in dialog (and the first-run setup's sign-in step). -->
   <string name="signin_body">Your addons, list and progress come with you. Choose how your Stremio account signs in.</string>
-  <!-- Signs in with a code confirmed in the browser, where the user is already signed in to Stremio by any method. -->
-  <string name="signin_with_browser">Sign in with the browser</string>
-  <!-- TV: the same, with a code shown on screen and confirmed on a phone. -->
+  <!-- TV: signs in with a code shown on screen and confirmed on a phone where the user is already signed in to Stremio. -->
   <string name="signin_with_code">Sign in with a code</string>
   <string name="signin_facebook">Continue with Facebook</string>
   <string name="signin_apple">Continue with Apple</string>
@@ -706,5 +770,13 @@
   <string name="signin_browser_timeout">It didn\'t finish in time.</string>
   <string name="signin_failed">Couldn\'t sign in. Check your connection and try again.</string>
   <string name="signin_other_ways">Other ways to sign in</string>
+  <!-- Above the email and password fields, which come first on the desktop and phones. -->
+  <string name="signin_intro">Your addons, list and progress come with you.</string>
+  <!-- Main button under the email and password fields. -->
+  <string name="signin_submit">Sign in</string>
+  <!-- Centred on a line between the email sign-in and the Facebook and Apple buttons. -->
+  <string name="signin_or">or</string>
+  <!-- Quiet link at the bottom: signs in with a code confirmed in the browser, which shows a QR code. -->
+  <string name="signin_with_browser_qr">Sign in with the browser (QR code)</string>
 
 </resources>

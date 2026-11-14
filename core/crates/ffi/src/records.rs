@@ -3,6 +3,8 @@
 
 use stremionow_addons::{AddonError, InstalledAddon, manifest_fingerprint};
 use stremionow_library::StoreError;
+
+use crate::playback::WatchProgress;
 use stremionow_protocol::{CatalogDescriptor, Link, MetaDetail, MetaPreview, Video};
 
 /// Why a core operation failed. Messages are for logs; the interface shows its own text.
@@ -450,7 +452,8 @@ fn truncate(text: &str, max: usize) -> String {
     cut
 }
 
-/// A title saved to "My list".
+/// A title saved to "My list", with how much it has been watched, for sorting the list as
+/// Stremio does.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct LibraryItem {
     pub id: String,
@@ -459,6 +462,16 @@ pub struct LibraryItem {
     pub poster: Option<String>,
     /// Unix time in milliseconds.
     pub added_at: i64,
+    /// Last time it was played or one of its videos finished, Unix milliseconds; `None` if
+    /// never (Stremio's `lastWatched`).
+    pub last_watched_at: Option<i64>,
+    /// Times it, or one of its videos, was watched to the end (Stremio's `timesWatched`).
+    pub times_watched: u32,
+    /// Whether it counts as watched: Stremio's rule (watched at least once) or, so it agrees
+    /// with the watched marks, any of its videos marked watched.
+    pub watched: bool,
+    /// Where the user stopped, when something is in progress.
+    pub progress: Option<WatchProgress>,
 }
 
 /// Keeps only HTTPS image URLs: plain HTTP images would leak what the user browses on the

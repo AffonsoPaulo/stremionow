@@ -60,3 +60,12 @@ internal actual fun rememberLocalNetworkAccess(onResult: (granted: Boolean) -> U
         }
     }
 }
+
+/** Phones and TVs have no pointer to rest on anything. */
+@Composable
+internal actual fun SnPointerTooltip(
+    text: String,
+    content: @Composable () -> Unit,
+) {
+    content()
+}

@@ -347,27 +347,52 @@ fn language_of_country([a, b]: [char; 2]) -> Option<&'static str> {
     })
 }
 
-/// Language names and release-name tags. Two-letter codes alone ("It", "De") are too
-/// ambiguous to trust and are ignored, except for the `PT-BR` pair.
+/// Language names and release-name tags, for the audio and the subtitles alike. Two-letter
+/// codes alone ("It", "De") are too ambiguous to trust and are ignored, except for the `PT-BR`
+/// pair; so are three-letter codes that are also common words in titles ("por", "fra", "chi",
+/// "vie", "rum").
 fn language_word(t: &[Token<'_>]) -> Option<(&'static str, usize)> {
     let [a, b, _] = lookahead(t);
     if [a, b] == ["pt", "br"] {
         return Some(("pt", 2));
     }
     let code = match a {
-        "english" | "eng" => "en",
-        "portuguese" | "português" | "portugues" | "dublado" | "dublada" | "ptbr" | "brazilian" => {
-            "pt"
+        "english" | "eng" | "subeng" => "en",
+        "portuguese" | "português" | "portugues" | "dublado" | "dublada" | "ptbr" | "brazilian"
+        | "legendado" => "pt",
+        "spanish" | "español" | "espanol" | "castellano" | "castilian" | "latino" | "latam"
+        | "spa" | "esp" => "es",
+        "french" | "français" | "francais" | "truefrench" | "vff" | "vfq" | "vostfr" | "fre" => {
+            "fr"
         }
-        "spanish" | "español" | "espanol" | "castellano" | "latino" | "spa" | "esp" => "es",
-        "french" | "français" | "francais" | "truefrench" | "vff" | "vfq" | "fre" => "fr",
-        "german" | "deutsch" | "ger" => "de",
-        "italian" | "italiano" | "ita" => "it",
+        "german" | "deutsch" | "ger" | "deu" => "de",
+        "italian" | "italiano" | "ita" | "subita" => "it",
         "japanese" | "jpn" => "ja",
         "korean" | "kor" => "ko",
         "russian" | "rus" => "ru",
-        "chinese" | "mandarin" | "cantonese" => "zh",
+        "chinese" | "mandarin" | "cantonese" | "chs" | "cht" => "zh",
         "hindi" => "hi",
+        "dutch" | "nederlands" | "nld" => "nl",
+        "polish" | "polski" => "pl",
+        "turkish" | "türkçe" | "turkce" => "tr",
+        "swedish" | "svenska" | "swe" => "sv",
+        "norwegian" | "norsk" => "no",
+        "danish" | "dansk" => "da",
+        "finnish" | "suomi" => "fi",
+        "greek" => "el",
+        "czech" | "cesky" | "česky" => "cs",
+        "hungarian" | "magyar" => "hu",
+        "romanian" | "romana" | "română" => "ro",
+        "ukrainian" | "ukr" => "uk",
+        "hebrew" => "he",
+        "arabic" => "ar",
+        "thai" => "th",
+        "vietnamese" => "vi",
+        "indonesian" => "id",
+        "tamil" => "ta",
+        "telugu" => "te",
+        "bengali" => "bn",
+        "persian" | "farsi" => "fa",
         _ => return None,
     };
     Some((code, 1))
@@ -654,6 +679,49 @@ mod tests {
         ];
         for (title, expected) in cases {
             assert_eq!(parse_title(title).languages, expected, "{title}");
+        }
+    }
+
+    #[test]
+    fn more_language_names_and_subtitle_tags() {
+        let cases: [(&str, &[&str]); 9] = [
+            ("Hokum.2026.4K.HDR.BDRemux.Eng.Sub.Ita", &["en", "it"]),
+            ("Movie.2023.1080p.WEB.SubIta.SubEng", &["it", "en"]),
+            ("Film 2023 VOSTFR 1080p", &["fr"]),
+            ("Movie 2023 LATAM 1080p", &["es"]),
+            (
+                "🌐 Dutch, Polish, Turkish, Swedish, Norwegian",
+                &["nl", "pl", "tr", "sv", "no"],
+            ),
+            (
+                "Danish Finnish Greek Czech Hungarian Romanian",
+                &["da", "fi", "el", "cs", "hu", "ro"],
+            ),
+            (
+                "Ukrainian Hebrew Arabic Thai Vietnamese Indonesian",
+                &["uk", "he", "ar", "th", "vi", "id"],
+            ),
+            (
+                "Tamil Telugu Bengali Farsi CHS",
+                &["ta", "te", "bn", "fa", "zh"],
+            ),
+            ("Filme.2023.1080p.Legendado", &["pt"]),
+        ];
+        for (title, expected) in cases {
+            assert_eq!(parse_title(title).languages, expected, "{title}");
+        }
+    }
+
+    #[test]
+    fn words_that_only_look_like_language_codes_are_ignored() {
+        for title in [
+            "Por.Un.Punado.De.Dolares.1964.1080p",
+            "Fra.Le.Righe.2022.1080p",
+            "Chi.Raq.2015.720p",
+            "La.Vie.En.Rose.2007.1080p",
+            "Rum.Diary.2011.BluRay",
+        ] {
+            assert!(parse_title(title).languages.is_empty(), "{title}");
         }
     }
 

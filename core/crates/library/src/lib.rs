@@ -51,6 +51,22 @@ pub struct ProgressEntry {
     pub updated_at: i64,
 }
 
+/// How much a title has been watched, kept per title whether or not it is in "My list", as
+/// the account library keeps it (stremio-core `LibraryItemState`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchStats {
+    pub id: String,
+    /// Times the title, or one of its videos, was watched to the end (`timesWatched`).
+    pub times_watched: u32,
+    /// Last time it was played or marked watched, Unix milliseconds (`lastWatched`).
+    pub last_watched: Option<i64>,
+    /// Last change to these numbers, Unix milliseconds; decides which side wins on sync.
+    pub updated_at: i64,
+    /// When the times watched were last set back to zero here (marked unwatched), Unix
+    /// milliseconds. Until then a sync never lowers the account's count.
+    pub reset_at: Option<i64>,
+}
+
 /// A title the user has finished videos of.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchedTitle {
@@ -61,6 +77,16 @@ pub struct WatchedTitle {
     pub watched_at: i64,
     /// How many of its videos are watched.
     pub videos: u32,
+}
+
+/// What a title's watched videos were on the account when it last synced, to tell which side
+/// changed since (ADR 0012). Empty for a title that never synced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchedSync {
+    /// The account's `state.watched` string as last read or written; `None` when it had none.
+    pub remote: Option<String>,
+    /// The title's watched videos both sides agreed on, sorted.
+    pub videos: Vec<String>,
 }
 
 const MIGRATIONS: &[&str] = &[
@@ -112,6 +138,35 @@ const MIGRATIONS: &[&str] = &[
         watched_at INTEGER NOT NULL
     );
     CREATE INDEX watched_id ON watched (id);
+    ",
+    // 3: times watched and last watched per title, for sorting "My list" as Stremio does.
+    // Titles watched before start with one watch per finished video.
+    r"
+    CREATE TABLE watch_stats (
+        id TEXT PRIMARY KEY,
+        times_watched INTEGER NOT NULL DEFAULT 0,
+        last_watched INTEGER,
+        updated_at INTEGER NOT NULL,
+        reset_at INTEGER
+    );
+    INSERT INTO watch_stats (id, times_watched, last_watched, updated_at)
+    SELECT id, SUM(times), MAX(at), MAX(at) FROM (
+        SELECT id, COUNT(*) AS times, MAX(watched_at) AS at FROM watched GROUP BY id
+        UNION ALL
+        SELECT id, 0, updated_at FROM progress
+    ) GROUP BY id;
+    ",
+    // 4: what the account had of each title's watched videos at the last sync (ADR 0012).
+    r"
+    CREATE TABLE watched_sync (
+        id TEXT PRIMARY KEY,
+        remote TEXT
+    );
+    CREATE TABLE watched_sync_videos (
+        id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        PRIMARY KEY (id, video_id)
+    );
     ",
 ];
 
@@ -438,6 +493,138 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    // Watch statistics
+
+    /// How much each title has been watched, for every title with statistics.
+    pub fn all_watch_stats(&self) -> Result<Vec<WatchStats>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("{STATS_SELECT} ORDER BY id"))?;
+        let rows = statement.query_map([], stats_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub fn watch_stats(&self, id: &str) -> Result<Option<WatchStats>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(&format!("{STATS_SELECT} WHERE id = ?1"), [id], stats_row)
+            .optional()?)
+    }
+
+    /// Records that title `id` was being played at `at`.
+    pub fn note_watching(&self, id: &str, at: i64) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watch_stats (id, times_watched, last_watched, updated_at)
+             VALUES (?1, 0, ?2, ?2)
+             ON CONFLICT (id) DO UPDATE SET
+                last_watched = MAX(COALESCE(last_watched, excluded.last_watched),
+                                   excluded.last_watched),
+                updated_at = MAX(updated_at, excluded.updated_at)",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Counts one more watch of title `id`, finished or marked at `at`.
+    pub fn count_watch(&self, id: &str, at: i64) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watch_stats (id, times_watched, last_watched, updated_at)
+             VALUES (?1, 1, ?2, ?2)
+             ON CONFLICT (id) DO UPDATE SET
+                times_watched = MIN(times_watched + 1, 4294967295),
+                last_watched = MAX(COALESCE(last_watched, excluded.last_watched),
+                                   excluded.last_watched),
+                updated_at = MAX(updated_at, excluded.updated_at)",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets how many times title `id` was watched, as marking it unwatched does in Stremio.
+    /// When it was last watched stays. The reset is kept even for a title without numbers yet,
+    /// so the next sync takes the account's count down too.
+    pub fn reset_times_watched(&self, id: &str, at: i64) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watch_stats (id, times_watched, last_watched, updated_at, reset_at)
+             VALUES (?1, 0, NULL, ?2, ?2)
+             ON CONFLICT (id) DO UPDATE SET
+                times_watched = 0, updated_at = MAX(updated_at, excluded.updated_at),
+                reset_at = excluded.reset_at",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Replaces a title's statistics, as when the account's copy is newer.
+    pub fn set_watch_stats(&self, stats: &WatchStats) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watch_stats (id, times_watched, last_watched, updated_at, reset_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (id) DO UPDATE SET
+                times_watched = excluded.times_watched, last_watched = excluded.last_watched,
+                updated_at = excluded.updated_at, reset_at = excluded.reset_at",
+            params![
+                stats.id,
+                stats.times_watched,
+                stats.last_watched,
+                stats.updated_at,
+                stats.reset_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    // Watched videos on the account
+
+    /// What title `id`'s watched videos were at the last sync; empty if it never synced.
+    pub fn watched_sync(&self, id: &str) -> Result<WatchedSync, StoreError> {
+        let remote = self
+            .connection
+            .query_row(
+                "SELECT remote FROM watched_sync WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let mut statement = self
+            .connection
+            .prepare("SELECT video_id FROM watched_sync_videos WHERE id = ?1 ORDER BY video_id")?;
+        let videos = statement
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(WatchedSync { remote, videos })
+    }
+
+    /// Records what title `id`'s watched videos are on the account after a sync. An empty
+    /// record forgets the title.
+    pub fn save_watched_sync(&mut self, id: &str, sync: &WatchedSync) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM watched_sync WHERE id = ?1", [id])?;
+        transaction.execute("DELETE FROM watched_sync_videos WHERE id = ?1", [id])?;
+        if *sync != WatchedSync::default() {
+            transaction.execute(
+                "INSERT INTO watched_sync (id, remote) VALUES (?1, ?2)",
+                params![id, sync.remote],
+            )?;
+            for video_id in &sync.videos {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO watched_sync_videos (id, video_id) VALUES (?1, ?2)",
+                    params![id, video_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Forgets what every title had on the account, as when signing out.
+    pub fn clear_watched_sync(&self) -> Result<(), StoreError> {
+        self.connection
+            .execute_batch("DELETE FROM watched_sync; DELETE FROM watched_sync_videos;")?;
+        Ok(())
+    }
+
     // Response cache
 
     /// A cached body and the time it was fetched (Unix milliseconds).
@@ -467,6 +654,19 @@ impl Store {
             .connection
             .execute("DELETE FROM cache WHERE fetched_at < ?1", [older_than])?)
     }
+}
+
+const STATS_SELECT: &str =
+    "SELECT id, times_watched, last_watched, updated_at, reset_at FROM watch_stats";
+
+fn stats_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WatchStats> {
+    Ok(WatchStats {
+        id: row.get(0)?,
+        times_watched: row.get(1)?,
+        last_watched: row.get(2)?,
+        updated_at: row.get(3)?,
+        reset_at: row.get(4)?,
+    })
 }
 
 const PROGRESS_SELECT: &str = "SELECT id, kind, name, poster, background, video_id, season, \
@@ -706,5 +906,193 @@ mod tests {
             .unmark_watched("a", "a:9:9")
             .expect("unwatched is fine");
         assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:2"]);
+    }
+    #[test]
+    fn counts_watches_and_keeps_the_latest_time() {
+        let store = Store::open_in_memory().expect("opens");
+        assert_eq!(store.watch_stats("a").expect("reads"), None);
+        store.note_watching("a", 50).expect("notes");
+        store.count_watch("a", 100).expect("counts");
+        store.count_watch("a", 80).expect("counts a late report");
+        store
+            .note_watching("a", 90)
+            .expect("an older tick changes nothing");
+        assert_eq!(
+            store.watch_stats("a").expect("reads"),
+            Some(WatchStats {
+                id: "a".into(),
+                times_watched: 2,
+                last_watched: Some(100),
+                updated_at: 100,
+                reset_at: None,
+            })
+        );
+
+        store.reset_times_watched("a", 200).expect("resets");
+        let reset = store.watch_stats("a").expect("reads").expect("kept");
+        assert_eq!(reset.times_watched, 0);
+        assert_eq!(reset.last_watched, Some(100), "the last watch stays");
+        assert_eq!(reset.updated_at, 200);
+        assert_eq!(reset.reset_at, Some(200));
+        store.count_watch("a", 300).expect("counts after the reset");
+        let counted = store.watch_stats("a").expect("reads").expect("kept");
+        assert_eq!(counted.times_watched, 1);
+        assert_eq!(counted.reset_at, Some(200), "the reset is remembered");
+
+        store
+            .reset_times_watched("new", 400)
+            .expect("a title without numbers");
+        assert_eq!(
+            store.watch_stats("new").expect("reads"),
+            Some(WatchStats {
+                id: "new".into(),
+                times_watched: 0,
+                last_watched: None,
+                updated_at: 400,
+                reset_at: Some(400),
+            })
+        );
+    }
+
+    #[test]
+    fn replaces_stats_from_the_account() {
+        let store = Store::open_in_memory().expect("opens");
+        store.count_watch("a", 100).expect("counts");
+        let remote = WatchStats {
+            id: "a".into(),
+            times_watched: 7,
+            last_watched: None,
+            updated_at: 300,
+            reset_at: None,
+        };
+        store.set_watch_stats(&remote).expect("replaces");
+        store.note_watching("b", 10).expect("notes");
+        assert_eq!(
+            store.all_watch_stats().expect("lists"),
+            [
+                remote,
+                WatchStats {
+                    id: "b".into(),
+                    times_watched: 0,
+                    last_watched: Some(10),
+                    updated_at: 10,
+                    reset_at: None,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_what_the_account_had_per_title() {
+        let mut store = Store::open_in_memory().expect("store");
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
+        let synced = WatchedSync {
+            remote: Some("a:1:2:2:eJxjAgAAAwAC".into()),
+            videos: vec!["a:1:1".into(), "a:1:2".into()],
+        };
+        store.save_watched_sync("a", &synced).expect("saves");
+        store
+            .save_watched_sync(
+                "b",
+                &WatchedSync {
+                    remote: None,
+                    videos: vec!["b".into()],
+                },
+            )
+            .expect("saves");
+        assert_eq!(store.watched_sync("a").expect("reads"), synced);
+
+        let fewer = WatchedSync {
+            remote: Some("a:1:1:1:eJxjBAAAAgAC".into()),
+            videos: vec!["a:1:1".into()],
+        };
+        store.save_watched_sync("a", &fewer).expect("replaces");
+        assert_eq!(store.watched_sync("a").expect("reads"), fewer);
+        store
+            .save_watched_sync("a", &WatchedSync::default())
+            .expect("forgets");
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
+        assert_eq!(store.watched_sync("b").expect("reads").videos, ["b"]);
+
+        store.clear_watched_sync().expect("clears");
+        assert_eq!(
+            store.watched_sync("b").expect("reads"),
+            WatchedSync::default()
+        );
+    }
+
+    #[test]
+    fn migration_counts_what_was_watched_before() {
+        let connection = Connection::open_in_memory().expect("opens");
+        for migration in &MIGRATIONS[..2] {
+            connection.execute_batch(migration).expect("migrates");
+        }
+        connection
+            .pragma_update(None, "user_version", 2)
+            .expect("versions");
+        let store = Store { connection };
+        store.mark_watched("tt1", "tt1:1:1", 10).expect("marks");
+        store.mark_watched("tt1", "tt1:1:2", 30).expect("marks");
+        store
+            .save_progress(&progress("tt1", "tt1:1:3", 20))
+            .expect("saves");
+        store
+            .save_progress(&progress("tt2", "tt2:1:1", 40))
+            .expect("saves");
+
+        let store = Store::migrate(store.connection).expect("migrates to 3");
+        let stats = store.all_watch_stats().expect("lists");
+        assert_eq!(
+            stats,
+            [
+                WatchStats {
+                    id: "tt1".into(),
+                    times_watched: 2,
+                    last_watched: Some(30),
+                    updated_at: 30,
+                    reset_at: None,
+                },
+                WatchStats {
+                    id: "tt2".into(),
+                    times_watched: 0,
+                    last_watched: Some(40),
+                    updated_at: 40,
+                    reset_at: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn migrates_a_version_2_database_and_keeps_its_marks() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("store.db");
+        {
+            let connection = Connection::open(&path).expect("opens");
+            for migration in &MIGRATIONS[..2] {
+                connection.execute_batch(migration).expect("migrates");
+            }
+            connection
+                .pragma_update(None, "user_version", 2)
+                .expect("versions");
+            connection
+                .execute(
+                    "INSERT INTO watched (video_id, id, watched_at) VALUES ('a:1:1', 'a', 1)",
+                    [],
+                )
+                .expect("marks");
+        }
+        let store = Store::open(&path).expect("migrates to the latest");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
     }
 }

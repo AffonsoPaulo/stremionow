@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -143,6 +144,15 @@ object SnIcons {
         )
     val CheckCircle = stroke("check-circle", "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18z", "M8.5 12l2.5 2.5l4.5 -5")
 
+    /** [CheckCircle] filled: the disc covers the outline's stroke, with the check cut out of it. */
+    val CheckCircleFilled =
+        fill(
+            "check-circle-filled",
+            "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0 -20z" +
+                "M7.79 12.71L11.04 15.95L16.24 10.17L14.76 8.83L10.96 13.05L9.21 11.29z",
+            evenOdd = true,
+        )
+
     /** Seeders of a torrent: people sharing it. */
     val Seeds = stroke("seeds", "M12 19V5", "M5 12l7 -7l7 7")
     val ExternalLink =
@@ -177,12 +187,15 @@ object SnIcons {
     private fun fill(
         name: String,
         vararg paths: String,
-    ): ImageVector = build(name, paths, filled = true)
+        evenOdd: Boolean = false,
+    ): ImageVector = build(name, paths, filled = true, evenOdd = evenOdd)
 
     private fun build(
         name: String,
         paths: Array<out String>,
         filled: Boolean,
+        // Holes, such as a check cut out of a disc, where a path's inner shapes are left empty.
+        evenOdd: Boolean = false,
     ): ImageVector =
         ImageVector
             .Builder(
@@ -195,6 +208,7 @@ object SnIcons {
                 for (path in paths) {
                     addPath(
                         pathData = addPathNodes(path),
+                        pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero,
                         fill = if (filled) SolidColor(Color.White) else null,
                         stroke = if (filled) null else SolidColor(Color.White),
                         strokeLineWidth = if (filled) 0f else 2f,

@@ -38,7 +38,6 @@
     <item quantity="many">%1$d addons</item>
     <item quantity="other">%1$d addons</item>
   </plurals>
-  <string name="sources_title">Escolher fonte</string>
 
   <string name="type_movie">Filme</string>
   <string name="type_series">Série</string>

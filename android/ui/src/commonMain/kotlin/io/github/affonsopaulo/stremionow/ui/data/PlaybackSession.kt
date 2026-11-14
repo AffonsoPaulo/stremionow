@@ -6,12 +6,12 @@ import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.StreamSource
 
 /**
- * What the user chose to watch, handed from the details page to the source picker and on to
- * the player.
+ * What the user chose to watch, handed from the details page, where the sources are, to the
+ * player, and back from the player when it moves on to another episode or another source.
  *
  * It lives in memory only: stream addresses can carry debrid keys, so they never go into
- * navigation arguments, saved state or logs. After the process dies the picker and the player
- * find it empty and step back.
+ * navigation arguments, saved state or logs. After the process dies the player finds it
+ * empty and steps back.
  */
 object PlaybackSession {
     /** A title, and the episode for series. */
@@ -44,12 +44,24 @@ object PlaybackSession {
 
     /**
      * When moving on to the next episode, the binge group of the source just watched: the
-     * picker plays the first source of the same group by itself, as Stremio does.
+     * details page plays the first source of the same group by itself, as Stremio does.
      */
     @Volatile var continueWith: String? = null
+
+    /**
+     * Set by the player when it hands back to the details page to choose a source: "Change
+     * source", or Up Next without a source of the same group. The page opens the sources of
+     * [selection]'s video in place of its episodes, then clears it.
+     */
+    @Volatile var showSources: Boolean = false
 
     fun select(selection: Selection) {
         this.selection = selection
         source = null
+    }
+
+    /** Asks the details page of [selection]'s title to show its sources; see [showSources]. */
+    fun returnToSources() {
+        showSources = selection != null
     }
 }

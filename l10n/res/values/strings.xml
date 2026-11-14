@@ -52,7 +52,6 @@
     <item quantity="one">%1$d addon</item>
     <item quantity="other">%1$d addons</item>
   </plurals>
-  <string name="sources_title">Choose a source</string>
 
   <!-- Content types. -->
   <string name="type_movie">Movie</string>

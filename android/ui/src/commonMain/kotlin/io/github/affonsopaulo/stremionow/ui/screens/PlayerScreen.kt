@@ -10,7 +10,7 @@ import io.github.affonsopaulo.stremionow.core.Episode
  * desktop opens its two-window player (docs/adr/0005-desktop-ui.md). Both share
  * [PlayerViewModel] and the parts in PlayerParts.kt.
  *
- * [onBack] leaves the player, [onChangeSource] returns to the source picker and [onOpenEpisode]
+ * [onBack] leaves the player, [onChangeSource] returns to the title's sources and [onOpenEpisode]
  * moves on to another episode of the same series.
  */
 @Composable

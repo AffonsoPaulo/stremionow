@@ -56,7 +56,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 private val QrSize = 240.dp
 
 /** Width of a dialog with a QR code beside its text. */
-private val CodeDialogWidth = 760.dp
+internal val CodeDialogWidth = 760.dp
 
 /**
  * "Add addon": a link, checked by downloading its manifest, then a summary of the addon to
@@ -402,7 +402,7 @@ internal fun ConfigureAddonDialog(
  * TV's height, stacked on a phone. A link too long for a code gets a note instead.
  */
 @Composable
-private fun TextBesideCode(
+internal fun TextBesideCode(
     url: String,
     description: String,
     text: @Composable () -> Unit,
@@ -437,7 +437,7 @@ private fun TextBesideCode(
 
 /** A link in a quiet box, cut after a few lines: enough to recognize, not to fill the dialog. */
 @Composable
-private fun LinkText(url: String) {
+internal fun LinkText(url: String) {
     val shape = RoundedCornerShape(SnRadius.radiusMd)
     BasicText(
         url,

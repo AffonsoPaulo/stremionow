@@ -116,6 +116,46 @@
   <string name="details_show_less">Less</string>
   <!-- Accessibility action on a genre link. %1$s is the genre. -->
   <string name="details_open_genre">Browse %1$s titles</string>
+  <!-- Tab of a movie's page with the places to watch it. -->
+  <string name="details_tab_sources">Sources</string>
+  <!-- Badge in a title's facts, shown only once a source in 4K was found. -->
+  <string name="details_4k_available">4K available</string>
+  <!-- Main button of a series. %1$s is the season and episode label, for example "S1 E1". -->
+  <string name="action_watch_episode">Watch %1$s</string>
+  <!-- Second button of a series the user has started: plays it again from its first episode. -->
+  <string name="action_start_over">Start over</string>
+  <!-- Actions under a title's buttons, each an icon with this label. -->
+  <string name="action_trailer">Trailer</string>
+  <string name="action_mark_watched">Mark as watched</string>
+  <!-- Same action on a movie already watched; choosing it marks the movie as not watched. -->
+  <string name="action_watched">Watched</string>
+  <string name="action_like">Like</string>
+  <string name="action_love">Love</string>
+  <string name="action_share">Share</string>
+  <!-- Dialog that marks a series' episodes as watched or not. -->
+  <string name="watched_title">Mark as watched</string>
+  <string name="watched_body">Episodes not released yet are never marked.</string>
+  <!-- %1$s is the season and episode label, for example "S1 E5". -->
+  <string name="watched_episode_mark">Mark %1$s as watched</string>
+  <string name="watched_episode_unmark">Mark %1$s as unwatched</string>
+  <!-- %1$d is the season number. -->
+  <string name="watched_season_mark">Mark season %1$d as watched</string>
+  <string name="watched_season_unmark">Mark season %1$d as unwatched</string>
+  <string name="watched_specials_mark">Mark the specials as watched</string>
+  <string name="watched_specials_unmark">Mark the specials as unwatched</string>
+  <string name="watched_series_mark">Mark the whole series as watched</string>
+  <string name="watched_series_unmark">Mark the whole series as unwatched</string>
+  <!-- Badge on an episode the user has watched. -->
+  <string name="episode_watched">Watched</string>
+  <!-- An episode's length. %1$d is a number of minutes. -->
+  <string name="episode_runtime">%1$d min</string>
+  <!-- Dialog that shares a title's public page. %1$s is the title's name. -->
+  <string name="share_title_heading">Share %1$s</string>
+  <string name="share_title_body">Anyone with this link can open the title\'s page.</string>
+  <string name="share_title_tv_body">Scan the code with your phone\'s camera to get the title\'s link.</string>
+  <!-- Name of the copied link where the system shows the clipboard's content. -->
+  <string name="share_title_clip_label">Title link</string>
+  <string name="share_title_qr_description">QR code with the title\'s link</string>
 
   <!-- My list. -->
   <string name="library_empty_title">Your list is empty</string>
@@ -289,6 +329,22 @@
   <string name="sources_opens_outside">Opens outside the app</string>
   <string name="sources_empty_title">No sources found</string>
   <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <!-- Button at the start of an episode's sources that returns to the list of episodes. -->
+  <string name="sources_back_to_episodes">Back to episodes</string>
+  <!-- Filter showing every source. %1$d is how many there are. -->
+  <string name="sources_filter_all">All (%1$d)</string>
+  <!-- Filter showing one addon's sources. %1$s is the addon's name, %2$d how many it found. -->
+  <string name="sources_filter_addon">%1$s (%2$d)</string>
+  <!-- Under the sources while some addons have not answered yet. -->
+  <plurals name="sources_addons_loading">
+    <item quantity="one">%1$d addon still loading</item>
+    <item quantity="other">%1$d addons still loading</item>
+  </plurals>
+  <!-- Accessibility label of a torrent's seeder count. %1$d is the number of seeders. -->
+  <plurals name="sources_seeders">
+    <item quantity="one">%1$d seeder</item>
+    <item quantity="other">%1$d seeders</item>
+  </plurals>
   <string name="player_play">Play</string>
   <string name="player_pause">Pause</string>
   <string name="player_back10">Back 10 seconds</string>

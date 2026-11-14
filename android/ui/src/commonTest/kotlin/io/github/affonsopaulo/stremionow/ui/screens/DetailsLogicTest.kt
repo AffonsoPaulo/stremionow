@@ -177,6 +177,7 @@ class DetailsLogicTest {
         external: String? = null,
     ) = StreamSource(
         addonName = addon,
+        addonId = addon.lowercase(),
         name = addon,
         description = "",
         url = url,

@@ -75,6 +75,7 @@ import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
 import io.github.affonsopaulo.stremionow.ui.screens.OnboardingScreen
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
+import io.github.affonsopaulo.stremionow.ui.screens.ResumingPlayer
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsPage
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsRoutes
@@ -375,6 +376,12 @@ private fun AppNavHost(
             HomeScreen(
                 onOpenTitle = { openTitle(it.kind, it.id) },
                 onOpenProgress = { openTitle(it.kind, it.id) },
+                // The title's page goes under the player, as when playing from it: Back, "Change
+                // source" and a source that cannot be found again all lead there.
+                onResume = {
+                    openTitle(it.kind, it.id)
+                    navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+                },
                 onOpenAddons = { navController.openSettings(SettingsPage.Addons) },
             )
         }
@@ -470,33 +477,41 @@ private fun AppNavHost(
             )
         }
         page(Routes.PLAYER) {
-            PlayerScreen(
-                onBack = { navController.popBackStack() },
-                // Both return to the title's page, which shows the sources in place of the
-                // episodes; for the next episode it plays the source of the same binge group
-                // by itself when one shows up.
-                onChangeSource = {
-                    PlaybackSession.returnToSources()
-                    navController.popBackStack()
-                },
-                // The next episode plays at once when the player already found its source of
-                // the same binge group, in place of this player; otherwise its sources show.
-                onOpenEpisode = { episode ->
-                    val current = PlaybackSession.selection ?: return@PlayerScreen
-                    val ready = PlaybackSession.nextUp?.takeIf { it.episodeId == episode.id }?.source
-                    val group = PlaybackSession.source?.bingeGroup
-                    PlaybackSession.select(current.copy(episode = episode))
-                    if (ready != null) {
-                        PlaybackSession.source = ready
-                        PlaybackSession.alternatives = emptyList()
-                        navController.navigate(Routes.PLAYER) { popUpTo(Routes.PLAYER) { inclusive = true } }
-                    } else {
-                        PlaybackSession.continueWith = group
+            // Resuming, the source chosen before is looked up again under the player's loading
+            // screen first; when it cannot be, the title's page below shows the video's sources.
+            var resume by remember { mutableStateOf(PlaybackSession.resume) }
+            val request = resume
+            if (request != null) {
+                ResumingPlayer(request, onPlay = { resume = null }, onSources = { navController.popBackStack() })
+            } else {
+                PlayerScreen(
+                    onBack = { navController.popBackStack() },
+                    // Both return to the title's page, which shows the sources in place of the
+                    // episodes; for the next episode it plays the source of the same binge group
+                    // by itself when one shows up.
+                    onChangeSource = {
                         PlaybackSession.returnToSources()
                         navController.popBackStack()
-                    }
-                },
-            )
+                    },
+                    // The next episode plays at once when the player already found its source of
+                    // the same binge group, in place of this player; otherwise its sources show.
+                    onOpenEpisode = { episode ->
+                        val current = PlaybackSession.selection ?: return@PlayerScreen
+                        val ready = PlaybackSession.nextUp?.takeIf { it.episodeId == episode.id }?.source
+                        val group = PlaybackSession.source?.bingeGroup
+                        PlaybackSession.select(current.copy(episode = episode))
+                        if (ready != null) {
+                            PlaybackSession.source = ready
+                            PlaybackSession.alternatives = emptyList()
+                            navController.navigate(Routes.PLAYER) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                        } else {
+                            PlaybackSession.continueWith = group
+                            PlaybackSession.returnToSources()
+                            navController.popBackStack()
+                        }
+                    },
+                )
+            }
         }
     }
 }

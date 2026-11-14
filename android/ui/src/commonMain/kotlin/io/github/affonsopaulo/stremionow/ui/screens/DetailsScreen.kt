@@ -55,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.MetaItem
+import io.github.affonsopaulo.stremionow.core.NextVideo
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.TitleRating
@@ -240,8 +241,18 @@ class DetailsViewModel(
         watched: Boolean,
     ) {
         if (videoIds.isEmpty()) return
+        // Continue watching moves on when the episode it is on gets marked (resumeAfterMarking).
+        val details = (mutableDetails.value as? Loadable.Ready)?.value
+        val current = mutableProgress.value?.videoId?.takeIf { watched && it in videoIds }
+        val next =
+            if (details != null && current != null) {
+                resumeAfterMarking(details, current, mutableWatched.value + videoIds, Instant.now())
+                    ?.let { NextVideo(videoId = it.id, season = it.season, episode = it.episode) }
+            } else {
+                null
+            }
         viewModelScope.launch {
-            runCatching { io { core.setWatched(id, videoIds, watched) } }
+            runCatching { io { core.setWatchedWithNext(id, videoIds, watched, next) } }
                 .onFailure { logWarning("Could not mark videos as watched", it) }
             refresh()
         }

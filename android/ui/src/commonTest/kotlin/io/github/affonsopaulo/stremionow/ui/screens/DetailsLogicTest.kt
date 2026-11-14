@@ -170,6 +170,27 @@ class DetailsLogicTest {
         assertNull(progress("tt1", duration = 0).fraction())
     }
 
+    @Test
+    fun `marking the episode in progress moves on to the next unwatched released one`() {
+        val now = Instant.parse("2024-01-01T00:00:00Z")
+        val show =
+            details(
+                listOf(
+                    episode(0, 1),
+                    episode(1, 1),
+                    episode(1, 2),
+                    episode(1, 3),
+                    episode(2, 1, released = "2030-01-01T00:00:00.000Z"),
+                ),
+            )
+        // E2 was watched before: it is skipped.
+        assertEquals("tt1:1:3", resumeAfterMarking(show, "tt1:1:1", setOf("tt1:1:1", "tt1:1:2"), now)?.id)
+        // Only an unreleased episode left, and specials stay apart from the seasons.
+        assertNull(resumeAfterMarking(show, "tt1:1:3", setOf("tt1:1:3"), now))
+        assertNull(resumeAfterMarking(show, "tt1:0:1", setOf("tt1:0:1"), now))
+        assertNull(resumeAfterMarking(show, "tt9:1:1", emptySet(), now))
+    }
+
     private fun source(
         addon: String,
         quality: String? = null,

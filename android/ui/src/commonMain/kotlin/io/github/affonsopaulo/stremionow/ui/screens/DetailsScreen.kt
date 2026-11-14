@@ -75,6 +75,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
+import io.github.affonsopaulo.stremionow.ui.components.SnTextLink
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
@@ -905,16 +906,13 @@ private fun GenreLink(
     style: TextStyle,
     onClick: () -> Unit,
 ) {
-    BasicText(
+    SnTextLink(
         genre,
-        modifier =
-            Modifier
-                .snClickable(
-                    RoundedCornerShape(SnRadius.radiusSm),
-                    onClickLabel = stringResource(Res.string.details_open_genre, genre),
-                    onClick = onClick,
-                ).padding(vertical = SnSpacing.space1),
-        style = style.copy(color = SnColors.fg, textDecoration = TextDecoration.Underline),
+        onClick = onClick,
+        modifier = Modifier.padding(vertical = SnSpacing.space1),
+        style = style.copy(textDecoration = TextDecoration.Underline),
+        color = SnColors.fg,
+        onClickLabel = stringResource(Res.string.details_open_genre, genre),
     )
 }
 

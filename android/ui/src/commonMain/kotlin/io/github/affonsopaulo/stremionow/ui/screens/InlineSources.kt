@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.screens
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,7 +45,10 @@ import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
+import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
+import io.github.affonsopaulo.stremionow.ui.components.snStateBorder
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -317,12 +322,14 @@ private fun SourceCard(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusLg)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Column(
         modifier =
             modifier
-                .snClickable(shape, onClick = onClick)
-                .background(if (best) SnColors.accentSurface else SnColors.surface, shape)
-                .border(1.dp, if (best) SnColors.accentBorder else SnColors.border, shape)
+                .snClickable(shape, lift = true, highlight = false, interactionSource = interaction, onClick = onClick)
+                .snStateBackground(if (best) SnColors.accentSurface else SnColors.surface, shape, state)
+                .snStateBorder(if (best) SnColors.accentBorder else SnColors.border, shape, state)
                 .padding(SnSpacing.space4),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
     ) {

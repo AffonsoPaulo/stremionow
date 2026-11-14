@@ -147,8 +147,10 @@ pub struct LibraryItemState {
     /// The video being watched (episode id for series).
     #[serde(default, rename = "video_id")]
     pub video_id: Option<String>,
-    /// Encoded watched-episodes bitfield (`<anchor id>:<anchor length>:<base64>`), opaque here.
-    #[serde(default)]
+    /// Watched videos of a series, as `<anchor id>:<anchor length>:<base64>`; read and written
+    /// with [`crate::decode_watched`] and [`crate::encode_watched`]. A value that is not a
+    /// string reads as none rather than making the whole item unreadable.
+    #[serde(default, deserialize_with = "lenient_string")]
     pub watched: Option<String>,
     /// Do not notify about new episodes.
     #[serde(default)]
@@ -180,6 +182,13 @@ fn lenient_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D::
         .and_then(Value::as_f64)
         .filter(|n| n.is_finite() && *n > 0.0)
         .unwrap_or(0.0))
+}
+
+fn lenient_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::String(text)) => Some(text),
+        _ => None,
+    })
 }
 
 fn lenient_u64<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
@@ -258,6 +267,18 @@ mod tests {
         assert_eq!(item.state.time_offset, 1500);
         assert_eq!(item.state.duration, 0);
         assert_eq!(item.state.times_watched, 0);
+    }
+
+    #[test]
+    fn a_watched_field_that_is_not_a_string_reads_as_none() {
+        for watched in [json!(5), json!({"bits": 1}), json!(null), json!([1])] {
+            let item: RemoteLibraryItem = serde_json::from_value(json!({
+                "_id": "tt1", "type": "series", "_mtime": "2021-06-01T12:00:00Z",
+                "state": { "watched": watched }
+            }))
+            .expect("the item stays readable");
+            assert_eq!(item.state.watched, None);
+        }
     }
 
     #[test]

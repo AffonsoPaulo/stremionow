@@ -65,6 +65,11 @@ if-addrs = "0.15.0"
 # Windows: adapter types, gateways and the gateway's MAC address, to tell the home network from
 # others (ADR 0008). Already in the tree through if-addrs and tokio.
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+# The official watched-videos bitfield of library items (ADR 0012): zlib with the pure-Rust
+# backend and standard base64, as stremio-core's `stremio-watched-bitfield`. Both are already
+# in the tree, through librqbit and hyper-util.
+flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 
 [profile.release]
 lto = "thin"

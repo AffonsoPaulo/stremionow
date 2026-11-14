@@ -11,6 +11,9 @@
 //!
 //! [`merge_library`] reconciles a local library with the remote one without doing any I/O.
 //!
+//! [`merge_watched`] combines the watched videos of a title with the account's, in the official
+//! `state.watched` format ([`encode_watched`], [`decode_watched`]).
+//!
 //! [`LikesApi`] keeps the Like and Love of each title on Stremio's likes service
 //! (`https://likes.stremio.com`), as the official apps do.
 
@@ -22,6 +25,7 @@ mod merge;
 mod signin;
 mod time;
 mod types;
+mod watched;
 
 pub use api::{DEFAULT_BASE_URL, DEFAULT_LINK_URL, DEFAULT_WEB_URL, StremioApi};
 pub use error::SyncError;
@@ -33,3 +37,7 @@ pub use signin::{
 };
 pub use time::{format_timestamp, parse_timestamp};
 pub use types::{AddonFlags, RemoteAddon, Session, User};
+pub use watched::{
+    WatchedError, WatchedMerge, WatchedVideo, decode_watched, encode_watched, merge_mark,
+    merge_watched, watched_order,
+};

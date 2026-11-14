@@ -2,12 +2,12 @@
 package io.github.affonsopaulo.stremionow.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,25 +35,23 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
-import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
+import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -88,7 +86,7 @@ fun SnRow(
     overContent: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
-    if (!LocalSnFeedback.current.showHover) {
+    if (!LocalSnFeedback.current.mouseFirst) {
         LazyRow(
             modifier = modifier,
             state = state,
@@ -225,7 +223,18 @@ private fun PageButton(
 ) {
     val label = stringResource(if (forward) Res.string.action_row_next else Res.string.action_row_previous)
     val interaction = remember { MutableInteractionSource() }
-    val hovered by interaction.collectIsHoveredAsState()
+    val state = interaction.collectSnInteraction()
+    val reducedMotion = rememberReducedMotion()
+    // Over the cards the button needs a solid circle to show; the pointer makes it lighter.
+    val circle by animateColorAsState(
+        when {
+            state.press -> SnColors.statePress.compositeOver(SnColors.surfaceSelected)
+            state.hover -> SnColors.surfaceSelected
+            else -> SnColors.scrimSoft
+        },
+        tween(FEEDBACK_MS),
+        label = "page-button",
+    )
     AnimatedVisibility(
         visible = visible,
         modifier = modifier.width(if (fade) EdgeFadeWidth else SnLayout.gutter.coerceAtLeast(SnSize.controlMd)),
@@ -242,13 +251,9 @@ private fun PageButton(
                 Modifier
                     .size(SnSize.controlMd)
                     .focusProperties { canFocus = false }
-                    .semantics {
-                        contentDescription = label
-                        role = Role.Button
-                    }.pointerHoverIcon(PointerIcon.Hand)
-                    .hoverable(interaction)
-                    .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-                    .background(if (hovered) SnColors.surfaceSelected else SnColors.scrimSoft, CircleShape),
+                    .semantics { contentDescription = label }
+                    .snClickable(CircleShape, highlight = false, interactionSource = interaction, onClick = onClick)
+                    .background(circle, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 // Points the way the row moves: to the left for Next in right-to-left languages.
@@ -256,7 +261,7 @@ private fun PageButton(
                 Image(
                     if (forward != rtl) SnIcons.ChevronRight else SnIcons.ChevronLeft,
                     contentDescription = null,
-                    modifier = Modifier.size(if (hovered) 28.dp else 24.dp),
+                    modifier = Modifier.size(if (state.hover && !reducedMotion) 28.dp else 24.dp),
                     colorFilter = ColorFilter.tint(SnColors.fg),
                 )
             }

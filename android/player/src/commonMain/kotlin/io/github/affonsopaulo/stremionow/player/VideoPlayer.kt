@@ -9,8 +9,10 @@ data class PlayerOptions(
     val audioLanguages: List<String> = emptyList(),
     /** Preferred subtitle languages, most wanted first; empty turns subtitles off by default. */
     val subtitleLanguages: List<String> = emptyList(),
-    /** Memory budget for buffered data ahead of the playback position, in MiB. */
+    /** Memory budget for buffered data ahead of the playback position, in MiB (Android). */
     val bufferAheadMiB: Int = 64,
+    /** How much of the stream to keep in memory on the desktop; null picks it from the computer's memory. */
+    val streamMemory: StreamMemory? = null,
     /**
      * Detailed mpv logs. Keep it off in release builds: mpv logs the addresses it opens, and
      * debrid addresses carry the user's API key.

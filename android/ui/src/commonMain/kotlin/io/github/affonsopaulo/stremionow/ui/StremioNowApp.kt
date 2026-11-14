@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -51,6 +52,8 @@ import io.github.affonsopaulo.stremionow.ui.components.HeaderSearchState
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderOverlay
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderPage
+import io.github.affonsopaulo.stremionow.ui.components.PageMotion
+import io.github.affonsopaulo.stremionow.ui.components.ProvidePageMotion
 import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnHeaderSearch
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
@@ -66,6 +69,8 @@ import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.playerHasOwnWindow
+import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.screens.AccountMenuPopup
 import io.github.affonsopaulo.stremionow.ui.screens.AccountOverlays
 import io.github.affonsopaulo.stremionow.ui.screens.AccountUi
@@ -359,7 +364,10 @@ private fun AppHeader(
     }
 }
 
-/** The app's pages. Those with title art at the top (home, a title) run under the header. */
+/**
+ * The app's pages. Those with title art at the top (home, a title) run under the header, which
+ * stays outside and does not animate with them.
+ */
 @Composable
 private fun AppNavHost(
     navController: NavHostController,
@@ -369,7 +377,24 @@ private fun AppNavHost(
     headerQuery: String?,
     onSignIn: () -> Unit,
 ) {
-    NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
+    val reducedMotion = rememberReducedMotion()
+    val move = { scope: AnimatedContentTransitionScope<NavBackStackEntry>, back: Boolean ->
+        pageMove(
+            kindOf(scope.initialState.destination.route),
+            kindOf(scope.targetState.destination.route),
+            back,
+            playerHasOwnWindow,
+        )
+    }
+    NavHost(
+        navController = navController,
+        startDestination = startRoute,
+        modifier = Modifier.fillMaxSize(),
+        enterTransition = { move(this, false).enter(reducedMotion) },
+        exitTransition = { move(this, false).exit(reducedMotion) },
+        popEnterTransition = { move(this, true).enter(reducedMotion) },
+        popExitTransition = { move(this, true).exit(reducedMotion) },
+    ) {
         val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
         page(Routes.HOME, underHeader = true) {
             HomeScreen(
@@ -503,7 +528,8 @@ private fun AppNavHost(
 
 /**
  * A destination of [AppNavHost]. Pages start below the header unless [underHeader] is set,
- * in which case they run under it and keep their own content clear of it.
+ * in which case they run under it and keep their own content clear of it. Each takes part in
+ * the page transitions through its [PageMotion].
  */
 private fun NavGraphBuilder.page(
     route: String,
@@ -512,11 +538,23 @@ private fun NavGraphBuilder.page(
     content: @Composable (NavBackStackEntry) -> Unit,
 ) {
     composable(route, arguments) { entry ->
-        CompositionLocalProvider(LocalHeaderPage provides entry) {
-            Box(if (underHeader) Modifier.fillMaxSize() else Modifier.fillMaxSize().belowHeader()) { content(entry) }
+        ProvidePageMotion(this) {
+            CompositionLocalProvider(LocalHeaderPage provides entry) {
+                Box(if (underHeader) Modifier.fillMaxSize() else Modifier.fillMaxSize().belowHeader()) {
+                    content(entry)
+                }
+            }
         }
     }
 }
+
+/** What [route] is to the page transitions. */
+private fun kindOf(route: String?): PageKind =
+    when (route) {
+        in TopRoutes -> PageKind.Tab
+        Routes.PLAYER -> PageKind.Player
+        else -> PageKind.Page
+    }
 
 /**
  * Lays the header over the pages, measuring it first so the pages learn its height through

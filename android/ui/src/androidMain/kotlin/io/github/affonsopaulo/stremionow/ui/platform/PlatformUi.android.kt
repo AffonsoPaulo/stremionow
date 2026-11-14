@@ -69,3 +69,6 @@ internal actual fun SnPointerTooltip(
 ) {
     content()
 }
+
+/** The player is a page of the app, in the same window. */
+internal actual val playerHasOwnWindow: Boolean = false

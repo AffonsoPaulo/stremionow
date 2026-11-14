@@ -46,7 +46,7 @@ internal class VideoWindow(
             background = Color.BLACK
             contentPane.background = Color.BLACK
             defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
-            iconImages = icons
+            WindowIcon.apply(this, icons)
             contentPane.add(canvas, BorderLayout.CENTER)
             if (isFramed) minimumSize = Dimension(MIN_WIDTH, MIN_HEIGHT)
         }

@@ -21,6 +21,7 @@ import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.SmokeTest
 import io.github.affonsopaulo.stremionow.ui.desktop.SystemTitleBar
+import io.github.affonsopaulo.stremionow.ui.desktop.WindowIcon
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import java.awt.Color
@@ -85,7 +86,7 @@ fun main(args: Array<String>) {
             onPreviewKeyEvent = { event -> input.onPreviewKeyEvent(event) || shortcuts.onPreviewKeyEvent(event) },
         ) {
             LaunchedEffect(window) {
-                window.iconImages = AppIcon.images
+                WindowIcon.apply(window, AppIcon.images)
                 window.minimumSize = MINIMUM_SIZE
                 window.background = BACKGROUND
                 SystemTitleBar.follow(window)

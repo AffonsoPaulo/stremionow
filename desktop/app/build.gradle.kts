@@ -76,12 +76,17 @@ compose.desktop {
             appResourcesRootDir.set(layout.buildDirectory.dir(DesktopNativesPlugin.RESOURCES_ROOT))
             modules("jdk.unsupported")
 
+            // Drawn by AppIcon.kt; `./gradlew :app:writeAppIcons` writes them again after a change.
             windows {
+                iconFile.set(layout.projectDirectory.file("icons/StremioNow.ico"))
                 menuGroup = "StremioNow"
                 perUserInstall = true
                 shortcut = true
                 // Fixed so that newer installers upgrade older ones instead of installing side by side.
                 upgradeUuid = "6f0c1d2e-5b7a-4f43-9c1e-8a2d4b6e9f10"
+            }
+            linux {
+                iconFile.set(layout.projectDirectory.file("icons/StremioNow.png"))
             }
         }
     }
@@ -99,3 +104,17 @@ tasks.withType<JavaExec>().configureEach {
 
 // Compose registers its packaging tasks after this script runs, hence the lazy lookup by name.
 tasks.named { it == "prepareAppResources" }.configureEach { dependsOn("prepareNativeResources") }
+
+// The installers' icons in icons/, drawn by AppIcon.kt like the windows' own.
+tasks.register<JavaExec>("writeAppIcons") {
+    description = "Draws the installers' icons into icons/ from AppIcon.kt."
+    group = "build"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.github.affonsopaulo.stremionow.desktop.AppIconFilesKt"
+    args(
+        layout.projectDirectory
+            .dir("icons")
+            .asFile.absolutePath,
+    )
+    systemProperty("java.awt.headless", "true")
+}

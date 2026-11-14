@@ -717,6 +717,28 @@
   <!-- About: opens the form to report a problem. -->
   <string name="settings_about_report">Report a problem</string>
 
+  <!-- Settings › Playback: how subtitles look, with a preview over a still picture. -->
+  <string name="settings_sub_style">Subtitle style</string>
+  <string name="settings_sub_style_body">Applies from the next video. The player\'s own buttons still change the size and position while you watch.</string>
+  <!-- The sample line of subtitle in the preview. -->
+  <string name="settings_sub_preview">This is how subtitles will look.</string>
+  <string name="settings_sub_text_color">Text color</string>
+  <!-- The box drawn behind the subtitle text. -->
+  <string name="settings_sub_background_color">Background</string>
+  <string name="settings_sub_outline_color">Outline</string>
+  <!-- ASS subtitles, common in anime, carry their own fonts, colors and positions. -->
+  <string name="settings_sub_file_styling">Use the subtitle file\'s own styling</string>
+  <string name="settings_sub_file_styling_body">Styled subtitles, common in anime, keep their own fonts, colors and positions. When off, the colors and position above apply to them too.</string>
+  <!-- Colors offered for subtitles. -->
+  <string name="settings_color_white">White</string>
+  <string name="settings_color_yellow">Yellow</string>
+  <string name="settings_color_cyan">Cyan</string>
+  <string name="settings_color_green">Green</string>
+  <string name="settings_color_black">Black</string>
+  <string name="settings_color_translucent_black">Translucent black</string>
+  <!-- No background box, or no outline. -->
+  <string name="settings_color_none">None</string>
+
   <!-- Settings › Playback: how much of the video is kept in memory for skipping. Not the torrent cache, which is disk space. -->
   <string name="settings_memory">Memory for the video</string>
   <string name="settings_memory_body">How much of the video StremioNow keeps in memory around where you are, so skipping back or forward doesn\'t load it again. It\'s separate from the torrent cache, which is disk space for downloads. Applies from the next video.</string>

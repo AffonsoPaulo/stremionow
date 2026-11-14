@@ -22,6 +22,25 @@ const SERVE_NAME: &str = "serve_name";
 const STREAM_MEMORY: &str = "stream_memory";
 const STREAM_MEMORY_AHEAD_MIB: &str = "stream_memory_ahead_mib";
 const STREAM_MEMORY_BEHIND_MIB: &str = "stream_memory_behind_mib";
+const SUBTITLE_SIZE_PERCENT: &str = "subtitle_size_percent";
+const SUBTITLE_POSITION: &str = "subtitle_position";
+const SUBTITLE_TEXT_COLOR: &str = "subtitle_text_color";
+const SUBTITLE_BACKGROUND_COLOR: &str = "subtitle_background_color";
+const SUBTITLE_OUTLINE_COLOR: &str = "subtitle_outline_color";
+const SUBTITLE_FILE_STYLING: &str = "subtitle_file_styling";
+
+/// Subtitle sizes, in percent of the normal size, and the step between them: the same as the
+/// player's size buttons, which change the size for the session only.
+pub const SUBTITLE_SIZE_RANGE: (u32, u32) = (50, 200);
+const SUBTITLE_SIZE_STEP: u32 = 10;
+/// Subtitle places, in percent of the picture's height from its top (100 is the bottom, where
+/// subtitles normally are), and the step between them: the same as the player's buttons.
+pub const SUBTITLE_POSITION_RANGE: (u32, u32) = (30, 100);
+const SUBTITLE_POSITION_STEP: u32 = 5;
+/// Stremio's subtitle colours, as ARGB: white text, no background and a black outline.
+const DEFAULT_SUBTITLE_TEXT_COLOR: u32 = 0xFFFF_FFFF;
+const DEFAULT_SUBTITLE_BACKGROUND_COLOR: u32 = 0x0000_0000;
+const DEFAULT_SUBTITLE_OUTLINE_COLOR: u32 = 0xFF00_0000;
 
 /// Custom stream memory read ahead, in MiB: the player's `StreamMemorySizes` takes the same
 /// range. Below it, a few seconds of a 4K film; above it, more memory than any level uses.
@@ -137,6 +156,21 @@ pub struct AppSettings {
     pub stream_memory_ahead_mib: u32,
     /// Kept behind with [`StreamMemoryChoice::Custom`], in MiB, within [`STREAM_BEHIND_MIB_RANGE`].
     pub stream_memory_behind_mib: u32,
+    /// Subtitle size, in percent of the normal size, within [`SUBTITLE_SIZE_RANGE`] on 10 %
+    /// steps. The player's buttons change it for the session only.
+    pub subtitle_size_percent: u32,
+    /// Where subtitles sit, in percent of the picture's height from its top, within
+    /// [`SUBTITLE_POSITION_RANGE`] on 5 % steps: 100 is the bottom, lower raises them.
+    pub subtitle_position: u32,
+    /// Subtitle text colour, as ARGB (`0xAARRGGBB`).
+    pub subtitle_text_color: u32,
+    /// The box behind subtitle text, as ARGB; fully transparent draws none.
+    pub subtitle_background_color: u32,
+    /// The outline around subtitle text, as ARGB; fully transparent draws none.
+    pub subtitle_outline_color: u32,
+    /// Styled subtitles (ASS) keep the file's own fonts, colours and places; off, the colours
+    /// and place above apply to them too, as with plain ones.
+    pub subtitle_file_styling: bool,
 }
 
 impl Default for AppSettings {
@@ -156,6 +190,12 @@ impl Default for AppSettings {
             stream_memory: StreamMemoryChoice::Automatic,
             stream_memory_ahead_mib: DEFAULT_STREAM_MIB,
             stream_memory_behind_mib: DEFAULT_STREAM_MIB,
+            subtitle_size_percent: 100,
+            subtitle_position: 100,
+            subtitle_text_color: DEFAULT_SUBTITLE_TEXT_COLOR,
+            subtitle_background_color: DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+            subtitle_outline_color: DEFAULT_SUBTITLE_OUTLINE_COLOR,
+            subtitle_file_styling: false,
         }
     }
 }
@@ -217,6 +257,29 @@ impl StremioCore {
                 .map_or(defaults.stream_memory_behind_mib, |mib| {
                     clamp_range(mib, STREAM_BEHIND_MIB_RANGE)
                 }),
+            subtitle_size_percent: store
+                .setting(SUBTITLE_SIZE_PERCENT)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.subtitle_size_percent, subtitle_size),
+            subtitle_position: store
+                .setting(SUBTITLE_POSITION)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.subtitle_position, subtitle_position),
+            subtitle_text_color: store
+                .setting(SUBTITLE_TEXT_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_text_color),
+            subtitle_background_color: store
+                .setting(SUBTITLE_BACKGROUND_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_background_color),
+            subtitle_outline_color: store
+                .setting(SUBTITLE_OUTLINE_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_outline_color),
+            subtitle_file_styling: store
+                .setting(SUBTITLE_FILE_STYLING)?
+                .map_or(defaults.subtitle_file_styling, |value| value == "1"),
         })
     }
 
@@ -264,6 +327,34 @@ impl StremioCore {
         store.set_setting(
             STREAM_MEMORY_BEHIND_MIB,
             &clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_SIZE_PERCENT,
+            &subtitle_size(settings.subtitle_size_percent).to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_POSITION,
+            &subtitle_position(settings.subtitle_position).to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_TEXT_COLOR,
+            &settings.subtitle_text_color.to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_BACKGROUND_COLOR,
+            &settings.subtitle_background_color.to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_OUTLINE_COLOR,
+            &settings.subtitle_outline_color.to_string(),
+        )?;
+        store.set_setting(
+            SUBTITLE_FILE_STYLING,
+            if settings.subtitle_file_styling {
+                "1"
+            } else {
+                "0"
+            },
         )?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
@@ -348,6 +439,23 @@ fn clamp_range(value: u32, (min, max): (u32, u32)) -> u32 {
     value.clamp(min, max)
 }
 
+/// Keeps `value` within the inclusive `(min, max)` range, on the nearest multiple of `step`
+/// counted from `min`.
+fn snap_to_step(value: u32, (min, max): (u32, u32), step: u32) -> u32 {
+    let steps = (value.clamp(min, max) - min + step / 2) / step;
+    (min + steps * step).min(max)
+}
+
+/// A subtitle size the player's buttons could reach.
+fn subtitle_size(percent: u32) -> u32 {
+    snap_to_step(percent, SUBTITLE_SIZE_RANGE, SUBTITLE_SIZE_STEP)
+}
+
+/// A subtitle place the player's buttons could reach.
+fn subtitle_position(percent: u32) -> u32 {
+    snap_to_step(percent, SUBTITLE_POSITION_RANGE, SUBTITLE_POSITION_STEP)
+}
+
 /// Keeps a cache size within the offered range.
 fn clamp_cache(megabytes: u32) -> u32 {
     let (min, max) = (TORRENT_CACHE_CHOICES_MB[0], TORRENT_CACHE_CHOICES_MB[4]);
@@ -379,6 +487,12 @@ mod tests {
             stream_memory: StreamMemoryChoice::Custom,
             stream_memory_ahead_mib: 4,
             stream_memory_behind_mib: 99_999,
+            subtitle_size_percent: 500,
+            subtitle_position: 0,
+            subtitle_text_color: 0xFFFF_E600,
+            subtitle_background_color: 0x8000_0000,
+            subtitle_outline_color: 0,
+            subtitle_file_styling: true,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -405,6 +519,56 @@ mod tests {
             saved.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE.1,
             "too much is lowered"
         );
+        assert_eq!(saved.subtitle_size_percent, SUBTITLE_SIZE_RANGE.1);
+        assert_eq!(saved.subtitle_position, SUBTITLE_POSITION_RANGE.0);
+        assert_eq!(saved.subtitle_text_color, 0xFFFF_E600);
+        assert_eq!(saved.subtitle_background_color, 0x8000_0000);
+        assert_eq!(saved.subtitle_outline_color, 0);
+        assert!(saved.subtitle_file_styling);
+    }
+
+    #[test]
+    fn subtitle_style_defaults_steps_and_junk() {
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.subtitle_size_percent, 100);
+        assert_eq!(defaults.subtitle_position, 100, "at the bottom");
+        assert_eq!(defaults.subtitle_text_color, 0xFFFF_FFFF, "white");
+        assert_eq!(defaults.subtitle_background_color, 0, "no box");
+        assert_eq!(defaults.subtitle_outline_color, 0xFF00_0000, "black");
+        assert!(!defaults.subtitle_file_styling, "Stremio's default");
+
+        // Sizes and places land on the player's steps.
+        assert_eq!(subtitle_size(124), 120);
+        assert_eq!(subtitle_size(125), 130);
+        assert_eq!(subtitle_size(10), 50);
+        assert_eq!(subtitle_position(82), 80);
+        assert_eq!(subtitle_position(83), 85);
+        assert_eq!(subtitle_position(101), 100);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        core.update_settings(AppSettings {
+            subtitle_size_percent: 137,
+            subtitle_position: 52,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.subtitle_size_percent, 140);
+        assert_eq!(saved.subtitle_position, 50);
+
+        // Values that are not numbers fall back to the defaults.
+        let store = core.store().expect("store");
+        store
+            .set_setting(SUBTITLE_TEXT_COLOR, "red")
+            .expect("writes");
+        store
+            .set_setting(SUBTITLE_SIZE_PERCENT, "-3")
+            .expect("writes");
+        drop(store);
+        let read = core.settings().expect("reads");
+        assert_eq!(read.subtitle_text_color, defaults.subtitle_text_color);
+        assert_eq!(read.subtitle_size_percent, defaults.subtitle_size_percent);
     }
 
     #[test]

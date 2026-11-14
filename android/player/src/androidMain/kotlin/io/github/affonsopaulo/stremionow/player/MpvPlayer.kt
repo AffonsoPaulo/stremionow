@@ -294,6 +294,10 @@ class MpvPlayer private constructor(
                 } else {
                     setOptionString("sid", "no")
                 }
+                // Each under the first name this libmpv knows; one it knows under none stays as it is.
+                for (option in options.subtitleStyle.mpvOptions()) {
+                    option.names.firstOrNull { setOptionString(it, option.value) >= 0 }
+                }
 
                 init()
                 setOptionString("force-window", "no")

@@ -15,6 +15,8 @@ data class PlayerOptions(
     val streamMemory: StreamMemory? = null,
     /** Exact sizes of the stream memory on the desktop (the user's "Custom"); they win over [streamMemory]. */
     val streamMemorySizes: StreamMemorySizes? = null,
+    /** How subtitles look, from Settings; the player's own buttons change size and place afterwards. */
+    val subtitleStyle: SubtitleStyle = SubtitleStyle(),
     /**
      * Detailed mpv logs. Keep it off in release builds: mpv logs the addresses it opens, and
      * debrid addresses carry the user's API key.

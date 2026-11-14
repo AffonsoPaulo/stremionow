@@ -66,6 +66,9 @@ class PlayerViewModel<out P : VideoPlayer>(
                 ).isO3LanguageOrNull()
         }
 
+    /** How subtitles look, from Settings › Playback. */
+    val subtitleStyle = settings.subtitleStyle()
+
     val player: P =
         createPlayer(
             PlayerOptions(
@@ -75,6 +78,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                 // "Memory for the video"; neither set means the player decides (see VideoMemory.kt).
                 streamMemory = settings.streamMemoryOptions().first,
                 streamMemorySizes = settings.streamMemoryOptions().second,
+                subtitleStyle = subtitleStyle,
             ),
         )
 

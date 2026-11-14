@@ -2,7 +2,6 @@
 package io.github.affonsopaulo.stremionow.ui.screens
 
 import io.github.affonsopaulo.stremionow.core.AppSettings
-import io.github.affonsopaulo.stremionow.core.DisplaySwitch
 import io.github.affonsopaulo.stremionow.core.StreamMemoryChoice
 import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.player.StreamMemorySizes
@@ -15,18 +14,7 @@ class VideoMemoryTest {
         choice: StreamMemoryChoice,
         ahead: UInt = 128u,
         behind: UInt = 128u,
-    ) = AppSettings(
-        torrentWifiOnly = false,
-        torrentCacheMb = 2048u,
-        audioLanguage = "",
-        subtitleLanguage = "",
-        maxResolution = 0u,
-        onboarded = true,
-        aniskip = true,
-        hdr = DisplaySwitch.ASK,
-        matchRefreshRate = false,
-        serveToDevices = false,
-        serveName = "",
+    ) = defaultSettings().copy(
         streamMemory = choice,
         streamMemoryAheadMib = ahead,
         streamMemoryBehindMib = behind,

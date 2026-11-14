@@ -95,7 +95,7 @@ actual fun PlayerScreen(
     // The next video starts at the volume, subtitle size and position of the previous one.
     LaunchedEffect(player) {
         SessionVolume.applyTo(player)
-        SessionSubtitles.applyTo(player)
+        SessionSubtitles.applyTo(player, viewModel.subtitleStyle)
         SessionPicture.applyTo(player)
     }
     // HDR and refresh rate changes for this player, put back when it goes (Windows only).

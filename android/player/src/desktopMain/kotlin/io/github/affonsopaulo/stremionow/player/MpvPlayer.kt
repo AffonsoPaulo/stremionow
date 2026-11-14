@@ -405,6 +405,7 @@ class MpvPlayer private constructor(
                     library = MpvLibrary.locate(libraryDirectory),
                     options = mpvOptions,
                     preferences = preferences,
+                    firstKnown = options.subtitleStyle.mpvOptions(),
                     logLevel = if (options.verboseLogs) "v" else "warn",
                 )
             val macOutput =

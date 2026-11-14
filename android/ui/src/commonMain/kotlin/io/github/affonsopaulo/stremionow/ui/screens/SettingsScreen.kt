@@ -368,6 +368,7 @@ private fun PlaybackPage() {
             onSelect = { language -> viewModel.update { it.copy(subtitleLanguage = language) } },
         )
     }
+    SubtitleStyleSetting(current, viewModel::update)
     Group(stringResource(Res.string.onboarding_quality)) {
         SnChipRow(
             options = listOf(0u, 2160u, 1080u, 720u),

@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.player.PlaybackState
+import io.github.affonsopaulo.stremionow.player.SubtitleStyle
 import io.github.affonsopaulo.stremionow.player.Track
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
@@ -62,12 +63,12 @@ import kotlin.math.roundToInt
 private const val SYNC_STEP_SECONDS = 0.1
 
 /** Step of the subtitle position buttons, in percent of the picture's height. */
-private const val POSITION_STEP = 5
+private const val POSITION_STEP = SubtitleStyle.POSITION_STEP
 
 /** Step of the subtitle size buttons, and the sizes allowed, in percent of the normal size. */
-private const val SCALE_STEP_PERCENT = 10
-private const val MIN_SCALE_PERCENT = 50
-private const val MAX_SCALE_PERCENT = 200
+private const val SCALE_STEP_PERCENT = SubtitleStyle.SIZE_STEP
+private val MIN_SCALE_PERCENT = SubtitleStyle.SIZE_RANGE.first
+private val MAX_SCALE_PERCENT = SubtitleStyle.SIZE_RANGE.last
 
 /** A subtitle scale as a whole percentage, on the buttons' 10 % steps. */
 internal fun subtitleScalePercent(scale: Double): Int =
@@ -77,14 +78,17 @@ internal fun subtitleScalePercent(scale: Double): Int =
     )
 
 /**
- * Subtitle size and position chosen in this run of the app, so the next video starts with
- * them. Their delay belongs to each file and is not carried over.
+ * Subtitle size and position chosen with the player's buttons in this run of the app, so the
+ * next video starts with them rather than with Settings'. Changing them in Settings afterwards
+ * wins: the next video starts with the new settings. Their delay belongs to each file and is
+ * not carried over.
  */
 internal object SessionSubtitles {
-    var scale = 1.0
-        private set
-    var position = 100
-        private set
+    private var scale: Double? = null
+    private var position: Int? = null
+
+    /** The settings' size and position when the last player started. */
+    private var settings: Pair<Int, Int>? = null
 
     fun setScale(
         player: VideoPlayer,
@@ -98,18 +102,31 @@ internal object SessionSubtitles {
         player: VideoPlayer,
         percent: Int,
     ) {
-        position = percent.coerceIn(MIN_POSITION, 100)
+        val position = percent.coerceIn(SubtitleStyle.POSITION_RANGE)
+        this.position = position
         player.setSubtitlePosition(position)
     }
 
-    /** Gives a new player the size and position of the previous one. */
-    fun applyTo(player: VideoPlayer) {
-        player.setSubtitleScale(scale)
-        player.setSubtitlePosition(position)
+    /**
+     * Gives a new player the size and position chosen in the previous one, unless [style]
+     * (the settings it started with) changed since; it already has the settings' own.
+     */
+    fun applyTo(
+        player: VideoPlayer,
+        style: SubtitleStyle,
+    ) {
+        val current = style.sizePercent to style.position
+        if (current != settings) {
+            settings = current
+            scale = null
+            position = null
+        }
+        scale?.let(player::setSubtitleScale)
+        position?.let(player::setSubtitlePosition)
     }
 
     /** The highest subtitles go: a third of the way down the picture. */
-    const val MIN_POSITION = 30
+    val MIN_POSITION = SubtitleStyle.POSITION_RANGE.first
 }
 
 /** Formats a subtitle delay as "+0.5 s", "−1.2 s" or "0.0 s", in the device's number format. */

@@ -531,6 +531,22 @@
   <string name="settings_about_source">Código-fonte</string>
   <string name="settings_about_report">Relatar um problema</string>
 
+  <string name="settings_sub_style">Estilo da legenda</string>
+  <string name="settings_sub_style_body">Vale a partir do próximo vídeo. Os botões do player continuam mudando o tamanho e a posição enquanto você assiste.</string>
+  <string name="settings_sub_preview">A legenda vai ficar assim.</string>
+  <string name="settings_sub_text_color">Cor do texto</string>
+  <string name="settings_sub_background_color">Fundo</string>
+  <string name="settings_sub_outline_color">Contorno</string>
+  <string name="settings_sub_file_styling">Usar o estilo do próprio arquivo de legenda</string>
+  <string name="settings_sub_file_styling_body">Legendas com estilo, comuns em animes, mantêm as próprias fontes, cores e posições. Desligado, as cores e a posição acima valem para elas também.</string>
+  <string name="settings_color_white">Branco</string>
+  <string name="settings_color_yellow">Amarelo</string>
+  <string name="settings_color_cyan">Ciano</string>
+  <string name="settings_color_green">Verde</string>
+  <string name="settings_color_black">Preto</string>
+  <string name="settings_color_translucent_black">Preto translúcido</string>
+  <string name="settings_color_none">Nenhum</string>
+
   <string name="settings_memory">Memória para o vídeo</string>
   <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>
   <string name="settings_memory_light">Leve</string>

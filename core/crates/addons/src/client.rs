@@ -40,7 +40,7 @@ pub enum AddonError {
 }
 
 impl AddonError {
-    fn from_reqwest(error: reqwest::Error) -> Self {
+    pub(crate) fn from_reqwest(error: reqwest::Error) -> Self {
         if error.is_timeout() {
             Self::Timeout
         } else if let Some(status) = error.status() {

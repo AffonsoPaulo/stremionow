@@ -10,6 +10,7 @@
 mod account;
 mod core;
 mod home;
+mod icons;
 mod panics;
 mod playback;
 mod ratings;

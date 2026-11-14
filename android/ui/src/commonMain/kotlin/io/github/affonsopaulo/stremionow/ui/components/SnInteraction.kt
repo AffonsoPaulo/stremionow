@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
@@ -75,21 +76,32 @@ fun MutableInteractionSource.collectSnInteraction(enabled: Boolean = true): SnIn
 
 /**
  * The background an element shows in [state]: lighter under the pointer, darker when pressed.
- * A light fill cannot get lighter, so a white button or selected pill keeps its look on
- * hover. On a translucent or transparent fill, such as an icon button's, hover adds a
+ * A light fill cannot get lighter: with [darkenLightOnHover], as on a white button, it darkens
+ * a little under the pointer instead; otherwise, as on the selected white pill, it keeps its
+ * look. On a translucent or transparent fill, such as an icon button's, hover adds a
  * translucent circle and a press darkens that circle rather than the page behind it, so a
  * press shows on touch screens too.
  */
 internal fun snStateColor(
     base: Color,
     state: SnInteractionState,
+    darkenLightOnHover: Boolean = false,
 ): Color =
     when {
         state.press && base.alpha < 1f -> SnColors.statePress.compositeOver(SnColors.stateHover.compositeOver(base))
         state.press -> SnColors.statePress.compositeOver(base)
+        state.hover && darkenLightOnHover && base.isLight() -> LightHover.compositeOver(base)
         state.hover -> SnColors.stateHover.compositeOver(base)
         else -> base
     }
+
+/** An opaque fill too light to lighten further. */
+private fun Color.isLight(): Boolean = alpha == 1f && luminance() > LIGHT_LUMINANCE
+
+private const val LIGHT_LUMINANCE = 0.5f
+
+/** Half the press shade: a white button under the pointer, lighter than when pressed. */
+private val LightHover: Color get() = SnColors.statePress.copy(alpha = SnColors.statePress.alpha / 2)
 
 /**
  * A card's border in [state]: lighter under the pointer. While the focus ring shows, the ring
@@ -110,8 +122,13 @@ fun Modifier.snStateBackground(
     color: Color,
     shape: Shape,
     state: SnInteractionState,
+    darkenLightOnHover: Boolean = false,
 ): Modifier {
-    val shown by animateColorAsState(snStateColor(color, state), tween(FEEDBACK_MS), label = "state-background")
+    val shown by animateColorAsState(
+        snStateColor(color, state, darkenLightOnHover),
+        tween(FEEDBACK_MS),
+        label = "state-background",
+    )
     return background(shown, shape)
 }
 

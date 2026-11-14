@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -25,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +41,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -143,6 +148,57 @@ fun SnIconButton(
         Image(icon, contentDescription = null, modifier = Modifier.size(22.dp), colorFilter = ColorFilter.tint(tint))
     }
 }
+
+/**
+ * A link in running text, such as a genre or a cast member: [color] at rest, brighter and
+ * underlined under the pointer. Like a link on the web, it shows nothing more when pressed.
+ * A [style] that is already underlined stays so, for touch screens, where nothing hovers.
+ */
+@Composable
+fun SnTextLink(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: TextStyle = SnTypography.body,
+    color: Color = SnColors.fgSecondary,
+    onClickLabel: String? = null,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    val shown by animateColorAsState(snLinkColor(color, state), tween(FEEDBACK_MS), label = "link")
+    BasicText(
+        text,
+        modifier =
+            modifier.snClickable(
+                RoundedCornerShape(SnRadius.radiusSm),
+                onClickLabel = onClickLabel,
+                highlight = false,
+                interactionSource = interaction,
+                onClick = onClick,
+            ),
+        style = style.copy(color = shown, textDecoration = snLinkDecoration(style.textDecoration, state)),
+    )
+}
+
+/**
+ * A link's color: [color] at rest; under the pointer the main text color, or pure white for a
+ * link that already uses the main text color.
+ */
+internal fun snLinkColor(
+    color: Color,
+    state: SnInteractionState,
+): Color =
+    when {
+        !state.hover -> color
+        color == SnColors.fg -> SnColors.inverse
+        else -> SnColors.fg
+    }
+
+/** A link's decoration: underlined under the pointer, otherwise [decoration]. */
+internal fun snLinkDecoration(
+    decoration: TextDecoration?,
+    state: SnInteractionState,
+): TextDecoration? = if (state.hover) TextDecoration.Underline else decoration
 
 /** Filter pill. Selected chips use the light fill. */
 @Composable

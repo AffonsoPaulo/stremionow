@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.components
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.style.TextDecoration
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -135,5 +136,16 @@ class SnInteractionTest {
         assertEquals(GROW_FRACTION, snGrowFraction(200f, 12f, capped = true))
         assertEquals(12f / 800f, snGrowFraction(800f, 12f, capped = true), 1e-6f)
         assertEquals(0f, snGrowFraction(0f, 12f, capped = true))
+    }
+
+    @Test
+    fun `links brighten and underline under the pointer`() {
+        val hover = SnInteractionState(hover = true)
+        assertEquals(SnColors.fg, snLinkColor(SnColors.fgSecondary, hover))
+        assertEquals(SnColors.inverse, snLinkColor(SnColors.fg, hover))
+        assertEquals(SnColors.fgSecondary, snLinkColor(SnColors.fgSecondary, SnInteractionState(press = true)))
+        assertEquals(TextDecoration.Underline, snLinkDecoration(null, hover))
+        assertEquals(null, snLinkDecoration(null, SnInteractionState()))
+        assertEquals(TextDecoration.Underline, snLinkDecoration(TextDecoration.Underline, SnInteractionState()))
     }
 }

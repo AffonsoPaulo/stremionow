@@ -14,6 +14,7 @@ enum class SettingsPage(
     val slug: String,
 ) {
     Addons("addons"),
+    General("general"),
     Playback("playback"),
     Display("display"),
     Torrents("torrents"),
@@ -69,6 +70,7 @@ object SettingsRoutes {
 internal fun SettingsPage.title(): StringResource =
     when (this) {
         SettingsPage.Addons -> Res.string.nav_addons
+        SettingsPage.General -> Res.string.settings_general
         SettingsPage.Playback -> Res.string.settings_playback
         SettingsPage.Display -> Res.string.settings_display
         SettingsPage.Torrents -> Res.string.settings_torrents
@@ -81,6 +83,7 @@ internal fun SettingsPage.title(): StringResource =
 internal fun SettingsPage.icon(): ImageVector =
     when (this) {
         SettingsPage.Addons -> SnIcons.Layers
+        SettingsPage.General -> SnIcons.Settings
         SettingsPage.Playback -> SnIcons.Play
         SettingsPage.Display -> SnIcons.Monitor
         SettingsPage.Torrents -> SnIcons.Peers

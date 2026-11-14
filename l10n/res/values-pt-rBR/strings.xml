@@ -411,6 +411,10 @@
   <string name="onboarding_debrid_failed">Não foi possível conectar. Confira a chave e tente de novo.</string>
   <string name="onboarding_skip">Pular</string>
   <string name="onboarding_connect">Conectar</string>
+  <string name="settings_general">Geral</string>
+  <string name="settings_language">Idioma do app</string>
+  <string name="settings_language_body">O idioma dos textos do próprio app. Títulos e sinopses vêm dos addons e continuam no idioma deles.</string>
+  <string name="settings_language_system">Padrão do sistema</string>
   <string name="settings_playback">Reprodução</string>
 
   <string name="profile_account_body">Seus addons, sua lista e seu progresso sincronizam com a sua conta do Stremio.</string>

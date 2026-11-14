@@ -288,7 +288,7 @@ fun StremioNowApp(
                 sheet = phone,
                 onOpenAddons = { openSettings(SettingsPage.Addons) },
                 // Phones show the list of sections; elsewhere, the first section after Addons.
-                onOpenSettings = { openSettings(if (phone) null else SettingsPage.Playback) },
+                onOpenSettings = { openSettings(if (phone) null else SettingsPage.General) },
             )
         }
     }
@@ -351,7 +351,7 @@ private fun AppHeader(
                     AccountMenuPopup(
                         ui = accountUi,
                         onOpenAddons = { openSettings(SettingsPage.Addons) },
-                        onOpenSettings = { openSettings(SettingsPage.Playback) },
+                        onOpenSettings = { openSettings(SettingsPage.General) },
                     )
                 },
             )

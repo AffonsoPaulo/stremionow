@@ -4,8 +4,8 @@ package io.github.affonsopaulo.stremionow.ui.l10n
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 
-// The language follows the system and does not change while the app runs, so nothing here
-// needs to observe composition state.
+// DesktopStrings keeps its tables in composition state, so the strings read here redraw when
+// the language changes in Settings.
 
 @Composable
 @ReadOnlyComposable

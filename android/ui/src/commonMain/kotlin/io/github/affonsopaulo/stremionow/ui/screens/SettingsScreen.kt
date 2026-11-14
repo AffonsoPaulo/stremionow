@@ -71,7 +71,10 @@ import io.github.affonsopaulo.stremionow.ui.crash.IssueLink
 import io.github.affonsopaulo.stremionow.ui.crash.TestCrashMenu
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.l10n.AppLanguage
+import io.github.affonsopaulo.stremionow.ui.l10n.InterfaceLanguages
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.endonym
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
@@ -146,7 +149,7 @@ fun SettingsScreen(
     if (SnLayout.formFactor == FormFactor.Phone) {
         if (asked == null) SettingsList(pages, onOpenPage) else PageContent(asked, onSignIn)
     } else {
-        SideBySide(pages, initial = asked ?: SettingsPage.Playback, onSignIn = onSignIn)
+        SideBySide(pages, initial = asked ?: SettingsPage.General, onSignIn = onSignIn)
     }
 }
 
@@ -271,6 +274,7 @@ private fun PageContent(
         else -> {
             PageColumn(page) {
                 when (page) {
+                    SettingsPage.General -> GeneralPage()
                     SettingsPage.Playback -> PlaybackPage()
                     SettingsPage.Display -> DisplayPage()
                     SettingsPage.Torrents -> TorrentsPage()
@@ -313,6 +317,31 @@ private fun PageColumn(
 private fun settingsViewModel(): SettingsViewModel {
     val context = LocalPlatformContext.current
     return viewModel { SettingsViewModel(AppGraph.core(context)) }
+}
+
+/** The interface language; the system's by default (see [AppLanguage]). */
+@Composable
+private fun GeneralPage() {
+    val context = LocalPlatformContext.current
+    var language by remember { mutableStateOf(AppLanguage.current(context)) }
+    val system = stringResource(Res.string.settings_language_system)
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_language), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(Res.string.settings_language_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = listOf("") + InterfaceLanguages,
+            selected = language,
+            // Each in its own language, so whoever lands on the wrong one finds theirs.
+            label = { if (it.isEmpty()) system else endonym(it) },
+            onSelect = { tag ->
+                language = tag
+                AppLanguage.set(context, tag)
+            },
+        )
+    }
 }
 
 @Composable

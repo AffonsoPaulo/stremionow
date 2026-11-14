@@ -553,6 +553,10 @@
   <string name="onboarding_debrid_failed">Couldn\'t connect. Check the key and try again.</string>
   <string name="onboarding_skip">Skip</string>
   <string name="onboarding_connect">Connect</string>
+  <string name="settings_general">General</string>
+  <string name="settings_language">App language</string>
+  <string name="settings_language_body">The language of the app\'s own text. Titles and overviews come from addons and keep their language.</string>
+  <string name="settings_language_system">System default</string>
   <string name="settings_playback">Playback</string>
 
   <!-- Signed in to a Stremio account. -->

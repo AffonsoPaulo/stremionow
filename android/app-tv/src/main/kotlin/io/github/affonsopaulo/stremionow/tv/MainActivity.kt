@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.tv
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,12 +11,16 @@ import io.github.affonsopaulo.stremionow.ui.StremioNowApp
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
 import io.github.affonsopaulo.stremionow.ui.data.parse
+import io.github.affonsopaulo.stremionow.ui.l10n.AppLanguage
 import kotlinx.coroutines.launch
 
 /** Entry point of the Android TV and Fire TV app. */
 class MainActivity : ComponentActivity() {
     /** A title to open, from the home screen's Watch Next row. */
     private val link = mutableStateOf<TitleLink.Target?>(null)
+
+    // The language picked in Settings, before Android 13 (see AppLanguage).
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

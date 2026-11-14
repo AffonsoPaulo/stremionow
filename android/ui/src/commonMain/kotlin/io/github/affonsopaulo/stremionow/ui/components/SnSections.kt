@@ -165,13 +165,15 @@ fun SnPosterGrid(
     state: LazyGridState = rememberLazyGridState(),
     content: LazyGridScope.() -> Unit,
 ) {
-    LazyVerticalGrid(
-        state = state,
-        modifier = modifier.fillMaxSize(),
-        columns = GridCells.Adaptive(150.dp),
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
-        content = content,
-    )
+    SnScrollArea(state, modifier) {
+        LazyVerticalGrid(
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            columns = GridCells.Adaptive(150.dp),
+            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
+            content = content,
+        )
+    }
 }

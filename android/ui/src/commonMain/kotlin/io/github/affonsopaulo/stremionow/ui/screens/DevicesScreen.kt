@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -55,6 +56,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
@@ -390,22 +392,26 @@ fun DevicesScreen() {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
-    ) {
-        item {
-            Column(Modifier.widthIn(max = 720.dp), verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
-                SnPageTitle(stringResource(Res.string.devices_title))
-                BasicText(
-                    stringResource(Res.string.devices_intro),
-                    style = SnTypography.body.copy(color = SnColors.fgMuted),
-                )
+    val listState = rememberLazyListState()
+    SnScrollArea(listState) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+        ) {
+            item {
+                Column(Modifier.widthIn(max = 720.dp), verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
+                    SnPageTitle(stringResource(Res.string.devices_title))
+                    BasicText(
+                        stringResource(Res.string.devices_intro),
+                        style = SnTypography.body.copy(color = SnColors.fgMuted),
+                    )
+                }
             }
+            item { ServeSection(state, viewModel) }
+            item { UseSection(state, viewModel) }
         }
-        item { ServeSection(state, viewModel) }
-        item { UseSection(state, viewModel) }
     }
 }
 

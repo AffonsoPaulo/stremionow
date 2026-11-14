@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -61,6 +62,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnListRow
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
@@ -154,13 +156,17 @@ private fun SettingsList(
     pages: List<SettingsPage>,
     onOpenPage: (SettingsPage) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
-    ) {
-        items(pages, key = { it.slug }) { page ->
-            SnListRow(icon = page.icon(), title = stringResource(page.title()), onClick = { onOpenPage(page) })
+    val listState = rememberLazyListState()
+    SnScrollArea(listState) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            items(pages, key = { it.slug }) { page ->
+                SnListRow(icon = page.icon(), title = stringResource(page.title()), onClick = { onOpenPage(page) })
+            }
         }
     }
 }
@@ -284,18 +290,21 @@ private fun PageColumn(
     page: SettingsPage,
     content: @Composable () -> Unit,
 ) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
-    ) {
+    val scroll = rememberScrollState()
+    SnScrollArea(scroll) {
         Column(
-            Modifier.widthIn(max = 880.dp).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space4),
         ) {
-            SnPageTitle(stringResource(page.title()))
-            content()
+            Column(
+                Modifier.widthIn(max = 880.dp).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+            ) {
+                SnPageTitle(stringResource(page.title()))
+                content()
+            }
         }
     }
 }

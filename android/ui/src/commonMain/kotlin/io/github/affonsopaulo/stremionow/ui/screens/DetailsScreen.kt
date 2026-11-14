@@ -74,6 +74,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.SnTextLink
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
@@ -516,7 +517,7 @@ private fun DetailsContent(
         val page = DpSize(maxWidth, maxHeight)
         val phone = SnLayout.formFactor == FormFactor.Phone
         val columns = sourceGridColumns((page.width - SnLayout.gutter * 2).value, SnSpacing.space3.value, phone)
-        SnMinimalScroll(topInset = headerInset) {
+        SnScrollArea(listState, topInset = headerInset, minimalScroll = true) {
             LazyColumn(
                 Modifier.fillMaxSize(),
                 state = listState,

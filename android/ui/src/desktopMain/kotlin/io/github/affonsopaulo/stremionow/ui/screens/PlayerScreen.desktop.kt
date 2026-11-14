@@ -29,9 +29,13 @@ import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import io.github.affonsopaulo.stremionow.ui.desktop.handleMediaCommand
 import io.github.affonsopaulo.stremionow.ui.desktop.handlePlayerShortcut
 import io.github.affonsopaulo.stremionow.ui.desktop.playerBack
+import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import kotlinx.coroutines.launch
 import java.awt.Dialog
+import java.awt.Frame
+import java.awt.Rectangle
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.swing.WindowConstants
@@ -59,13 +63,21 @@ actual fun PlayerScreen(
     }
     val host = LocalDesktopHost.current
     val context = LocalPlatformContext.current
+    val episodeLabel =
+        selection.episode?.let { episode ->
+            val season = episode.season?.toInt()
+            val number = episode.episode?.toInt()
+            if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
+        }
+    val windowTitle = listOfNotNull(selection.details.item.name, episodeLabel).joinToString(" · ") + " – StremioNow"
     val viewModel =
         viewModel(key = "player-${selection.videoId}-${source.url.hashCode()}") {
             PlayerViewModel(AppGraph.core(context), selection, source) { options ->
                 WindowedPlayer.open(
-                    title = "${selection.details.item.name} – StremioNow",
-                    bounds = host.playerBounds(),
+                    title = windowTitle,
+                    bounds = host.playerBounds(framed = VideoWindow.FRAMED),
                     icons = host.icons,
+                    maximized = host.isMaximized,
                 ) { canvas ->
                     MpvPlayer.create(
                         canvas = canvas,
@@ -86,14 +98,21 @@ actual fun PlayerScreen(
         }
     val state = remember { OverlayState() }
     val leave = remember(player) { Leave() }
-    val overlay = remember(player) { createOverlay(player.video, onCloseRequest = leave::back) }
+    // The window's close button, Alt+F4 and the taskbar's "Close window" close the app, as in
+    // the app's own window; Back and Esc are the way back to it.
+    val overlay = remember(player) { createOverlay(player.video, onCloseRequest = host::closeApp) }
     val pair = remember(player) { WindowPair(player.video.frame, overlay) }
     SideEffect {
         leave.onBack = onBack
         leave.restore = {
             player.mpv?.setColorspaceHint(false)
             display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
-            host.comeBack(if (pair.isFullScreen) null else player.video.frame.bounds)
+            val frame = player.video.frame
+            host.comeBack(
+                playerBounds = if (pair.isFullScreen) null else frame.bounds,
+                framed = player.video.isFramed,
+                maximized = frame.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH,
+            )
             player.video.hide()
         }
     }
@@ -177,10 +196,20 @@ private fun createOverlay(
         title = video.frame.title
         isUndecorated = true
         isTransparent = true
-        // Compose's own edge resizer would resize the overlay alone and has no minimum size; the
-        // overlay draws its own handles, which resize both windows in one step (WindowPair).
+        // Compose's own edge resizer would resize the overlay alone and has no minimum size. A
+        // framed video window is resized through its frame; otherwise the overlay draws its own
+        // handles, which resize both windows in one step (WindowPair).
         isResizable = false
-        bounds = video.frame.bounds
+        // Over the area inside a framed window's title bar and borders, or the whole window.
+        val outer = video.frame.bounds
+        val frame = video.frame.insets
+        bounds =
+            Rectangle(
+                outer.x + frame.left,
+                outer.y + frame.top,
+                outer.width - frame.left - frame.right,
+                outer.height - frame.top - frame.bottom,
+            )
         defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
         // Alt+F4 on the overlay, or "Close window" on the taskbar entry of the video window.
         val closeListener =

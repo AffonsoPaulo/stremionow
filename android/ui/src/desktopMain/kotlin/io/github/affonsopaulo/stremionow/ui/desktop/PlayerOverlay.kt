@@ -3,6 +3,8 @@ package io.github.affonsopaulo.stremionow.ui.desktop
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -39,6 +41,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -99,6 +102,9 @@ import java.awt.image.BufferedImage
 
 /** Height kept clear of the bottom controls (timeline and buttons) for prompts above them. */
 private val CONTROLS_CLEARANCE = 128.dp
+
+/** How long it fades back in once restored, while the system's restore animation plays. */
+private const val FADE_IN_MS = 250
 
 /** Step of the ±10 s buttons and of the arrow keys. */
 private const val SEEK_STEP_SECONDS = 10.0
@@ -226,8 +232,9 @@ internal fun handleMediaCommand(
  * The player's interface, drawn over the video in a transparent window: back, title and minimize
  * at the top, play/pause and ±10 s in the center, the timeline and the tracks, episodes, change
  * source, next episode and full screen buttons at the bottom. Areas without controls stay
- * transparent, so the video shows through. Click toggles play, double-click full screen, and
- * dragging the video moves the window.
+ * transparent, so the video shows through. Click toggles play and double-click full screen. With
+ * a borderless video window, dragging the video moves the window, edges resize it, and minimize
+ * is a button here; a framed one has the system's title bar and borders for all three.
  */
 @Composable
 internal fun PlayerOverlay(
@@ -253,6 +260,12 @@ internal fun PlayerOverlay(
     )
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
+    // Out before the pair minimizes, back in when it is restored.
+    val overlayAlpha by animateFloatAsState(
+        targetValue = if (pair.isFadingOut) 0f else 1f,
+        animationSpec = tween(if (pair.isFadingOut) OVERLAY_FADE_OUT_MS else FADE_IN_MS),
+        label = "overlay-fade",
+    )
 
     // Once the first frame tells what the video is: match the display, or ask about HDR. Playback
     // goes on meanwhile, so the question never delays the start.
@@ -272,6 +285,7 @@ internal fun PlayerOverlay(
     Box(
         Modifier
             .fillMaxSize()
+            .graphicsLayer { alpha = overlayAlpha }
             .pointerHoverIcon(if (state.areControlsVisible || failed) PointerIcon.Default else HiddenCursor)
             .pointerInput(Unit) {
                 // Sees every event before the children handle it, and consumes none. Positions are
@@ -317,7 +331,7 @@ internal fun PlayerOverlay(
                 isFullScreen = pair.isFullScreen,
                 hasNext = next != null,
                 onBack = onBack,
-                onMinimize = pair::minimize,
+                onMinimize = if (pair.framed) null else pair::minimize,
                 onToggleFullScreen = pair::toggleFullScreen,
                 onTogglePause = player::togglePause,
                 onSeekBy = player::seekBy,
@@ -386,7 +400,7 @@ internal fun PlayerOverlay(
             null -> {}
         }
 
-        if (!pair.isFullScreen) {
+        if (!pair.isFullScreen && !pair.framed) {
             for (edge in ResizeEdge.entries) ResizeHandle(edge, pair)
         }
     }
@@ -444,7 +458,10 @@ private fun PlayerUnavailable(
     }
 }
 
-/** The video itself: click to play or pause, double-click for full screen, drag to move the window. */
+/**
+ * The video itself: click to play or pause, double-click for full screen, and, with a borderless
+ * video window, drag to move the window.
+ */
 @Composable
 private fun VideoArea(
     player: VideoPlayer,
@@ -459,7 +476,7 @@ private fun VideoArea(
                     onDoubleTap = { pair.toggleFullScreen() },
                 )
             }.pointerInput(pair.isFullScreen) {
-                if (pair.isFullScreen) return@pointerInput
+                if (pair.isFullScreen || pair.framed) return@pointerInput
                 detectDragGestures(
                     onDragStart = { pair.beginGesture(null) },
                     onDrag = { change, _ ->
@@ -481,7 +498,8 @@ private fun Controls(
     isFullScreen: Boolean,
     hasNext: Boolean,
     onBack: () -> Unit,
-    onMinimize: () -> Unit,
+    /** Null when the window's title bar has the minimize button. */
+    onMinimize: (() -> Unit)?,
     onToggleFullScreen: () -> Unit,
     onTogglePause: () -> Unit,
     onSeekBy: (Double) -> Unit,
@@ -534,9 +552,11 @@ private fun Controls(
                     BasicText(label, style = SnTypography.body.copy(color = SnColors.fgSecondary), maxLines = 1)
                 }
             }
-            val minimizeLabel = stringResource(Res.string.player_minimize)
-            WithTooltip(minimizeLabel, side = TooltipSide.Below) {
-                SnIconButton(SnIcons.Minus, minimizeLabel, onMinimize)
+            if (onMinimize != null) {
+                val minimizeLabel = stringResource(Res.string.player_minimize)
+                WithTooltip(minimizeLabel, side = TooltipSide.Below) {
+                    SnIconButton(SnIcons.Minus, minimizeLabel, onMinimize)
+                }
             }
         }
 

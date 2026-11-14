@@ -8,6 +8,7 @@ import java.awt.Image
 import java.awt.Insets
 import java.awt.Rectangle
 import java.awt.Toolkit
+import java.awt.event.WindowEvent
 import java.io.File
 
 /**
@@ -30,9 +31,18 @@ class DesktopHost(
     /** mpv's detailed logs, which include the addresses it opens. */
     val verboseLogs: Boolean = false,
 ) {
-    /** Where the player opens, in AWT units: over the app's window, or over the work area when maximized. */
-    internal fun playerBounds(): Rectangle {
-        if (mainWindow.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH) {
+    /** Whether the app's window is maximized; a framed player window opens maximized too. */
+    internal val isMaximized: Boolean
+        get() = mainWindow.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+
+    /**
+     * Where the player opens, in AWT units. A [framed] player window takes the app's window's
+     * bounds as they are, frame and all. A borderless one covers what the app's window shows:
+     * the work area when maximized, the window without its invisible borders otherwise.
+     */
+    internal fun playerBounds(framed: Boolean): Rectangle {
+        if (framed) return mainWindow.bounds
+        if (isMaximized) {
             val configuration = mainWindow.graphicsConfiguration
             val screen = configuration.bounds
             val insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration)
@@ -48,17 +58,47 @@ class DesktopHost(
 
     /** Hides the app's window while the player shows. */
     internal fun stepAside() {
+        // The player's window takes its place: no closing animation (see WindowTransitions).
+        WindowTransitions.disable(mainWindow)
         mainWindow.isVisible = false
+    }
+
+    /** Closes the app, as the close button of its window does, from the player's window. */
+    internal fun closeApp() {
+        mainWindow.dispatchEvent(WindowEvent(mainWindow, WindowEvent.WINDOW_CLOSING))
     }
 
     /**
      * Shows the app's window again, where the player was unless [playerBounds] is null (the
-     * player was full screen) or the window is maximized. Call it before navigating away from
-     * the player: a hidden window does not draw, and its navigation would not move on.
+     * player was full screen). A [framed] player window hands over its bounds, frame and all, and
+     * whether it was [maximized]; a borderless one only its bounds, ignored while the app's window
+     * is maximized. Call it before navigating away from the player: a hidden window does not
+     * draw, and its navigation would not move on.
      */
-    internal fun comeBack(playerBounds: Rectangle?) {
-        val maximized = mainWindow.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
-        if (playerBounds != null && !maximized) {
+    internal fun comeBack(
+        playerBounds: Rectangle?,
+        framed: Boolean = false,
+        maximized: Boolean = false,
+    ) {
+        if (framed) {
+            when {
+                playerBounds == null -> {
+                    Unit
+                }
+
+                maximized -> {
+                    mainWindow.extendedState = Frame.MAXIMIZED_BOTH
+                }
+
+                else -> {
+                    mainWindow.extendedState = Frame.NORMAL
+                    mainWindow.bounds = playerBounds
+                }
+            }
+            show()
+            return
+        }
+        if (playerBounds != null && !isMaximized) {
             val borders = invisibleBorders()
             mainWindow.bounds =
                 Rectangle(
@@ -68,8 +108,14 @@ class DesktopHost(
                     playerBounds.height + borders.top + borders.bottom,
                 )
         }
+        show()
+    }
+
+    /** Shows the app's window in the player's place, without the system's opening animation. */
+    private fun show() {
         mainWindow.isVisible = true
         mainWindow.toFront()
+        WindowTransitions.enableSoon(mainWindow)
     }
 
     /**

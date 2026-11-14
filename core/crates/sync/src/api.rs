@@ -6,6 +6,9 @@
 //! ones, which are untagged (`DatastoreRequest`). The server answers HTTP 200 with either
 //! `{"result": ...}` or `{"error": {"code", "message"}}` (`APIResult`,
 //! `src/types/api/response.rs`).
+//!
+//! Signing in elsewhere (a link code, Facebook or Apple in the browser) uses two more services,
+//! with plain `GET`s: see [`crate::signin`].
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,10 +17,21 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{RemoteAddon, RemoteLibraryItem, Session, SyncError, User};
+use crate::signin::{LinkAuthKey, WebAccount};
+use crate::{
+    AppleCredentials, FacebookCredentials, LinkCode, RemoteAddon, RemoteLibraryItem, Session,
+    SyncError, User,
+};
 
 /// Base URL of the official API.
 pub const DEFAULT_BASE_URL: &str = "https://api.strem.io/api";
+/// Stremio's website, where Facebook and Apple sign-in run (stremio-web `STREMIO_URL`).
+pub const DEFAULT_WEB_URL: &str = "https://www.strem.io";
+/// The link-code service (stremio-core `LINK_API_URL`).
+pub const DEFAULT_LINK_URL: &str = "https://link.stremio.com";
+
+/// Redirects followed by the sign-in `GET`s, which carry no secret in a body.
+const MAX_REDIRECTS: usize = 3;
 
 /// Datastore collection holding the library (stremio-core `LIBRARY_COLLECTION_NAME`).
 const LIBRARY_COLLECTION: &str = "libraryItem";
@@ -36,34 +50,34 @@ const CODE_WRONG_PASSWORD: u64 = 3;
 #[derive(Debug, Clone)]
 pub struct StremioApi {
     http: reqwest::Client,
+    /// For the sign-in `GET`s: follows a few redirects, to `https` only.
+    http_get: reqwest::Client,
     base_url: String,
+    web_url: String,
+    link_url: String,
 }
 
 impl StremioApi {
     /// Creates a client for the official API whose requests give up after `timeout`.
     pub fn new(timeout: Duration) -> Result<Self, SyncError> {
-        let roots = rustls::RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| SyncError::Network(e.to_string()))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
-            .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            // A redirected POST could resend the password elsewhere; the API never redirects.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| SyncError::Network(e.to_string()))?;
+        // A redirected POST could resend the password elsewhere; the API never redirects.
+        let http = client(timeout, reqwest::redirect::Policy::none())?;
+        let http_get = client(
+            timeout,
+            reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= MAX_REDIRECTS || attempt.url().scheme() != "https" {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }),
+        )?;
         Ok(Self {
             http,
+            http_get,
             base_url: DEFAULT_BASE_URL.to_owned(),
+            web_url: DEFAULT_WEB_URL.to_owned(),
+            link_url: DEFAULT_LINK_URL.to_owned(),
         })
     }
 
@@ -71,6 +85,18 @@ impl StremioApi {
     /// method name, `https://api.strem.io/api` for the official API.
     pub fn with_base_url(mut self, url: &str) -> Self {
         url.trim_end_matches('/').clone_into(&mut self.base_url);
+        self
+    }
+
+    /// Uses another website root for Facebook and Apple sign-in, such as a mock server.
+    pub fn with_web_url(mut self, url: &str) -> Self {
+        url.trim_end_matches('/').clone_into(&mut self.web_url);
+        self
+    }
+
+    /// Uses another link-code service root, such as a mock server.
+    pub fn with_link_url(mut self, url: &str) -> Self {
+        url.trim_end_matches('/').clone_into(&mut self.link_url);
         self
     }
 
@@ -85,6 +111,136 @@ impl StremioApi {
             "facebook": false,
         });
         self.call("login", &body).await
+    }
+
+    /// Logs in with what the website handed over after a Facebook sign-in: the usual `login`,
+    /// with `facebook: true` and the token as the password (stremio-web `useFacebookLogin`).
+    pub async fn login_with_facebook(
+        &self,
+        credentials: &FacebookCredentials,
+    ) -> Result<Session, SyncError> {
+        let body = json!({
+            "type": "Login",
+            "email": credentials.email,
+            "password": credentials.fb_login_token,
+            "facebook": true,
+        });
+        self.call("login", &body).await
+    }
+
+    /// Logs in with what the website handed over after an Apple sign-in (stremio-core
+    /// `AuthRequest::Apple`).
+    pub async fn login_with_apple(
+        &self,
+        credentials: &AppleCredentials,
+    ) -> Result<Session, SyncError> {
+        let body = json!({
+            "type": "Apple",
+            "token": credentials.token,
+            "sub": credentials.sub,
+            "email": credentials.email,
+            "name": credentials.name,
+        });
+        self.call("authWithApple", &body).await
+    }
+
+    /// The page to open in the browser to sign in with Facebook. `state` must pass
+    /// [`crate::is_valid_state`].
+    pub fn facebook_login_url(&self, state: &str) -> String {
+        format!("{}/login-fb/{state}", self.web_url)
+    }
+
+    /// The page to open in the browser to sign in with Apple. `state` must pass
+    /// [`crate::is_valid_state`].
+    pub fn apple_login_url(&self, state: &str) -> String {
+        format!("{}/login-apple/{state}", self.web_url)
+    }
+
+    /// What the website hands over for `state` once the Facebook sign-in there is done, or
+    /// `None` while it is not.
+    pub async fn facebook_credentials(
+        &self,
+        state: &str,
+    ) -> Result<Option<FacebookCredentials>, SyncError> {
+        self.web_account("login-fb-get-acc", state).await
+    }
+
+    /// What the website hands over for `state` once the Apple sign-in there is done, or `None`
+    /// while it is not.
+    pub async fn apple_credentials(
+        &self,
+        state: &str,
+    ) -> Result<Option<AppleCredentials>, SyncError> {
+        self.web_account("login-apple-get-acc", state).await
+    }
+
+    /// A new code to confirm on another device.
+    pub async fn create_link_code(&self) -> Result<LinkCode, SyncError> {
+        let url = self.link_endpoint("create", &[("type", "Create")])?;
+        let (status, bytes) = self.get("link create", url).await?;
+        parse_envelope("linkCreate", &bytes, status)
+    }
+
+    /// The account key once `code` has been confirmed, or `None` while it has not.
+    ///
+    /// The service answers with an error until then; any error counts as "not yet", and
+    /// network failures are returned for the caller to retry.
+    pub async fn read_link_code(&self, code: &str) -> Result<Option<String>, SyncError> {
+        let url = self.link_endpoint("read", &[("type", "Read"), ("code", code)])?;
+        let (status, bytes) = self.get("link read", url).await?;
+        match parse_envelope::<LinkAuthKey>("linkRead", &bytes, status) {
+            Ok(key) if !key.auth_key.is_empty() => Ok(Some(key.auth_key)),
+            Ok(_) | Err(SyncError::Server { .. } | SyncError::SessionExpired) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// `<link root>/api/v2/<path>?<query>`, as stremio-core's `fetch_api` builds it.
+    fn link_endpoint(&self, path: &str, query: &[(&str, &str)]) -> Result<reqwest::Url, SyncError> {
+        let mut url = reqwest::Url::parse(&format!("{}/api/v2/{path}", self.link_url))
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        url.query_pairs_mut().extend_pairs(query);
+        Ok(url)
+    }
+
+    /// Polls one of the website's `<endpoint>/<state>` pages. A failed request or one without
+    /// a `user` means the sign-in is not done yet, as for stremio-web.
+    async fn web_account<T: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        state: &str,
+    ) -> Result<Option<T>, SyncError> {
+        if !crate::is_valid_state(state) {
+            return Err(SyncError::InvalidResponse(
+                "invalid sign-in state".to_owned(),
+            ));
+        }
+        let url = reqwest::Url::parse(&format!("{}/{endpoint}/{state}", self.web_url))
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        let (status, bytes) = self.get(endpoint, url).await?;
+        if !status.is_success() {
+            return Ok(None);
+        }
+        Ok(serde_json::from_slice::<WebAccount<T>>(&bytes)
+            .ok()
+            .and_then(|account| account.user))
+    }
+
+    /// A `GET` whose URL is never logged: it carries the sign-in state or the link code.
+    async fn get(
+        &self,
+        label: &str,
+        url: reqwest::Url,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), SyncError> {
+        log::debug!("Stremio sign-in request: {label}");
+        let response = self
+            .http_get
+            .get(url)
+            .send()
+            .await
+            .map_err(SyncError::from_reqwest)?;
+        let status = response.status();
+        Ok((status, read_body(response).await?))
     }
 
     /// Ends the session on the server. An already expired session counts as success.
@@ -192,6 +348,31 @@ impl StremioApi {
         }
         result
     }
+}
+
+/// An HTTP client with the app's TLS roots and user agent.
+fn client(
+    timeout: Duration,
+    redirect: reqwest::redirect::Policy,
+) -> Result<reqwest::Client, SyncError> {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| SyncError::Network(e.to_string()))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(tls)
+        .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(timeout)
+        .timeout(timeout)
+        .redirect(redirect)
+        .build()
+        .map_err(|e| SyncError::Network(e.to_string()))
 }
 
 /// Reads the body, refusing anything larger than [`MAX_RESPONSE_BYTES`].

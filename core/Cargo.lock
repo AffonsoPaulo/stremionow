@@ -3280,6 +3280,7 @@ name = "stremionow-ffi"
 version = "0.0.1"
 dependencies = [
  "futures",
+ "getrandom 0.4.3",
  "log",
  "serde",
  "serde_json",

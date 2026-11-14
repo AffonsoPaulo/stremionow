@@ -29,6 +29,12 @@ pub enum CoreError {
     /// Signing in to the Stremio account failed or the session ended.
     #[error("sign-in error: {reason}")]
     SignIn { reason: String },
+    /// A sign-in finishing elsewhere (a link code, the browser) was not confirmed in time.
+    #[error("the sign-in was not confirmed in time")]
+    SignInNotConfirmed,
+    /// A sign-in finishing elsewhere was cancelled with `cancel_sign_in`.
+    #[error("the sign-in was cancelled")]
+    SignInCancelled,
     /// Serving to other devices needs a home network, and the device is not on one.
     #[error("not connected to a local network")]
     NoLocalNetwork,

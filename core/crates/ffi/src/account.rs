@@ -4,14 +4,20 @@
 //! The session key lives in memory only; the app keeps it encrypted (Android Keystore) and
 //! hands it back with [`StremioCore::restore_session`] on launch. Without an account nothing
 //! here runs and the app works locally.
+//!
+//! Besides email and password, the account can be signed in to elsewhere: with a link code
+//! confirmed on another device, or with Facebook or Apple in the system browser. Those poll
+//! the official services until the sign-in is done, a limit is reached or the app cancels.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use stremionow_library::{LibraryEntry, ProgressEntry, Store};
 use stremionow_protocol::AddonUrl;
-use stremionow_sync::{LikesApi, RemoteLibraryItem, StremioApi, SyncError, merge_library};
+use stremionow_sync::{LikesApi, RemoteLibraryItem, Session, StremioApi, SyncError, merge_library};
+use tokio::sync::watch;
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::CoreError;
@@ -24,33 +30,86 @@ const ACCOUNT_EMAIL: &str = "account_email";
 const ADDONS_CHANGED: &str = "sync_addons_changed";
 /// Setting with titles removed from My list since the last sync, as `{id: removed_at}`.
 const PENDING_REMOVALS: &str = "sync_pending_removals";
+/// Setting with the time of the last successful sync, in milliseconds since the epoch.
+const LAST_SYNC: &str = "sync_last_at";
 /// Library items of this type are never uploaded, as in the official apps.
 const SKIPPED_KIND: &str = "other";
+
+/// How a sign-in that finishes elsewhere is waited for: a request every `interval`, at most
+/// `tries` times.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Polling {
+    interval: Duration,
+    tries: u32,
+}
+
+/// Facebook in the browser: every second, 25 times, as stremio-web (`useSocialLogin.ts`).
+const FACEBOOK_POLLING: Polling = Polling {
+    interval: Duration::from_secs(1),
+    tries: 25,
+};
+/// Apple in the browser: every 2 seconds, 25 times, as stremio-web.
+const APPLE_POLLING: Polling = Polling {
+    interval: Duration::from_secs(2),
+    tries: 25,
+};
+/// A link code: the official core leaves polling to the apps. Every 5 seconds for 5 minutes
+/// gives time to pick up a phone, scan the code and sign in there; after that the app offers
+/// a new code.
+const LINK_POLLING: Polling = Polling {
+    interval: Duration::from_secs(5),
+    tries: 60,
+};
 
 /// The account half of the core.
 pub(crate) struct Account {
     api: StremioApi,
     pub(crate) likes: LikesApi,
     auth_key: Mutex<Option<String>>,
+    /// Bumped by `cancel_sign_in`; every sign-in that is waiting stops.
+    cancel: watch::Sender<u64>,
+    facebook_polling: Polling,
+    apple_polling: Polling,
+    link_polling: Polling,
 }
 
 impl Account {
     pub(crate) fn new() -> Result<Self, CoreError> {
-        Ok(Self {
-            api: StremioApi::new(API_TIMEOUT)?,
-            likes: LikesApi::new(API_TIMEOUT)?,
-            auth_key: Mutex::new(None),
-        })
+        Ok(Self::with_api(
+            StremioApi::new(API_TIMEOUT)?,
+            LikesApi::new(API_TIMEOUT)?,
+        ))
     }
 
-    /// An account client talking to another server, for tests: the account API and the likes
-    /// service both answer there.
+    fn with_api(api: StremioApi, likes: LikesApi) -> Self {
+        Self {
+            api,
+            likes,
+            auth_key: Mutex::new(None),
+            cancel: watch::Sender::new(0),
+            facebook_polling: FACEBOOK_POLLING,
+            apple_polling: APPLE_POLLING,
+            link_polling: LINK_POLLING,
+        }
+    }
+
+    /// An account client talking to another server for every service (the account API, the
+    /// website, link codes and the likes service), polling quickly, for tests.
     #[cfg(test)]
     pub(crate) fn with_base_url(url: &str) -> Result<Self, CoreError> {
+        let api = StremioApi::new(API_TIMEOUT)?
+            .with_base_url(url)
+            .with_web_url(url)
+            .with_link_url(url);
+        let quick = Polling {
+            interval: Duration::from_millis(10),
+            tries: 5,
+        };
         Ok(Self {
-            api: StremioApi::new(API_TIMEOUT)?.with_base_url(url),
-            likes: LikesApi::new(API_TIMEOUT)?.with_base_url(url),
-            auth_key: Mutex::new(None),
+            facebook_polling: quick,
+            apple_polling: quick,
+            link_polling: quick,
+            ..Self::with_api(api, LikesApi::new(API_TIMEOUT)?.with_base_url(url))
         })
     }
 
@@ -92,24 +151,144 @@ pub struct SyncSummary {
     pub uploaded: u32,
 }
 
+/// A code to confirm on another device where the user is signed in to Stremio.
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
+pub struct LinkCode {
+    /// The code, shown on screen.
+    pub code: String,
+    /// The page where it is confirmed, always `https`: shown as a QR code and opened in the
+    /// browser.
+    pub link: String,
+}
+
+impl std::fmt::Debug for LinkCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LinkCode { .. }")
+    }
+}
+
+/// A sign-in service that runs in the system browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BrowserSignInProvider {
+    Facebook,
+    Apple,
+}
+
+/// A browser sign-in in progress: the page to open, and the random state to wait with.
+#[derive(Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BrowserSignIn {
+    /// The `https` page to open in the system browser (never in a web view inside the app).
+    pub url: String,
+    /// 128 random bits as hex; whoever knows it can collect the sign-in, so it is never logged.
+    pub state: String,
+}
+
+impl std::fmt::Debug for BrowserSignIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BrowserSignIn { .. }")
+    }
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl StremioCore {
     /// Signs in to Stremio, replaces the addons with the account's and merges the library.
     /// Returns the session key for the app to keep encrypted; it is never stored here.
     pub async fn sign_in(&self, email: String, password: String) -> Result<String, CoreError> {
         let session = self.account.api.login(email.trim(), &password).await?;
-        self.account.set_auth_key(Some(session.auth_key.clone()));
-        self.store()?
-            .set_setting(ACCOUNT_EMAIL, &session.user.email)?;
-        // Signed in from here on. A first sync that fails (offline, server hiccup) must not
-        // look like a failed sign-in, or the app would drop a session that is still live;
-        // the next sync retries.
-        if let Err(error) = self.pull_addons(&session.auth_key).await {
-            log::warn!("first addon sync failed: {error}");
-        } else if let Err(error) = self.sync_library(&session.auth_key).await {
-            log::warn!("first library sync failed: {error}");
+        self.signed_in(session).await
+    }
+
+    /// Asks for a code to confirm on another device, the main way to sign in on TV. Wait for
+    /// the confirmation with [`StremioCore::sign_in_with_link_code`].
+    pub async fn create_link_code(&self) -> Result<LinkCode, CoreError> {
+        let code = self.account.api.create_link_code().await?;
+        // The link becomes a QR code and is opened in the browser: web pages only.
+        if !code.link.starts_with("https://") || code.code.is_empty() {
+            return Err(CoreError::Network {
+                reason: "the link-code service sent an unusable code".into(),
+            });
         }
-        Ok(session.auth_key)
+        Ok(LinkCode {
+            code: code.code,
+            link: code.link,
+        })
+    }
+
+    /// Waits until `code` is confirmed on another device, then signs in as
+    /// [`StremioCore::sign_in`] does. Fails with [`CoreError::SignInNotConfirmed`] after a few
+    /// minutes and with [`CoreError::SignInCancelled`] after [`StremioCore::cancel_sign_in`].
+    pub async fn sign_in_with_link_code(&self, code: String) -> Result<String, CoreError> {
+        let api = &self.account.api;
+        let key = self
+            .wait_for(self.account.link_polling, || api.read_link_code(&code))
+            .await?;
+        // The service gives only the key; the account's email comes from the API.
+        let user = api.user(&key).await?;
+        self.signed_in(Session {
+            auth_key: key,
+            user,
+        })
+        .await
+    }
+
+    /// Starts a sign-in with Facebook or Apple: the page to open in the system browser, with a
+    /// new random state. Wait for it with [`StremioCore::sign_in_with_browser`].
+    pub fn start_browser_sign_in(
+        &self,
+        provider: BrowserSignInProvider,
+    ) -> Result<BrowserSignIn, CoreError> {
+        let mut bytes = [0_u8; 16];
+        getrandom::fill(&mut bytes).map_err(|e| CoreError::SignIn {
+            reason: format!("no randomness: {e}"),
+        })?;
+        let state = stremionow_sync::state_from_bytes(bytes);
+        let url = match provider {
+            BrowserSignInProvider::Facebook => self.account.api.facebook_login_url(&state),
+            BrowserSignInProvider::Apple => self.account.api.apple_login_url(&state),
+        };
+        Ok(BrowserSignIn { url, state })
+    }
+
+    /// Waits until the browser sign-in started with `state` is done, then signs in as
+    /// [`StremioCore::sign_in`] does. Fails with [`CoreError::SignInNotConfirmed`] after the
+    /// official app's 25 tries and with [`CoreError::SignInCancelled`] after
+    /// [`StremioCore::cancel_sign_in`].
+    pub async fn sign_in_with_browser(
+        &self,
+        provider: BrowserSignInProvider,
+        state: String,
+    ) -> Result<String, CoreError> {
+        if !stremionow_sync::is_valid_state(&state) {
+            return Err(CoreError::SignIn {
+                reason: "invalid sign-in state".into(),
+            });
+        }
+        let api = &self.account.api;
+        let session = match provider {
+            BrowserSignInProvider::Facebook => {
+                let credentials = self
+                    .wait_for(self.account.facebook_polling, || {
+                        api.facebook_credentials(&state)
+                    })
+                    .await?;
+                api.login_with_facebook(&credentials).await?
+            }
+            BrowserSignInProvider::Apple => {
+                let credentials = self
+                    .wait_for(self.account.apple_polling, || api.apple_credentials(&state))
+                    .await?;
+                api.login_with_apple(&credentials).await?
+            }
+        };
+        self.signed_in(session).await
+    }
+
+    /// Stops every sign-in that is waiting for a confirmation, as when its dialog closes. One
+    /// that already has the account goes on and finishes.
+    pub fn cancel_sign_in(&self) {
+        self.account.cancel.send_modify(|generation| {
+            *generation = generation.wrapping_add(1);
+        });
     }
 
     /// Resumes a session saved by the app, without contacting the server.
@@ -126,6 +305,19 @@ impl StremioCore {
         Ok(self.store()?.setting(ACCOUNT_EMAIL)?)
     }
 
+    /// When the account last synced, in milliseconds since the epoch; `None` when signed out or
+    /// never synced.
+    pub fn last_synced_at(&self) -> Result<Option<i64>, CoreError> {
+        if !self.account.signed_in() {
+            return Ok(None);
+        }
+        Ok(self
+            .store()?
+            .setting(LAST_SYNC)?
+            .and_then(|value| value.parse().ok())
+            .filter(|&time: &i64| time > 0))
+    }
+
     /// Signs out. Local addons, list and progress stay on the device.
     pub async fn sign_out(&self) -> Result<(), CoreError> {
         if let Some(key) = self.account.auth_key() {
@@ -139,6 +331,7 @@ impl StremioCore {
         store.set_setting(ADDONS_CHANGED, "0")?;
         // Ratings stay on the device; the next account must not receive this one's.
         store.delete_settings_with_prefix(crate::ratings::PENDING_PREFIX)?;
+        store.set_setting(LAST_SYNC, "")?;
         Ok(())
     }
 
@@ -162,6 +355,50 @@ impl StremioCore {
 }
 
 impl StremioCore {
+    /// Keeps the session and brings the account's addons and library, after any way of
+    /// signing in. Returns the key for the app to keep in the platform's secret store.
+    async fn signed_in(&self, session: Session) -> Result<String, CoreError> {
+        self.account.set_auth_key(Some(session.auth_key.clone()));
+        self.store()?
+            .set_setting(ACCOUNT_EMAIL, &session.user.email)?;
+        // Signed in from here on. A first sync that fails (offline, server hiccup) must not
+        // look like a failed sign-in, or the app would drop a session that is still live;
+        // the next sync retries.
+        if let Err(error) = self.pull_addons(&session.auth_key).await {
+            log::warn!("first addon sync failed: {error}");
+        } else if let Err(error) = self.sync_library(&session.auth_key).await {
+            log::warn!("first library sync failed: {error}");
+        }
+        Ok(session.auth_key)
+    }
+
+    /// Calls `attempt` every `polling.interval` until it gives a value, `polling.tries` times
+    /// at most, or until [`StremioCore::cancel_sign_in`]. Failed attempts count as "not yet",
+    /// as in the official app: the user may still be signing in.
+    async fn wait_for<T, F, Fut>(&self, polling: Polling, mut attempt: F) -> Result<T, CoreError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<Option<T>, SyncError>>,
+    {
+        let mut cancelled = self.account.cancel.subscribe();
+        cancelled.borrow_and_update();
+        let waiting = async {
+            for _ in 0..polling.tries {
+                tokio::time::sleep(polling.interval).await;
+                match attempt().await {
+                    Ok(Some(value)) => return Ok(value),
+                    Ok(None) => {}
+                    Err(error) => log::debug!("sign-in not confirmed yet: {error}"),
+                }
+            }
+            Err(CoreError::SignInNotConfirmed)
+        };
+        tokio::select! {
+            result = waiting => result,
+            _ = cancelled.changed() => Err(CoreError::SignInCancelled),
+        }
+    }
+
     /// Marks the addon list as changed here, so the next sync sends it instead of
     /// replacing it with the account's.
     pub(crate) fn addons_changed(&self) -> Result<(), CoreError> {
@@ -263,7 +500,9 @@ impl StremioCore {
         if !upload.is_empty() {
             self.account.api.put_library(key, &upload).await?;
         }
-        self.store()?.set_setting(PENDING_REMOVALS, "{}")?;
+        let store = self.store()?;
+        store.set_setting(PENDING_REMOVALS, "{}")?;
+        store.set_setting(LAST_SYNC, &now_millis().to_string())?;
         Ok(SyncSummary {
             downloaded,
             uploaded: u32::try_from(upload.len()).unwrap_or(u32::MAX),
@@ -411,7 +650,7 @@ fn pending_removals(store: &Store) -> Result<HashMap<String, i64>, CoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{body_partial_json, method, path};
+    use wiremock::matchers::{body_partial_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn manifest(id: &str) -> serde_json::Value {
@@ -587,6 +826,305 @@ mod tests {
         assert_eq!(
             core.account_email().expect("reads").as_deref(),
             Some("me@example.com")
+        );
+    }
+
+    /// The usual account mocks plus `getUser` and an accepting `datastorePut`.
+    async fn account_server() -> MockServer {
+        let server = server().await;
+        Mock::given(method("POST"))
+            .and(path("/getUser"))
+            .and(body_partial_json(
+                serde_json::json!({"authKey": "link-key"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"_id": "u1", "email": "linked@example.com"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/datastorePut"))
+            .respond_with(ok())
+            .mount(&server)
+            .await;
+        server
+    }
+
+    fn not_confirmed() -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "error": {"code": 101, "message": "not confirmed"}
+        }))
+    }
+
+    async fn link_code(server: &MockServer, link: &str) {
+        Mock::given(method("GET"))
+            .and(path("/api/v2/create"))
+            .and(query_param("type", "Create"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"code": "CODE1", "link": link, "qrcode": ""}
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn link_code_signs_in_once_confirmed() {
+        let server = account_server().await;
+        link_code(&server, "https://www.stremio.com/link?code=CODE1").await;
+        // Two polls before the user confirms on the phone.
+        Mock::given(method("GET"))
+            .and(path("/api/v2/read"))
+            .respond_with(not_confirmed())
+            .up_to_n_times(2)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/read"))
+            .and(query_param("type", "Read"))
+            .and(query_param("code", "CODE1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"authKey": "link-key"}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        assert_eq!(core.last_synced_at().expect("reads"), None);
+
+        let code = core.create_link_code().await.expect("creates");
+        assert_eq!(code.code, "CODE1");
+        let key = core
+            .sign_in_with_link_code(code.code)
+            .await
+            .expect("signs in");
+        assert_eq!(key, "link-key");
+        assert_eq!(
+            core.account_email().expect("reads").as_deref(),
+            Some("linked@example.com")
+        );
+        assert_eq!(core.addons().expect("lists").len(), 1, "addons came along");
+        assert!(
+            core.is_in_library("tt1".into()).expect("reads"),
+            "and the library"
+        );
+        assert!(core.last_synced_at().expect("reads").is_some());
+
+        core.sign_out().await.expect("signs out");
+        assert_eq!(core.last_synced_at().expect("reads"), None);
+    }
+
+    #[tokio::test]
+    async fn link_codes_must_link_to_a_web_page() {
+        let server = account_server().await;
+        link_code(&server, "javascript:alert(1)").await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        assert!(matches!(
+            core.create_link_code().await,
+            Err(CoreError::Network { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn waiting_stops_after_the_limit() {
+        let server = account_server().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/read"))
+            .respond_with(not_confirmed())
+            .expect(5)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+
+        let result = core.sign_in_with_link_code("CODE1".into()).await;
+        assert!(
+            matches!(result, Err(CoreError::SignInNotConfirmed)),
+            "{result:?}"
+        );
+        assert_eq!(core.account_email().expect("reads"), None);
+    }
+
+    #[tokio::test]
+    async fn waiting_stops_when_cancelled() {
+        let server = account_server().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/read"))
+            .respond_with(not_confirmed())
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+
+        let waiting = tokio::spawn({
+            let core = std::sync::Arc::clone(&core);
+            async move { core.sign_in_with_link_code("CODE1".into()).await }
+        });
+        // Cancel once it is surely waiting: after its first poll.
+        while server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        core.cancel_sign_in();
+        let result = waiting.await.expect("joins");
+        assert!(
+            matches!(result, Err(CoreError::SignInCancelled)),
+            "{result:?}"
+        );
+        let polls = server.received_requests().await.expect("recorded").len();
+        assert!(polls < 5, "stopped before the limit, after {polls} polls");
+
+        // A cancel only stops what was waiting: the next sign-in still works.
+        Mock::given(method("GET"))
+            .and(path("/api/v2/read"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"authKey": "link-key"}
+            })))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let key = core
+            .sign_in_with_link_code("CODE1".into())
+            .await
+            .expect("signs in");
+        assert_eq!(key, "link-key");
+    }
+
+    #[tokio::test]
+    async fn facebook_in_the_browser_signs_in() {
+        let server = account_server().await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+
+        let started = core
+            .start_browser_sign_in(BrowserSignInProvider::Facebook)
+            .expect("starts");
+        let again = core
+            .start_browser_sign_in(BrowserSignInProvider::Facebook)
+            .expect("starts");
+        assert!(stremionow_sync::is_valid_state(&started.state));
+        assert_ne!(started.state, again.state, "each sign-in has its own state");
+        assert_eq!(
+            started.url,
+            format!("{}/login-fb/{}", server.uri(), started.state)
+        );
+
+        let poll_path = format!("/login-fb-get-acc/{}", started.state);
+        Mock::given(method("GET"))
+            .and(path(poll_path.as_str()))
+            .respond_with(ResponseTemplate::new(404))
+            .up_to_n_times(2)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(poll_path.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "user": {"email": "me@example.com", "fbLoginToken": "fb-token"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/login"))
+            .and(body_partial_json(serde_json::json!({
+                "email": "me@example.com", "password": "fb-token", "facebook": true
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"authKey": "fb-session", "user": {"_id": "u1", "email": "me@example.com"}}
+            })))
+            .with_priority(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let key = core
+            .sign_in_with_browser(BrowserSignInProvider::Facebook, started.state)
+            .await
+            .expect("signs in");
+        assert_eq!(key, "fb-session");
+        assert_eq!(
+            core.account_email().expect("reads").as_deref(),
+            Some("me@example.com")
+        );
+        assert_eq!(core.addons().expect("lists").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn apple_in_the_browser_signs_in() {
+        let server = account_server().await;
+        Mock::given(method("POST"))
+            .and(path("/authWithApple"))
+            .and(body_partial_json(serde_json::json!({
+                "type": "Apple", "token": "apple-token", "sub": "sub-1"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"authKey": "apple-session", "user": {"_id": "u1", "email": "me@icloud.example"}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        let started = core
+            .start_browser_sign_in(BrowserSignInProvider::Apple)
+            .expect("starts");
+        assert!(started.url.contains("/login-apple/"));
+        Mock::given(method("GET"))
+            .and(path(format!("/login-apple-get-acc/{}", started.state)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "user": {"token": "apple-token", "sub": "sub-1", "email": "me@icloud.example"}
+            })))
+            .mount(&server)
+            .await;
+
+        let key = core
+            .sign_in_with_browser(BrowserSignInProvider::Apple, started.state)
+            .await
+            .expect("signs in");
+        assert_eq!(key, "apple-session");
+    }
+
+    #[tokio::test]
+    async fn browser_sign_in_refuses_a_made_up_state() {
+        let server = account_server().await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        let result = core
+            .sign_in_with_browser(BrowserSignInProvider::Facebook, "../login".into())
+            .await;
+        assert!(
+            matches!(result, Err(CoreError::SignIn { .. })),
+            "{result:?}"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .expect("recorded")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn sign_in_records_do_not_print_secrets() {
+        let code = LinkCode {
+            code: "CODE1".into(),
+            link: "https://www.stremio.com/link?code=CODE1".into(),
+        };
+        let browser = BrowserSignIn {
+            url: "https://www.strem.io/login-fb/abc".into(),
+            state: "abc".into(),
+        };
+        let debug = format!("{code:?} {browser:?}");
+        assert!(
+            !debug.contains("CODE1") && !debug.contains("abc"),
+            "{debug}"
         );
     }
 }

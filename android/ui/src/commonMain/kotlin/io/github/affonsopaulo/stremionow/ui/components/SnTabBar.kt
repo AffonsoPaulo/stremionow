@@ -36,7 +36,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
-/** Destinations shown in the phone tab bar, in order. The profile lives in the top bar. */
+/** Destinations shown in the phone tab bar, in order. The account lives in the top bar. */
 val PhoneTabs =
     listOf(
         TopDestination.Home,
@@ -129,5 +129,4 @@ private fun TopDestination.icon(): ImageVector =
         TopDestination.Series -> SnIcons.Tv
         TopDestination.Movies -> SnIcons.Film
         TopDestination.MyList -> SnIcons.Bookmark
-        TopDestination.Profile -> SnIcons.User
     }

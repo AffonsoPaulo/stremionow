@@ -28,6 +28,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 log.workspace = true
+# The random state of a browser sign-in (128 bits, as the official app's).
+getrandom.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

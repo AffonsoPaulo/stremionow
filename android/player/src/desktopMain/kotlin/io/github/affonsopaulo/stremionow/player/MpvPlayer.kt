@@ -299,8 +299,13 @@ class MpvPlayer private constructor(
                     if (caFile != null) put("tls-ca-file", caFile.absolutePath)
 
                     put("cache", "yes")
-                    put("demuxer-max-bytes", "${options.bufferAheadMiB}MiB")
-                    put("demuxer-max-back-bytes", "${(options.bufferAheadMiB / 4).coerceAtLeast(8)}MiB")
+                    // Sized by the computer's memory (see StreamMemory): the 16 MiB kept behind
+                    // before held 2 s of a 4K file, so going back 10 s opened the source again
+                    // and showed black until it answered. The user's exact sizes come first.
+                    val memory =
+                        options.streamMemorySizes ?: (options.streamMemory ?: StreamMemory.forThisComputer()).sizes
+                    put("demuxer-max-bytes", "${memory.aheadMiB}MiB")
+                    put("demuxer-max-back-bytes", "${memory.behindMiB}MiB")
 
                     if (options.audioLanguages.isNotEmpty()) put("alang", options.audioLanguages.joinToString(","))
                     if (options.subtitleLanguages.isNotEmpty()) {

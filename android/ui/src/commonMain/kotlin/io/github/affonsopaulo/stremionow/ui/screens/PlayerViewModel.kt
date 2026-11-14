@@ -95,8 +95,16 @@ class PlayerViewModel<out P : VideoPlayer>(
      * Empty until the answer arrives, and for everything else; the file's chapters come first.
      */
     val skips = mutableSkips.asStateFlow()
+    private val mutableWatched = MutableStateFlow<Set<String>>(emptySet())
+
+    /** The title's videos marked watched, for the episodes strip; empty until read. */
+    val watched = mutableWatched.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            mutableWatched.value =
+                runCatching { io { core.watchedVideos(selection.details.item.id) } }.getOrDefault(emptyList()).toSet()
+        }
         source.infoHash?.let { hash ->
             viewModelScope.launch {
                 while (isActive) {

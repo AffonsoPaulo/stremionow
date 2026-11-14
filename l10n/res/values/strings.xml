@@ -441,6 +441,13 @@
   <!-- The letter printed on the key that opens the episodes (E); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_episodes">E</string>
   <string name="player_volume">Volume</string>
+  <string name="player_watch_credits">Watch credits</string>
+  <string name="player_starts_in">Starts in %1$d s</string>
+  <string name="player_closes_in">Closes in %1$d s</string>
+  <string name="player_hdr_not_now">Not now</string>
+  <string name="player_watching_now">Watching now</string>
+  <string name="player_season_menu">Season</string>
+  <string name="player_close_episodes">Close episodes</string>
   <string name="player_playback">Playback</string>
   <string name="player_speed">Speed</string>
   <string name="player_picture">Picture</string>

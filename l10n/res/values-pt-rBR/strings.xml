@@ -313,6 +313,13 @@
   <string name="player_key_next">N</string>
   <string name="player_key_episodes">E</string>
   <string name="player_volume">Volume</string>
+  <string name="player_watch_credits">Ver créditos</string>
+  <string name="player_starts_in">Começa sozinho em %1$d s</string>
+  <string name="player_closes_in">Fecha sozinho em %1$d s</string>
+  <string name="player_hdr_not_now">Agora não</string>
+  <string name="player_watching_now">Assistindo agora</string>
+  <string name="player_season_menu">Temporada</string>
+  <string name="player_close_episodes">Fechar episódios</string>
   <string name="player_playback">Reprodução</string>
   <string name="player_speed">Velocidade</string>
   <string name="player_picture">Imagem</string>

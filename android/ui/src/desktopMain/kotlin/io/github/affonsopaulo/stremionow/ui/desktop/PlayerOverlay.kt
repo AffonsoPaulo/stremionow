@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.Chapters
+import io.github.affonsopaulo.stremionow.player.PlaybackPrompt
 import io.github.affonsopaulo.stremionow.player.PlaybackState
 import io.github.affonsopaulo.stremionow.player.PlayerError
 import io.github.affonsopaulo.stremionow.player.VideoFormat
@@ -155,6 +157,9 @@ internal class OverlayState {
     /** The HDR question is showing. */
     var isAskingHdr by mutableStateOf(false)
 
+    /** Where "Skip intro" (recap, credits) on screen would go, for the S key; null when none shows. */
+    var skipTarget by mutableStateOf<Double?>(null)
+
     fun poke() {
         areControlsVisible = true
         lastActivity = System.nanoTime()
@@ -166,7 +171,8 @@ internal class OverlayState {
 }
 
 /**
- * Space, K, Left, Right, J, L, Up, Down, M, F, N, E and Esc, wherever the focus is in the overlay.
+ * Space, K, Left, Right, J, L, Up, Down, M, F, N, E, S and Esc, wherever the focus is in the overlay.
+ * S skips the intro, recap or credits whose prompt shows.
  * Up and Down change the volume and M mutes it. Esc (and the
  * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
  * [onNext], when there is one; E opens and closes the episodes, when the title has them.
@@ -212,6 +218,11 @@ internal fun handlePlayerShortcut(
 
         Key.M -> {
             SessionVolume.setMuted(player, !player.state.value.isMuted)
+        }
+
+        Key.S -> {
+            val target = state.skipTarget ?: return false
+            player.seekTo(target)
         }
 
         Key.E -> {
@@ -299,12 +310,21 @@ internal fun PlayerOverlay(
     val torrent by viewModel.torrent.collectAsState()
     val prepareFailed by viewModel.prepareFailed.collectAsState()
     val skips by viewModel.skips.collectAsState()
+    val watched by viewModel.watched.collectAsState()
     val promptLift by animateDpAsState(
         if (state.areControlsVisible) CONTROLS_CLEARANCE - SnSpacing.space8 else 0.dp,
         label = "prompt-lift",
     )
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
+    // The prompt on screen now, so S can skip what it offers to skip.
+    val markers =
+        remember(playback.chapters, playback.durationSeconds, skips) {
+            Chapters.markers(playback.chapters, playback.durationSeconds).orElse(skips)
+        }
+    val prompt =
+        PlaybackPrompt.at(markers, playback.positionSeconds, playback.durationSeconds, next != null, playback.isEnded)
+    SideEffect { state.skipTarget = (prompt as? PlaybackPrompt.Skip)?.toSeconds }
     // The intro, recap and credits, from the file's chapters or else AniSkip, marked on the timeline.
     val highlights =
         remember(playback.chapters, playback.durationSeconds, skips) {
@@ -397,7 +417,11 @@ internal fun PlayerOverlay(
             }
         }
 
-        AnimatedVisibility(state.areControlsVisible && !failed, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(
+            state.areControlsVisible && !failed && state.panel != Panel.Episodes,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
             Controls(
                 player = player,
                 selection = selection,
@@ -495,9 +519,20 @@ internal fun PlayerOverlay(
             }
 
             Panel.Episodes -> {
-                SidePanel(stringResource(Res.string.player_episodes), onClose = { state.panel = null }) {
-                    EpisodesList(selection, onOpenEpisode)
-                }
+                // A click above the strip closes it, rather than pausing the video.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { state.panel = null } },
+                )
+                EpisodesStrip(
+                    selection = selection,
+                    playback = playback,
+                    watched = watched,
+                    onOpenEpisode = onOpenEpisode,
+                    onClose = { state.panel = null },
+                    modifier = Modifier.align(Alignment.BottomStart),
+                )
             }
 
             null -> {}

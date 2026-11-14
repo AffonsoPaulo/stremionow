@@ -3,19 +3,23 @@ package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -29,22 +33,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.FallbackReason
 import io.github.affonsopaulo.stremionow.core.SkipSegment
@@ -127,12 +139,13 @@ internal fun PlaybackPrompts(
             isEnded = state.isEnded,
         )
     val focus = remember { FocusRequester() }
+    var creditsChosen by remember(next?.id) { mutableStateOf(false) }
     LaunchedEffect(prompt, takeFocus) {
         if (prompt != null && takeFocus) runCatching { focus.requestFocus() }
     }
     when (prompt) {
         is PlaybackPrompt.Skip -> {
-            SnButton(
+            SkipPill(
                 text =
                     stringResource(
                         when (prompt.kind) {
@@ -141,20 +154,20 @@ internal fun PlaybackPrompts(
                             SkipKind.Credits -> Res.string.player_skip_credits
                         },
                     ),
-                icon = SnIcons.Skip,
-                style = SnButtonStyle.Secondary,
                 onClick = { onSeekTo(prompt.toSeconds) },
                 modifier = modifier.focusRequester(focus),
             )
         }
 
         PlaybackPrompt.UpNext -> {
-            if (next != null) {
+            // "Watch credits" hides the card until the episode ends.
+            if (next != null && (!creditsChosen || state.isEnded)) {
                 UpNext(
                     episode = next,
                     // mpv pauses itself at the end of a file; only a pause by the viewer stops the count.
                     paused = state.isPaused && !state.isEnded,
                     onPlay = { onOpenEpisode(next) },
+                    onWatchCredits = { creditsChosen = true },
                     modifier = modifier.focusRequester(focus),
                 )
             }
@@ -409,15 +422,45 @@ private fun torrentPhaseText(progress: TorrentProgress): String =
         }
     }
 
+/** The "Skip intro" (recap, credits) prompt: a pill with a white border over the video. */
+@Composable
+internal fun SkipPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(SnRadius.radiusFull)
+    Row(
+        modifier
+            .heightIn(min = 52.dp)
+            .snClickable(shape, onClick = onClick)
+            .background(SnColors.scrimSoft, shape)
+            .border(2.dp, SnColors.fg.copy(alpha = 0.85f), shape)
+            .padding(horizontal = SnSpacing.space6),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+    ) {
+        BasicText(text, style = SnTypography.bodyLg.copy(color = SnColors.fg, fontWeight = FontWeight.Bold))
+        Image(
+            SnIcons.Skip,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            colorFilter = ColorFilter.tint(SnColors.fg),
+        )
+    }
+}
+
 /**
- * The next episode's card, counting down before it plays. Pausing stops the countdown, and the
- * card is a regular focusable button, so a remote can start it at once.
+ * The next episode, near the end: its picture with "Next episode · S1 E6" and its title, a
+ * "Next episode" button that fills up as the countdown runs (it plays the episode when full,
+ * unless the viewer pauses), "Watch credits", which hides the card, and the time left in words.
  */
 @Composable
 internal fun UpNext(
     episode: Episode,
     paused: Boolean,
     onPlay: () -> Unit,
+    onWatchCredits: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var remaining by remember(episode.id) { mutableIntStateOf(UP_NEXT_COUNTDOWN) }
@@ -428,28 +471,127 @@ internal fun UpNext(
         }
         if (remaining == 0) onPlay()
     }
+    val fill by animateFloatAsState(
+        targetValue = 1f - remaining.toFloat() / UP_NEXT_COUNTDOWN,
+        animationSpec = tween(1_000, easing = LinearEasing),
+        label = "up-next-fill",
+    )
     val number = episode.episode?.toInt()
     val season = episode.season?.toInt()
-    val label = if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
-    Column(
-        modifier =
-            modifier
-                .widthIn(max = 360.dp)
-                .snClickable(RoundedCornerShape(SnRadius.radiusLg), onClick = onPlay)
-                .background(SnColors.surfaceRaised, RoundedCornerShape(SnRadius.radiusLg))
-                .padding(SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+    val code = if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
+    val heading = listOfNotNull(stringResource(Res.string.player_next), code).joinToString(" · ")
+    val card = RoundedCornerShape(SnRadius.radiusLg)
+    Column(modifier.width(PROMPT_WIDTH), verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .shadow(18.dp, card)
+                .clip(card)
+                .background(SnColors.surfaceRaised),
+        ) {
+            if (episode.thumbnail != null) {
+                AsyncImage(
+                    model = episode.thumbnail,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(0.4f to Color.Transparent, 1f to SnColors.scrim)),
+            )
+            Column(
+                Modifier.align(Alignment.BottomStart).padding(SnSpacing.space4),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+            ) {
+                BasicText(heading.uppercase(), style = SnTypography.overline.copy(color = SnColors.fgSecondary))
+                if (episode.title.isNotBlank()) {
+                    BasicText(
+                        episode.title,
+                        style = SnTypography.headingMd.copy(color = SnColors.fg),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FillingButton(
+                text = stringResource(Res.string.player_next),
+                fill = fill,
+                onClick = onPlay,
+                modifier = Modifier.weight(1f),
+            )
+            OutlineButton(stringResource(Res.string.player_watch_credits), onWatchCredits)
+        }
+        BasicText(
+            stringResource(Res.string.player_starts_in, remaining),
+            style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+        )
+    }
+}
+
+/** A white pill that fills from the left as [fill] goes from 0 to 1, over a grey one. */
+@Composable
+private fun FillingButton(
+    text: String,
+    fill: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(SnRadius.radiusFull)
+    Box(
+        modifier
+            .heightIn(min = 50.dp)
+            .snClickable(shape, onClick = onClick)
+            .clip(shape)
+            .background(SnColors.fgMuted),
+        contentAlignment = Alignment.Center,
     ) {
-        BasicText(
-            stringResource(Res.string.player_up_next, remaining),
-            style = SnTypography.label.copy(color = SnColors.accentText),
+        Box(
+            Modifier.matchParentSize().drawWithContent {
+                clipRect(right = size.width * fill) { drawRect(SnColors.fg) }
+            },
         )
-        BasicText(
-            listOfNotNull(label, episode.title.ifBlank { null }).joinToString(" · "),
-            style = SnTypography.bodyLg.copy(color = SnColors.fg),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(
+            Modifier.padding(horizontal = SnSpacing.space6),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            Image(
+                SnIcons.Play,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                colorFilter = ColorFilter.tint(SnColors.bg),
+            )
+            BasicText(text, style = SnTypography.buttonLg.copy(color = SnColors.bg))
+        }
+    }
+}
+
+/** A pill with a thin light border over a dark see-through fill, for a prompt's second choice. */
+@Composable
+private fun OutlineButton(
+    text: String,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(SnRadius.radiusFull)
+    Box(
+        Modifier
+            .heightIn(min = 50.dp)
+            .snClickable(shape, onClick = onClick)
+            .background(SnColors.scrimSoft, shape)
+            .border(1.dp, SnColors.fg.copy(alpha = 0.45f), shape)
+            .padding(horizontal = SnSpacing.space6),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(text, style = SnTypography.buttonLg.copy(color = SnColors.fg))
     }
 }
 
@@ -457,11 +599,12 @@ internal fun UpNext(
 internal const val HDR_PROMPT_TIMEOUT_MS = 10_000
 
 /**
- * A small prompt in the corner, in the place of the skip and up-next prompts, asking whether to
- * turn on HDR for this title ([onTurnOn]) or for every HDR video ([onAlways]). Playback goes on
- * meanwhile. Unanswered, it fades away after [HDR_PROMPT_TIMEOUT_MS] through [onTimeout], which
- * changes nothing; a thin line shows the time left. It never takes the focus, so the player's
- * keys keep working.
+ * Asks whether to turn on HDR for this title ([onTurnOn]) or for every HDR video ([onAlways]),
+ * in the shape of the next episode's card: the question in the card, a close button in its
+ * corner, the two choices below and the time left in words. Playback goes on meanwhile.
+ * Closing it, or letting the time run out ([onTimeout]), means "not now", which changes
+ * nothing; the countdown is text only, since running out does not turn HDR on. It never takes
+ * the focus, so the player's keys keep working.
  */
 @Composable
 internal fun HdrPrompt(
@@ -471,44 +614,63 @@ internal fun HdrPrompt(
     modifier: Modifier = Modifier,
 ) {
     val title = stringResource(Res.string.player_hdr_title)
-    val remaining = remember { Animatable(1f) }
+    var remaining by remember { mutableIntStateOf(HDR_PROMPT_TIMEOUT_MS / 1_000) }
     LaunchedEffect(Unit) {
-        remaining.animateTo(0f, tween(HDR_PROMPT_TIMEOUT_MS, easing = LinearEasing))
+        while (remaining > 0) {
+            delay(1_000)
+            remaining--
+        }
         onTimeout()
     }
-    val shape = RoundedCornerShape(SnRadius.radiusLg)
+    val card = RoundedCornerShape(SnRadius.radiusLg)
     Column(
-        modifier =
-            modifier
-                .widthIn(max = 360.dp)
-                .semantics {
-                    paneTitle = title
-                    liveRegion = LiveRegionMode.Polite
-                }.background(SnColors.surfaceRaised, shape)
-                .clip(shape),
+        modifier
+            .width(PROMPT_WIDTH)
+            .semantics {
+                paneTitle = title
+                liveRegion = LiveRegionMode.Polite
+            },
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {
-        Column(
-            Modifier.padding(SnSpacing.space4),
-            verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-        ) {
-            BasicText(title, style = SnTypography.bodyLg.copy(color = SnColors.fg))
-            BasicText(
-                stringResource(Res.string.player_hdr_body),
-                style = SnTypography.body.copy(color = SnColors.fgSecondary),
-            )
-            Row(
-                Modifier.padding(top = SnSpacing.space2),
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
-            ) {
-                SnButton(stringResource(Res.string.player_hdr_turn_on), onTurnOn)
-                SnButton(stringResource(Res.string.player_hdr_always), onAlways, style = SnButtonStyle.Secondary)
-            }
-        }
         Box(
             Modifier
-                .fillMaxWidth(remaining.value)
-                .height(2.dp)
-                .background(SnColors.accent),
+                .fillMaxWidth()
+                .shadow(18.dp, card)
+                .background(SnColors.surfaceRaised, card)
+                .border(1.dp, SnColors.border, card),
+        ) {
+            Column(
+                Modifier.padding(
+                    start = SnSpacing.space4,
+                    top = SnSpacing.space4,
+                    bottom = SnSpacing.space4,
+                    end = SnSpacing.space12,
+                ),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+            ) {
+                BasicText(title, style = SnTypography.headingMd.copy(color = SnColors.fg))
+                BasicText(
+                    stringResource(Res.string.player_hdr_body),
+                    style = SnTypography.body.copy(color = SnColors.fgSecondary),
+                )
+            }
+            SnIconButton(
+                SnIcons.Close,
+                stringResource(Res.string.player_hdr_not_now),
+                onTimeout,
+                modifier = Modifier.align(Alignment.TopEnd).padding(SnSpacing.space1),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+            SnButton(stringResource(Res.string.player_hdr_turn_on), onTurnOn)
+            OutlineButton(stringResource(Res.string.player_hdr_always), onAlways)
+        }
+        BasicText(
+            stringResource(Res.string.player_closes_in, remaining),
+            style = SnTypography.caption.copy(color = SnColors.fgSecondary),
         )
     }
 }
+
+/** Width of the corner prompts: the next episode's card and the HDR question. */
+private val PROMPT_WIDTH = 400.dp

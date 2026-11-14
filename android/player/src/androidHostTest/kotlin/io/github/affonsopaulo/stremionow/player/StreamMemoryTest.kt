@@ -2,6 +2,8 @@
 package io.github.affonsopaulo.stremionow.player
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class StreamMemoryTest {
@@ -18,5 +20,24 @@ class StreamMemoryTest {
         assertEquals(StreamMemory.BALANCED, StreamMemory.forDeviceMemory(16 * gib))
         assertEquals(StreamMemory.SMOOTH, StreamMemory.forDeviceMemory(16 * gib + 1))
         assertEquals(StreamMemory.SMOOTH, StreamMemory.forDeviceMemory(33_500_000_000))
+    }
+
+    @Test
+    fun levelsKeepTheirSizes() {
+        assertEquals(StreamMemorySizes(64, 32), StreamMemory.LIGHT.sizes)
+        assertEquals(StreamMemorySizes(128, 128), StreamMemory.BALANCED.sizes)
+        assertEquals(StreamMemorySizes(256, 256), StreamMemory.SMOOTH.sizes)
+        StreamMemory.entries.forEach { assertEquals(it, it.sizes.level) }
+        assertNull(StreamMemorySizes(100, 200).level)
+    }
+
+    @Test
+    fun customSizesStayInRange() {
+        StreamMemorySizes(16, 8)
+        StreamMemorySizes(1024, 1024)
+        assertThrows(IllegalArgumentException::class.java) { StreamMemorySizes(15, 128) }
+        assertThrows(IllegalArgumentException::class.java) { StreamMemorySizes(128, 7) }
+        assertThrows(IllegalArgumentException::class.java) { StreamMemorySizes(1025, 128) }
+        assertThrows(IllegalArgumentException::class.java) { StreamMemorySizes(128, 1025) }
     }
 }

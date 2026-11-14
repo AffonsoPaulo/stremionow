@@ -133,12 +133,16 @@ fun SnSeekBar(
                         }
                     }
                 }.pointerInput(duration) {
-                    detectTapGestures { offset -> if (duration > 0) onSeek(fractionAt(offset.x) * duration) }
+                    // The bar's width at the time of the gesture: it changes with the window and
+                    // with the width of the time labels beside it.
+                    val at = { x: Float -> (x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f) }
+                    detectTapGestures { offset -> if (duration > 0) onSeek(at(offset.x) * duration) }
                 }.pointerInput(duration) {
+                    val at = { x: Float -> (x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f) }
                     detectHorizontalDragGestures(
                         onDragStart = { offset ->
-                            dragFraction = fractionAt(offset.x)
-                            onScrub(fractionAt(offset.x) * duration)
+                            dragFraction = at(offset.x)
+                            onScrub(at(offset.x) * duration)
                         },
                         onDragEnd = {
                             dragFraction?.let { onSeek(it * duration) }
@@ -151,8 +155,8 @@ fun SnSeekBar(
                         },
                         onHorizontalDrag = { change, _ ->
                             change.consume()
-                            dragFraction = fractionAt(change.position.x)
-                            onScrub(fractionAt(change.position.x) * duration)
+                            dragFraction = at(change.position.x)
+                            onScrub(at(change.position.x) * duration)
                         },
                     )
                 },

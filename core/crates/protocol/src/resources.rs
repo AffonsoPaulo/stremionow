@@ -77,6 +77,13 @@ pub struct MetaDetail {
     pub videos: Vec<Video>,
     #[serde(default, deserialize_with = "null_as_default")]
     pub trailers: Vec<Trailer>,
+    /// Trailers as streams, the newer form (Cinemeta sends both): usually YouTube ids.
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub trailer_streams: Vec<TrailerStream>,
+    /// Links the addon gives with the title: its IMDb page, Stremio's share link, genres,
+    /// cast. Entries that cannot be read are skipped.
+    #[serde(default, deserialize_with = "lenient_list")]
+    pub links: Vec<Link>,
 }
 
 /// A trailer, identified by its YouTube id.
@@ -84,6 +91,28 @@ pub struct MetaDetail {
 pub struct Trailer {
     #[serde(default)]
     pub source: Option<String>,
+}
+
+/// A trailer in `trailerStreams`: a stream with a YouTube id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrailerStream {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub yt_id: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub title: Option<String>,
+}
+
+/// A link of a title (stremio-core `Link`); `category` says what it is, such as `imdb`,
+/// `share`, `Genres` or `Cast`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Link {
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub category: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    pub url: Option<String>,
 }
 
 /// An episode or other playable video of a title.
@@ -98,6 +127,8 @@ pub struct Video {
     pub released: Option<String>,
     pub overview: Option<String>,
     pub thumbnail: Option<String>,
+    /// Length as the addon wrote it, such as `45 min` or `45`, when it gives one.
+    pub runtime: Option<String>,
 }
 
 /// A video as addons send it. They disagree on field names and Cinemeta sends several
@@ -127,6 +158,8 @@ struct RawVideo {
     description: Option<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     thumbnail: Option<String>,
+    #[serde(default, deserialize_with = "lenient_string")]
+    runtime: Option<String>,
 }
 
 impl From<RawVideo> for Video {
@@ -139,6 +172,7 @@ impl From<RawVideo> for Video {
             released: raw.released,
             overview: raw.overview.or(raw.description),
             thumbnail: raw.thumbnail,
+            runtime: raw.runtime,
         }
     }
 }
@@ -203,6 +237,22 @@ pub struct Subtitle {
     /// Language, usually as an ISO 639-2 code such as `por`.
     #[serde(default, deserialize_with = "null_as_default")]
     pub lang: String,
+}
+
+/// Reads a list, skipping entries that do not have the expected shape instead of failing the
+/// whole response; `null` or anything that is not a list reads as empty.
+fn lenient_list<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .filter_map(|value| serde_json::from_value(value).ok())
+            .collect(),
+        _ => Vec::new(),
+    })
 }
 
 /// Reads a non-negative whole number sent as a number or a numeric string; anything else
@@ -301,6 +351,35 @@ mod tests {
         assert_eq!(videos[0].overview.as_deref(), Some("O"));
         assert_eq!((videos[1].season, videos[1].episode), (Some(1), Some(2)));
         assert_eq!((videos[2].season, videos[2].episode), (None, None));
+    }
+
+    #[test]
+    fn parses_links_trailer_streams_and_runtimes_leniently() {
+        let response: MetaResponse = serde_json::from_value(serde_json::json!({
+            "meta": {
+                "id": "tt5", "type": "series", "name": "S",
+                "links": [
+                    {"name": "7.9", "category": "imdb", "url": "https://imdb.com/title/tt5"},
+                    "not a link",
+                    {"name": "S", "category": "share", "url": "https://www.strem.io/s/series/s-5"}
+                ],
+                "trailerStreams": [{"title": "Trailer", "ytId": "abc"}, 7],
+                "videos": [{"id": "tt5:1:1", "season": 1, "episode": 1, "runtime": 45}]
+            }
+        }))
+        .expect("valid meta");
+        let meta = &response.meta;
+        assert_eq!(meta.links.len(), 2, "the bad entry is skipped");
+        assert_eq!(meta.links[1].category.as_deref(), Some("share"));
+        assert_eq!(meta.trailer_streams.len(), 1);
+        assert_eq!(meta.trailer_streams[0].yt_id.as_deref(), Some("abc"));
+        assert_eq!(meta.videos[0].runtime.as_deref(), Some("45"));
+
+        let bare: MetaResponse = serde_json::from_value(serde_json::json!({
+            "meta": {"id": "tt6", "type": "movie", "name": "M", "links": null, "trailerStreams": {}}
+        }))
+        .expect("valid meta");
+        assert!(bare.meta.links.is_empty() && bare.meta.trailer_streams.is_empty());
     }
 
     #[test]

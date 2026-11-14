@@ -49,6 +49,18 @@ object PlaybackSession {
     @Volatile var continueWith: String? = null
 
     /**
+     * The next episode's source, found by the player while the episode before it plays, so
+     * moving on goes straight to the player, as in Stremio; see [NextUp].
+     */
+    @Volatile var nextUp: NextUp? = null
+
+    /** A source of [episodeId] of the same binge group as the one playing, from the same addon. */
+    data class NextUp(
+        val episodeId: String,
+        val source: StreamSource,
+    )
+
+    /**
      * Set by the player when it hands back to the details page to choose a source: "Change
      * source", or Up Next without a source of the same group. The page opens the sources of
      * [selection]'s video in place of its episodes, then clears it.
@@ -58,6 +70,7 @@ object PlaybackSession {
     fun select(selection: Selection) {
         this.selection = selection
         source = null
+        nextUp = null
     }
 
     /** Asks the details page of [selection]'s title to show its sources; see [showSources]. */

@@ -137,11 +137,39 @@ class PlayerViewModel<out P : VideoPlayer>(
             selectSubtitleIfMissing()
         }
         if (settings?.aniskip != false) viewModelScope.launch { findSkips() }
+        viewModelScope.launch { findNextSource() }
+        // Offered first among this video's sources next time, however it was picked.
+        source.identity?.let { identity ->
+            viewModelScope.launch { runCatching { io { core.rememberPlayedSource(selection.videoId, identity) } } }
+        }
         viewModelScope.launch {
             while (isActive) {
                 delay(PROGRESS_INTERVAL_MS)
                 if (!player.state.value.isPaused) saveProgress()
             }
+        }
+    }
+
+    /**
+     * Finds the next episode's source while this one plays, as Stremio does: asks the addon
+     * of the source playing for the next episode's sources and keeps the first of the same
+     * binge group, so moving on needs no choice ([PlaybackSession.nextUp]). Without a group, or
+     * a match, the next episode's sources show instead.
+     */
+    private suspend fun findNextSource() {
+        val next = selection.nextEpisode ?: return
+        val group = source.bingeGroup ?: return
+        val addon =
+            runCatching { io { core.streamAddons(selection.kind, next.id) } }
+                .getOrDefault(emptyList())
+                .firstOrNull { it.name == source.addonName } ?: return
+        val match =
+            runCatching { core.streamsFrom(addon.manifestUrl, selection.kind, next.id) }
+                .getOrDefault(emptyList())
+                .firstOrNull { it.bingeGroup == group && it.playsInApp } ?: return
+        // Only while this episode is still the one chosen: the session may have moved on.
+        if (PlaybackSession.selection?.videoId == selection.videoId) {
+            PlaybackSession.nextUp = PlaybackSession.NextUp(next.id, match)
         }
     }
 

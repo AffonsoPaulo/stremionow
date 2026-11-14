@@ -479,12 +479,22 @@ private fun AppNavHost(
                     PlaybackSession.returnToSources()
                     navController.popBackStack()
                 },
+                // The next episode plays at once when the player already found its source of
+                // the same binge group, in place of this player; otherwise its sources show.
                 onOpenEpisode = { episode ->
                     val current = PlaybackSession.selection ?: return@PlayerScreen
-                    PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
+                    val ready = PlaybackSession.nextUp?.takeIf { it.episodeId == episode.id }?.source
+                    val group = PlaybackSession.source?.bingeGroup
                     PlaybackSession.select(current.copy(episode = episode))
-                    PlaybackSession.returnToSources()
-                    navController.popBackStack()
+                    if (ready != null) {
+                        PlaybackSession.source = ready
+                        PlaybackSession.alternatives = emptyList()
+                        navController.navigate(Routes.PLAYER) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                    } else {
+                        PlaybackSession.continueWith = group
+                        PlaybackSession.returnToSources()
+                        navController.popBackStack()
+                    }
                 },
             )
         }

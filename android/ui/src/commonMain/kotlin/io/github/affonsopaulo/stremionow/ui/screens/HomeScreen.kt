@@ -102,6 +102,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
@@ -315,7 +316,7 @@ private fun HomeContent(
                         .offset { IntOffset(0, -listState.heroScroll()) },
             )
         }
-        SnMinimalScroll(topInset = headerInset) {
+        SnScrollArea(listState, topInset = headerInset, minimalScroll = true) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 state = listState,

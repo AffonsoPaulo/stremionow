@@ -54,6 +54,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
@@ -371,145 +372,147 @@ fun AddonsScreen() {
             ((maxWidth - gutter * 2 + SnSpacing.space3) / (SnLayout.listCellMin + SnSpacing.space3))
                 .toInt()
                 .coerceAtLeast(1)
-        LazyVerticalGrid(
-            state = gridState,
-            columns = GridCells.Fixed(1),
-            modifier = Modifier.fillMaxSize(),
-            contentPadding =
-                PaddingValues(
-                    start = SnLayout.gutter,
-                    end = SnLayout.gutter,
-                    top = SnSpacing.space2,
-                    bottom = SnSpacing.space8,
-                ),
-            verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-        ) {
-            item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
-                Header(
-                    state = state,
-                    phone = phone,
-                    typeOptions = options,
-                    type = type,
-                    tabFocus = tabFocus,
-                    onSelect = viewModel::select,
-                    onAdd = { viewModel.openLink() },
-                    onType = viewModel::setType,
-                    onQuery = viewModel::setQuery,
-                )
-            }
-            when (state.section) {
-                AddonsSection.Installed -> {
-                    val visible = state.installed.filter(matches)
-                    when {
-                        !state.installedLoaded -> {
-                            Unit
-                        }
-
-                        state.installed.isEmpty() -> {
-                            item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                                SnMessage(
-                                    title = stringResource(Res.string.addons_empty_title),
-                                    body = stringResource(Res.string.addons_empty_body),
-                                    actionText = stringResource(Res.string.addons_open_discover),
-                                    onAction = { viewModel.select(AddonsSection.Discover) },
-                                )
+        SnScrollArea(gridState) {
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding =
+                    PaddingValues(
+                        start = SnLayout.gutter,
+                        end = SnLayout.gutter,
+                        top = SnSpacing.space2,
+                        bottom = SnSpacing.space8,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            ) {
+                item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
+                    Header(
+                        state = state,
+                        phone = phone,
+                        typeOptions = options,
+                        type = type,
+                        tabFocus = tabFocus,
+                        onSelect = viewModel::select,
+                        onAdd = { viewModel.openLink() },
+                        onType = viewModel::setType,
+                        onQuery = viewModel::setQuery,
+                    )
+                }
+                when (state.section) {
+                    AddonsSection.Installed -> {
+                        val visible = state.installed.filter(matches)
+                        when {
+                            !state.installedLoaded -> {
+                                Unit
                             }
-                        }
 
-                        visible.isEmpty() -> {
-                            item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
-                                NoMatch(onClear = viewModel::clearFilters)
-                            }
-                        }
-
-                        else -> {
-                            if (filtering) {
-                                item(key = "reorder-hint", span = { GridItemSpan(maxLineSpan) }) {
-                                    BasicText(
-                                        stringResource(Res.string.addons_reorder_hint),
-                                        style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                            state.installed.isEmpty() -> {
+                                item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                                    SnMessage(
+                                        title = stringResource(Res.string.addons_empty_title),
+                                        body = stringResource(Res.string.addons_empty_body),
+                                        actionText = stringResource(Res.string.addons_open_discover),
+                                        onAction = { viewModel.select(AddonsSection.Discover) },
                                     )
                                 }
                             }
-                            itemsIndexed(visible, key = {
-                                _,
-                                addon,
-                                ->
-                                "installed/${addon.manifestUrl}"
-                            }) { shownAt, addon ->
-                                val index = state.installed.indexOf(addon)
-                                val removeRequester =
-                                    remember(addon.manifestUrl) {
-                                        removeFocus.getOrPut(addon.manifestUrl) { FocusRequester() }
+
+                            visible.isEmpty() -> {
+                                item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
+                                    NoMatch(onClear = viewModel::clearFilters)
+                                }
+                            }
+
+                            else -> {
+                                if (filtering) {
+                                    item(key = "reorder-hint", span = { GridItemSpan(maxLineSpan) }) {
+                                        BasicText(
+                                            stringResource(Res.string.addons_reorder_hint),
+                                            style = SnTypography.caption.copy(color = SnColors.fgMuted),
+                                        )
                                     }
-                                InstalledAddonCard(
-                                    addon = addon,
-                                    removeFocus = removeRequester,
-                                    position = index,
-                                    // Reordering a filtered list would move addons past hidden ones.
-                                    canReorder = !filtering,
-                                    canMoveUp = index > 0,
-                                    canMoveDown = index < state.installed.lastIndex,
-                                    onlyTitleMetadata = isOnlyTitleMetadata(addon, state.installed),
-                                    onToggle = { viewModel.setEnabled(addon, !addon.enabled) },
-                                    onMoveUp = { viewModel.move(addon, index - 1) },
-                                    onMoveDown = { viewModel.move(addon, index + 1) },
-                                    onRemove = {
-                                        val next = visible.getOrNull(shownAt + 1) ?: visible.getOrNull(shownAt - 1)
-                                        focusAfterRemoval = next?.manifestUrl
-                                        viewModel.remove(addon)
-                                    },
-                                    onShare = { sharing = addon },
-                                    onConfigure = { configuring = addon },
-                                )
+                                }
+                                itemsIndexed(visible, key = {
+                                    _,
+                                    addon,
+                                    ->
+                                    "installed/${addon.manifestUrl}"
+                                }) { shownAt, addon ->
+                                    val index = state.installed.indexOf(addon)
+                                    val removeRequester =
+                                        remember(addon.manifestUrl) {
+                                            removeFocus.getOrPut(addon.manifestUrl) { FocusRequester() }
+                                        }
+                                    InstalledAddonCard(
+                                        addon = addon,
+                                        removeFocus = removeRequester,
+                                        position = index,
+                                        // Reordering a filtered list would move addons past hidden ones.
+                                        canReorder = !filtering,
+                                        canMoveUp = index > 0,
+                                        canMoveDown = index < state.installed.lastIndex,
+                                        onlyTitleMetadata = isOnlyTitleMetadata(addon, state.installed),
+                                        onToggle = { viewModel.setEnabled(addon, !addon.enabled) },
+                                        onMoveUp = { viewModel.move(addon, index - 1) },
+                                        onMoveDown = { viewModel.move(addon, index + 1) },
+                                        onRemove = {
+                                            val next = visible.getOrNull(shownAt + 1) ?: visible.getOrNull(shownAt - 1)
+                                            focusAfterRemoval = next?.manifestUrl
+                                            viewModel.remove(addon)
+                                        },
+                                        onShare = { sharing = addon },
+                                        onConfigure = { configuring = addon },
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                AddonsSection.Discover -> {
-                    val visible = state.catalog.filter { matches(it.addon) }
-                    when {
-                        state.catalog.isEmpty() && state.catalogFailed -> {
-                            item(key = "catalog-error", span = { GridItemSpan(maxLineSpan) }) {
-                                SnLoadError(onRetry = viewModel::loadCatalog)
+                    AddonsSection.Discover -> {
+                        val visible = state.catalog.filter { matches(it.addon) }
+                        when {
+                            state.catalog.isEmpty() && state.catalogFailed -> {
+                                item(key = "catalog-error", span = { GridItemSpan(maxLineSpan) }) {
+                                    SnLoadError(onRetry = viewModel::loadCatalog)
+                                }
                             }
-                        }
 
-                        state.catalog.isEmpty() -> {
-                            item(key = "catalog-loading", span = { GridItemSpan(maxLineSpan) }) {
-                                SnLoading(Modifier.height(240.dp))
+                            state.catalog.isEmpty() -> {
+                                item(key = "catalog-loading", span = { GridItemSpan(maxLineSpan) }) {
+                                    SnLoading(Modifier.height(240.dp))
+                                }
                             }
-                        }
 
-                        visible.isEmpty() -> {
-                            item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
-                                NoMatch(onClear = viewModel::clearFilters)
+                            visible.isEmpty() -> {
+                                item(key = "no-match", span = { GridItemSpan(maxLineSpan) }) {
+                                    NoMatch(onClear = viewModel::clearFilters)
+                                }
                             }
-                        }
 
-                        else -> {
-                            val rows = visible.chunked(columns)
-                            items(rows, key = { "discover/${it.first().addon.manifestUrl}" }) { row ->
-                                Row(
-                                    Modifier.fillMaxWidth().height(IntrinsicSize.Max),
-                                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
-                                ) {
-                                    for (entry in row) {
-                                        val url = entry.addon.manifestUrl
-                                        DiscoverAddonCard(
-                                            entry = entry,
-                                            installed = entry.addon.id in installedIds,
-                                            checking = url in state.checking,
-                                            failed = url in state.installFailed,
-                                            onInstall = { viewModel.reviewFromCatalog(entry.addon) },
-                                            onConfigure = { configuring = entry.addon },
-                                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                                        )
+                            else -> {
+                                val rows = visible.chunked(columns)
+                                items(rows, key = { "discover/${it.first().addon.manifestUrl}" }) { row ->
+                                    Row(
+                                        Modifier.fillMaxWidth().height(IntrinsicSize.Max),
+                                        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+                                    ) {
+                                        for (entry in row) {
+                                            val url = entry.addon.manifestUrl
+                                            DiscoverAddonCard(
+                                                entry = entry,
+                                                installed = entry.addon.id in installedIds,
+                                                checking = url in state.checking,
+                                                failed = url in state.installFailed,
+                                                onInstall = { viewModel.reviewFromCatalog(entry.addon) },
+                                                onConfigure = { configuring = entry.addon },
+                                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                            )
+                                        }
+                                        // A short last row keeps the cards the width of the others.
+                                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                                     }
-                                    // A short last row keeps the cards the width of the others.
-                                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             }
                         }

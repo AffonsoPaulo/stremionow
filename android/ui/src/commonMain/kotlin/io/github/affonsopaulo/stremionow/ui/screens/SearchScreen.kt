@@ -34,6 +34,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
+import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSearchField
 import io.github.affonsopaulo.stremionow.ui.components.SnSeeAll
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
@@ -292,38 +293,40 @@ private fun ResultRows(
         atTop = { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 },
         scrollToTop = { listState.requestScrollToItem(0) },
     )
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(vertical = SnSpacing.space4),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
-    ) {
-        items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
-            val type = kindLabel(row.catalog.kind)
-            SnPosterSection(
-                title = type,
-                // Several catalogs of one type: tell them apart by their addon.
-                caption =
-                    if (row.catalog.kind in sharedKinds) {
-                        stringResource(Res.string.row_caption_by, row.catalog.addonName)
-                    } else {
-                        null
-                    },
-                items = row.items,
-                onOpen = onOpenTitle,
-                action =
-                    if (canNarrow) {
-                        {
-                            SnSeeAll(
-                                text = stringResource(Res.string.search_see_all),
-                                label = stringResource(Res.string.search_see_all_label, type),
-                                onClick = { onSeeAll(row.catalog.kind) },
-                            )
-                        }
-                    } else {
-                        null
-                    },
-            )
+    SnScrollArea(listState) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(vertical = SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
+        ) {
+            items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
+                val type = kindLabel(row.catalog.kind)
+                SnPosterSection(
+                    title = type,
+                    // Several catalogs of one type: tell them apart by their addon.
+                    caption =
+                        if (row.catalog.kind in sharedKinds) {
+                            stringResource(Res.string.row_caption_by, row.catalog.addonName)
+                        } else {
+                            null
+                        },
+                    items = row.items,
+                    onOpen = onOpenTitle,
+                    action =
+                        if (canNarrow) {
+                            {
+                                SnSeeAll(
+                                    text = stringResource(Res.string.search_see_all),
+                                    label = stringResource(Res.string.search_see_all_label, type),
+                                    onClick = { onSeeAll(row.catalog.kind) },
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                )
+            }
         }
     }
 }

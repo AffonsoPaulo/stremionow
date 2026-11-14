@@ -33,7 +33,7 @@ const PENDING_REMOVALS: &str = "sync_pending_removals";
 /// Setting with the time of the last successful sync, in milliseconds since the epoch.
 const LAST_SYNC: &str = "sync_last_at";
 /// Library items of this type are never uploaded, as in the official apps.
-const SKIPPED_KIND: &str = "other";
+pub(crate) const SKIPPED_KIND: &str = "other";
 
 /// How a sign-in that finishes elsewhere is waited for: a request every `interval`, at most
 /// `tries` times.
@@ -331,6 +331,8 @@ impl StremioCore {
         store.set_setting(ADDONS_CHANGED, "0")?;
         // Ratings stay on the device; the next account must not receive this one's.
         store.delete_settings_with_prefix(crate::ratings::PENDING_PREFIX)?;
+        // The watched marks stay; what this account had of them does not apply to the next.
+        store.clear_watched_sync()?;
         store.set_setting(LAST_SYNC, "")?;
         Ok(())
     }
@@ -473,13 +475,23 @@ impl StremioCore {
         Ok(self.account.api.set_addon_collection(key, &addons).await?)
     }
 
-    /// Two-way library merge: the newest change to each title wins, on either side.
+    /// Two-way library merge: the newest change to each title wins, on either side, and the
+    /// watched videos of both sides are combined (see [`crate::watched_sync`]).
     async fn sync_library(&self, key: &str) -> Result<SyncSummary, CoreError> {
         let remote = self.account.api.library(key).await?;
         let (local, local_mtimes) = self.local_items(&remote)?;
         let result = merge_library(&local, &remote);
 
-        let mut downloaded = 0;
+        let mut upload: Vec<RemoteLibraryItem> = result
+            .to_upload
+            .into_iter()
+            .filter(|item| item.kind != SKIPPED_KIND)
+            .collect();
+        let watched = self
+            .reconcile_watched(&remote, &result.merged, &mut upload)
+            .await?;
+
+        let mut downloaded: HashSet<String> = watched.downloaded.clone();
         {
             let store = self.store()?;
             for item in &result.merged {
@@ -487,24 +499,20 @@ impl StremioCore {
                 let remote_newer = item.mtime_ms().unwrap_or(0) > local_mtime.unwrap_or(i64::MIN);
                 if remote_newer {
                     apply_remote(&store, item)?;
-                    downloaded += 1;
+                    downloaded.insert(item.id.clone());
                 }
             }
         }
 
-        let upload: Vec<RemoteLibraryItem> = result
-            .to_upload
-            .into_iter()
-            .filter(|item| item.kind != SKIPPED_KIND)
-            .collect();
         if !upload.is_empty() {
             self.account.api.put_library(key, &upload).await?;
         }
-        let store = self.store()?;
+        let mut store = self.store()?;
+        watched.save(&mut store)?;
         store.set_setting(PENDING_REMOVALS, "{}")?;
         store.set_setting(LAST_SYNC, &now_millis().to_string())?;
         Ok(SyncSummary {
-            downloaded,
+            downloaded: u32::try_from(downloaded.len()).unwrap_or(u32::MAX),
             uploaded: u32::try_from(upload.len()).unwrap_or(u32::MAX),
         })
     }
@@ -563,8 +571,13 @@ impl StremioCore {
             if saved.contains(id.as_str()) {
                 continue;
             }
-            // Watched but not saved: Stremio keeps these as temporary items.
+            // Watched but not saved: Stremio keeps these as temporary items, removed from the
+            // library from the start (stremio-core `LibraryItem::from(&MetaItemPreview)`), so
+            // the official apps do not list them in it.
             let mut item = base_item(&by_id, id, &p.kind, &p.name, &p.poster, p.updated_at);
+            if !by_id.contains_key(id.as_str()) {
+                item.removed = true;
+            }
             item.temp = true;
             set_progress(&mut item, p);
             if let Some(s) = stats.get(id) {
@@ -693,7 +706,9 @@ fn apply_remote(store: &Store, item: &RemoteLibraryItem) -> Result<(), CoreError
         // u128: the numbers come from other clients and may be anything.
         let unfinished =
             duration > 0 && offset > 0 && u128::from(offset) * 100 < u128::from(duration) * 92;
-        if unfinished && !item.removed {
+        // Kept for an item in the library or a temporary one, as stremio-core's
+        // `is_in_continue_watching`; not for one removed from the library.
+        if unfinished && (!item.removed || item.temp) {
             store.save_progress(&ProgressEntry {
                 id: item.id.clone(),
                 kind: item.kind.clone(),
@@ -968,6 +983,64 @@ mod tests {
         core.sync().await.expect("syncs");
         let third = uploads(&server).await;
         assert_eq!(uploaded(&third[2], "tt1")["state"]["timesWatched"], 0);
+    }
+
+    #[tokio::test]
+    async fn titles_watched_without_saving_them_stay_out_of_the_library() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/addonCollectionGet"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": {"addons": []}
+            })))
+            .mount(&server)
+            .await;
+        // The official apps keep a title watched without adding it as removed and temporary.
+        Mock::given(method("POST"))
+            .and(path("/datastoreGet"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": [{
+                    "_id": "tt2", "name": "Watched there", "type": "movie",
+                    "removed": true, "temp": true,
+                    "_ctime": "2026-01-01T00:00:00.000Z", "_mtime": "2026-01-02T00:00:00.000Z",
+                    "state": {"timeOffset": 600000, "duration": 6000000, "video_id": "tt2"}
+                }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/datastorePut"))
+            .and(body_partial_json(serde_json::json!({
+                "changes": [{"_id": "tt3", "removed": true, "temp": true}]
+            })))
+            .respond_with(ok())
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        core.restore_session("secret-key".into());
+        core.save_progress(crate::playback::WatchProgress {
+            id: "tt3".into(),
+            kind: "movie".into(),
+            name: "Watched here".into(),
+            poster: None,
+            background: None,
+            video_id: "tt3".into(),
+            season: None,
+            episode: None,
+            position_ms: 600_000,
+            duration_ms: 6_000_000,
+            updated_at: 0,
+        })
+        .expect("saves");
+
+        core.sync().await.expect("syncs");
+        assert!(!core.is_in_library("tt2".into()).expect("reads"));
+        assert!(
+            core.progress("tt2".into()).expect("reads").is_some(),
+            "it continues here"
+        );
     }
 
     #[tokio::test]

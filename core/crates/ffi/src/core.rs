@@ -15,7 +15,7 @@ use stremionow_addons::{
 use stremionow_library::{LibraryEntry, ProgressEntry, Store, WatchStats, WatchedTitle};
 use stremionow_markers::AniSkip;
 use stremionow_protocol::{
-    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaResponse,
+    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaDetail, MetaResponse,
 };
 
 use crate::account::Account;
@@ -349,14 +349,7 @@ impl StremioCore {
 
     /// Full details of a title from the first addon that provides metadata for it.
     pub async fn meta(&self, kind: String, id: String) -> Result<MetaDetails, CoreError> {
-        let addon = self
-            .enabled()?
-            .into_iter()
-            .find(|addon| addon.manifest.supports("meta", &kind, &id))
-            .ok_or(CoreError::NotFound)?;
-        let url = addon.url.resource("meta", &kind, &id, &Extra::new());
-        let response: MetaResponse = self.cached_json(&url, META_FRESHNESS).await?;
-        Ok(response.meta.into())
+        Ok(self.meta_detail(&kind, &id).await?.into())
     }
 
     /// Titles saved to "My list", most recently added first, each with how much it has been
@@ -583,6 +576,19 @@ impl StremioCore {
             .into_iter()
             .filter_map(|(addon, enabled)| enabled.then_some(addon))
             .collect())
+    }
+
+    /// A title's details as the first addon that provides metadata for it sends them, through
+    /// the cache.
+    pub(crate) async fn meta_detail(&self, kind: &str, id: &str) -> Result<MetaDetail, CoreError> {
+        let addon = self
+            .enabled()?
+            .into_iter()
+            .find(|addon| addon.manifest.supports("meta", kind, id))
+            .ok_or(CoreError::NotFound)?;
+        let url = addon.url.resource("meta", kind, id, &Extra::new());
+        let response: MetaResponse = self.cached_json(&url, META_FRESHNESS).await?;
+        Ok(response.meta)
     }
 
     pub(crate) fn find_addon(&self, manifest_url: &str) -> Result<InstalledAddon, CoreError> {

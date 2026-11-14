@@ -15,6 +15,7 @@ One page per decision that is hard to reverse. Copy the template below into `NNN
 | [0009](0009-aniskip.md) | Skip anime openings and endings with AniSkip | Accepted |
 | [0010](0010-discover-addons.md) | Discover addons from Stremio's lists | Accepted |
 | [0011](0011-home-curation.md) | Pick the home screen's rows on the device | Accepted |
+| [0012](0012-watched-sync.md) | Sync watched videos with the account in the official format | Accepted |
 
 ## Template
 

@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.screens
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,7 +56,9 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
+import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.DeviceKind
 import io.github.affonsopaulo.stremionow.ui.data.DevicePlatform
@@ -836,12 +840,14 @@ private fun FoundDeviceRow(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusLg)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .snClickable(shape, onClick = onClick)
-            .background(if (selected) SnColors.accentSurface else SnColors.surface, shape)
+            .snClickable(shape, highlight = false, interactionSource = interaction, onClick = onClick)
+            .snStateBackground(if (selected) SnColors.accentSurface else SnColors.surface, shape, state)
             .border(1.dp, if (selected) SnColors.accentBorder else SnColors.border, shape)
             .padding(horizontal = SnSpacing.space4, vertical = SnSpacing.space3),
         verticalAlignment = Alignment.CenterVertically,

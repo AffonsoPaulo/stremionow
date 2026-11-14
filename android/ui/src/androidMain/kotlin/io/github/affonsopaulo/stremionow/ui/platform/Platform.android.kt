@@ -8,6 +8,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.ui.platform.LocalContext
+import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 
 actual typealias PlatformContext = Context
@@ -39,3 +40,5 @@ internal actual fun appVersion(context: PlatformContext): String? =
     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
 
 internal actual fun displaySwitchingSupported(): Boolean = false
+
+internal actual fun automaticStreamMemory(): StreamMemory? = null

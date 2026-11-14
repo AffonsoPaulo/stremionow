@@ -13,7 +13,7 @@ mod transport;
 pub use addon_catalog::{AddonCatalogResponse, AddonDescriptor};
 pub use manifest::{CatalogDescriptor, ExtraProperty, Manifest, ResourceDescriptor};
 pub use resources::{
-    CatalogResponse, MetaDetail, MetaPreview, MetaResponse, Stream, StreamBehaviorHints,
-    StreamResponse, Subtitle, SubtitlesResponse, Video,
+    CatalogResponse, Link, MetaDetail, MetaPreview, MetaResponse, Stream, StreamBehaviorHints,
+    StreamResponse, Subtitle, SubtitlesResponse, Trailer, TrailerStream, Video,
 };
 pub use transport::{AddonUrl, Extra, TransportError};

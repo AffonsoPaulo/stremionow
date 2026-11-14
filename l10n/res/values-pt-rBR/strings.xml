@@ -8,7 +8,7 @@
   <string name="nav_addons">Addons</string>
   <string name="nav_back">Voltar</string>
   <string name="nav_search">Buscar</string>
-  <string name="nav_profile">Perfil, conta e configurações</string>
+  <string name="nav_profile">Conta e configurações</string>
 
   <string name="action_watch">Assistir</string>
   <string name="action_more_info">Mais informações</string>
@@ -38,7 +38,6 @@
     <item quantity="many">%1$d addons</item>
     <item quantity="other">%1$d addons</item>
   </plurals>
-  <string name="sources_title">Escolher fonte</string>
 
   <string name="type_movie">Filme</string>
   <string name="type_series">Série</string>
@@ -85,6 +84,33 @@
   <string name="details_show_more">Mais</string>
   <string name="details_show_less">Menos</string>
   <string name="details_open_genre">Ver títulos de %1$s</string>
+  <string name="details_tab_sources">Fontes</string>
+  <string name="details_4k_available">4K disponível</string>
+  <string name="action_watch_episode">Assistir %1$s</string>
+  <string name="action_start_over">Começar do início</string>
+  <string name="action_trailer">Trailer</string>
+  <string name="action_mark_watched">Marcar como assistido</string>
+  <string name="action_watched">Assistido</string>
+  <string name="action_like">Gostei</string>
+  <string name="action_love">Amei</string>
+  <string name="action_share">Compartilhar</string>
+  <string name="watched_title">Marcar como assistido</string>
+  <string name="watched_body">Episódios ainda não lançados nunca são marcados.</string>
+  <string name="watched_episode_mark">Marcar %1$s como assistido</string>
+  <string name="watched_episode_unmark">Marcar %1$s como não assistido</string>
+  <string name="watched_season_mark">Marcar a temporada %1$d como assistida</string>
+  <string name="watched_season_unmark">Marcar a temporada %1$d como não assistida</string>
+  <string name="watched_specials_mark">Marcar os especiais como assistidos</string>
+  <string name="watched_specials_unmark">Marcar os especiais como não assistidos</string>
+  <string name="watched_series_mark">Marcar a série inteira como assistida</string>
+  <string name="watched_series_unmark">Marcar a série inteira como não assistida</string>
+  <string name="episode_watched">Assistido</string>
+  <string name="episode_runtime">%1$d min</string>
+  <string name="share_title_heading">Compartilhar %1$s</string>
+  <string name="share_title_body">Qualquer pessoa com este link pode abrir a página do título.</string>
+  <string name="share_title_tv_body">Aponte a câmera do celular para o código para receber o link do título.</string>
+  <string name="share_title_clip_label">Link do título</string>
+  <string name="share_title_qr_description">Código QR com o link do título</string>
 
   <string name="library_empty_title">Sua lista está vazia</string>
   <string name="library_empty_body">Use “Minha lista” em qualquer filme ou série para guardar aqui.</string>
@@ -167,15 +193,9 @@
   <string name="addons_remove_meta_body">É o único addon com informações de filmes e séries. Sem ele, os títulos não abrem e o Início pode ficar vazio. Você pode instalá-lo de novo em Descobrir.</string>
   <string name="addons_turn_off">Desativar</string>
 
-  <!-- Profile screen, opened from the avatar. -->
-  <string name="profile_title">Perfil</string>
+  <!-- The account, in the avatar's menu and in Settings › Account. -->
   <string name="profile_local_name">Este aparelho</string>
   <string name="profile_local_body">Seus addons e sua lista ficam salvos só neste aparelho.</string>
-  <plurals name="profile_addons_count">
-    <item quantity="one">%1$d instalado</item>
-    <item quantity="many">%1$d instalados</item>
-    <item quantity="other">%1$d instalados</item>
-  </plurals>
   <string name="profile_version">StremioNow %1$s</string>
 
   <string name="action_resume">Continuar</string>
@@ -207,6 +227,19 @@
   <string name="sources_opens_outside">Abre fora do app</string>
   <string name="sources_empty_title">Nenhuma fonte encontrada</string>
   <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="sources_back_to_episodes">Voltar aos episódios</string>
+  <string name="sources_filter_all">Todas (%1$d)</string>
+  <string name="sources_filter_addon">%1$s (%2$d)</string>
+  <plurals name="sources_addons_loading">
+    <item quantity="one">%1$d addon ainda carregando</item>
+    <item quantity="many">%1$d addons ainda carregando</item>
+    <item quantity="other">%1$d addons ainda carregando</item>
+  </plurals>
+  <plurals name="sources_seeders">
+    <item quantity="one">%1$d semeador</item>
+    <item quantity="many">%1$d semeadores</item>
+    <item quantity="other">%1$d semeadores</item>
+  </plurals>
   <string name="player_play">Reproduzir</string>
   <string name="player_pause">Pausar</string>
   <string name="player_back10">Voltar 10 segundos</string>
@@ -345,8 +378,6 @@
   <string name="settings_crash_reports_body">Quando o StremioNow fecha inesperadamente, ele pode salvar um relatório neste aparelho. Com Perguntar antes de enviar, você pode revisá-lo e decidir se quer enviá-lo na próxima vez que abrir o app. Nada é enviado sozinho.</string>
   <string name="settings_crash_ask">Perguntar antes de enviar</string>
   <string name="settings_crash_never">Nunca</string>
-  <string name="settings_devices">Outros aparelhos</string>
-  <string name="settings_devices_body">Baixe torrents em um aparelho e assista em outro.</string>
   <string name="devices_title">Outros aparelhos</string>
   <string name="devices_intro">Um aparelho da sua rede de casa pode baixar torrents para os outros. Uma TV com conexão fraca pode reproduzir pelo seu computador.</string>
   <string name="devices_section_serve">Compartilhar este aparelho</string>
@@ -415,5 +446,65 @@
   <string name="torrent_fallback_unreachable">Não foi possível alcançar %1$s. Baixando neste aparelho.</string>
   <string name="torrent_fallback_unpaired">%1$s não reconhece mais este aparelho. Baixando aqui; pareie de novo nas Configurações.</string>
   <string name="torrent_fallback_paused">%1$s está usando dados móveis. Baixando neste aparelho.</string>
+
+  <string name="settings_account">Conta</string>
+  <string name="settings_about">Sobre</string>
+  <string name="settings_about_license">Software livre sob a Licença Pública Geral GNU, versão 3 ou posterior.</string>
+  <string name="settings_about_source">Código-fonte</string>
+  <string name="settings_about_report">Relatar um problema</string>
+
+  <string name="settings_memory">Memória para o vídeo</string>
+  <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>
+  <string name="settings_memory_light">Leve</string>
+  <string name="settings_memory_light_body">Usa menos memória. Voltar ou avançar alguns segundos pode carregar o vídeo de novo.</string>
+  <string name="settings_memory_balanced">Equilibrado</string>
+  <string name="settings_memory_balanced_body">Volta e avança na hora quase sempre, sem pesar no computador.</string>
+  <string name="settings_memory_smooth">Fluido</string>
+  <string name="settings_memory_smooth_body">Guarda mais do vídeo para pular sem esperar. Usa mais memória.</string>
+  <string name="settings_memory_keeps">Guarda cerca de %1$s de um filme em 4K, ou %2$s de um em 1080p.</string>
+  <string name="settings_memory_suggested">Sugerido para este computador</string>
+  <string name="settings_memory_advanced">Avançado</string>
+  <string name="settings_memory_custom">Personalizado</string>
+  <string name="settings_memory_ahead">À frente (MiB)</string>
+  <string name="settings_memory_behind">Para trás (MiB)</string>
+  <string name="settings_memory_range">De %1$d a %2$d MiB.</string>
+  <plurals name="settings_duration_seconds">
+    <item quantity="one">%1$d s</item>
+    <item quantity="other">%1$d s</item>
+  </plurals>
+  <plurals name="settings_duration_minutes">
+    <item quantity="one">%1$d min</item>
+    <item quantity="other">%1$d min</item>
+  </plurals>
+
+  <string name="account_menu">Conta</string>
+  <string name="account_synced_just_now">Sincronizado agora</string>
+  <string name="account_synced_at">Última sincronização: %1$s</string>
+  <string name="account_not_synced">Ainda não sincronizado</string>
+  <string name="account_sync_now">Sincronizar agora</string>
+  <string name="account_syncing">Sincronizando…</string>
+  <string name="account_sync_failed">Não foi possível sincronizar. Verifique sua conexão e tente de novo.</string>
+
+  <string name="signin_body">Seus addons, sua lista e seu progresso vêm junto. Escolha como entrar na sua conta do Stremio.</string>
+  <string name="signin_with_browser">Entrar pelo navegador</string>
+  <string name="signin_with_code">Entrar com um código</string>
+  <string name="signin_facebook">Continuar com o Facebook</string>
+  <string name="signin_apple">Continuar com a Apple</string>
+  <string name="signin_email">Usar e-mail e senha</string>
+  <string name="signin_code_body">Abra o link num celular ou computador em que você já entrou no Stremio, ou leia o QR code, e confirme o código lá.</string>
+  <string name="signin_code_body_tv">Leia o QR code com o celular, ou abra %1$s num computador em que você já entrou no Stremio, e confirme o código lá.</string>
+  <string name="signin_code_label">Código</string>
+  <string name="signin_code_qr">QR code que abre a página para confirmar o código</string>
+  <string name="signin_waiting">Aguardando a confirmação…</string>
+  <string name="signin_code_expired">O código expirou.</string>
+  <string name="signin_new_code">Gerar um novo código</string>
+  <string name="signin_code_failed">Não foi possível gerar um código. Verifique sua conexão.</string>
+  <string name="signin_open_browser">Abrir no navegador</string>
+  <string name="signin_browser_facebook_body">Entre com o Facebook na janela do navegador que abriu. Isto se atualiza sozinho quando você terminar.</string>
+  <string name="signin_browser_apple_body">Entre com a Apple na janela do navegador que abriu. Isto se atualiza sozinho quando você terminar.</string>
+  <string name="signin_open_again">Abrir a página de novo</string>
+  <string name="signin_browser_timeout">Não terminou a tempo.</string>
+  <string name="signin_failed">Não foi possível entrar. Verifique sua conexão e tente de novo.</string>
+  <string name="signin_other_ways">Outras formas de entrar</string>
 
 </resources>

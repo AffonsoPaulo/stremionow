@@ -70,6 +70,9 @@ class PlayerViewModel<out P : VideoPlayer>(
                 audioLanguages = listOf(audioLanguage),
                 // Subtitles start on only when the device language is not English.
                 subtitleLanguages = listOfNotNull(subtitleChoice.ifEmpty { null }),
+                // "Memory for the video"; neither set means the player decides (see VideoMemory.kt).
+                streamMemory = settings.streamMemoryOptions().first,
+                streamMemorySizes = settings.streamMemoryOptions().second,
             ),
         )
 

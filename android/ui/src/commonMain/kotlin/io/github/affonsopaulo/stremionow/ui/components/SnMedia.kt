@@ -3,16 +3,19 @@ package io.github.affonsopaulo.stremionow.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -23,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
@@ -34,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
+import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
@@ -140,8 +145,8 @@ fun SnPosterCard(
 }
 
 /**
- * 16:9 card for episodes, with an optional progress bar. Under the pointer it grows, lifts and
- * gets a light border.
+ * 16:9 card for episodes, with an optional progress bar, and a "Watched" badge when
+ * [watchedLabel] is given. Under the pointer it grows, lifts and gets a light border.
  */
 @Composable
 fun SnEpisodeCard(
@@ -153,6 +158,7 @@ fun SnEpisodeCard(
     modifier: Modifier = Modifier,
     progress: Float? = null,
     highlighted: Boolean = false,
+    watchedLabel: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
@@ -173,6 +179,25 @@ fun SnEpisodeCard(
                 .snStateBorder(Color.Transparent, CardShape, state),
         ) {
             SnArtwork(url = thumbnail, fallbackTitle = "", modifier = Modifier.fillMaxSize())
+            if (watchedLabel != null) {
+                Row(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(SnSpacing.space2)
+                        .background(SnColors.scrim, RoundedCornerShape(SnRadius.radiusSm))
+                        .padding(horizontal = SnSpacing.space2, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+                ) {
+                    Image(
+                        SnIcons.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        colorFilter = ColorFilter.tint(SnColors.fg),
+                    )
+                    BasicText(watchedLabel, style = SnTypography.badge.copy(color = SnColors.fg), maxLines = 1)
+                }
+            }
             if (progress != null && progress > 0f) {
                 Box(
                     Modifier

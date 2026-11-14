@@ -89,6 +89,15 @@ object SnIcons {
             "M17 7.5h4",
             "M17 16.5h4",
         )
+    val Monitor =
+        stroke(
+            "monitor",
+            "M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1H4a1 1 0 0 1 -1 -1V5a1 1 0 0 1 1 -1z",
+            "M8 20h8",
+            "M12 16v4",
+        )
+    val Shield = stroke("shield", "M12 3l8 3v6c0 5 -3.5 8 -8 9c-4.5 -1 -8 -4 -8 -9V6z")
+    val LogOut = stroke("log-out", "M9 21H5a2 2 0 0 1 -2 -2V5a2 2 0 0 1 2 -2h4", "M16 17l5 -5l-5 -5", "M21 12H9")
     val User = stroke("user", "M12 3a4 4 0 1 0 0 8a4 4 0 1 0 0 -8z", "M19 21v-2a4 4 0 0 0 -4 -4H9a4 4 0 0 0 -4 4v2")
     val Bookmark = stroke("bookmark", "M19 21l-7 -4l-7 4V5a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2z")
     val Minus = stroke("minus", "M5 12h14")
@@ -100,6 +109,48 @@ object SnIcons {
             "M18 16a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
             "M8.59 13.51l6.83 3.98",
             "M15.41 6.51l-6.82 3.98",
+        )
+    val ThumbsUp =
+        stroke(
+            "thumbs-up",
+            "M7 10v12",
+            "M15 5.88L14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1 -2 -2v-8" +
+                "a2 2 0 0 1 2 -2h2.76a2 2 0 0 0 1.79 -1.11L12 2a3.13 3.13 0 0 1 3 3.88z",
+        )
+    val ThumbsUpFilled =
+        fill(
+            "thumbs-up-filled",
+            "M15 5.88L14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H8V10.6l4 -8.6a3.13 3.13 0 0 1 3 3.88z",
+            "M2 12a2 2 0 0 1 2 -2h2v12H4a2 2 0 0 1 -2 -2z",
+        )
+    val Heart =
+        stroke(
+            "heart",
+            "M19 14c1.49 -1.46 3 -3.21 3 -5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0 -3 0.5 -4.5 2c-1.5 -1.5 -2.74 -2 -4.5 -2" +
+                "A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z",
+        )
+    val HeartFilled =
+        fill(
+            "heart-filled",
+            "M19 14c1.49 -1.46 3 -3.21 3 -5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0 -3 0.5 -4.5 2c-1.5 -1.5 -2.74 -2 -4.5 -2" +
+                "A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z",
+        )
+    val Eye =
+        stroke(
+            "eye",
+            "M2.06 12.35a1 1 0 0 1 0 -0.7a10.75 10.75 0 0 1 19.88 0a1 1 0 0 1 0 0.7a10.75 10.75 0 0 1 -19.88 0",
+            "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
+        )
+    val CheckCircle = stroke("check-circle", "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0 -18z", "M8.5 12l2.5 2.5l4.5 -5")
+
+    /** Seeders of a torrent: people sharing it. */
+    val Seeds = stroke("seeds", "M12 19V5", "M5 12l7 -7l7 7")
+    val ExternalLink =
+        stroke(
+            "external-link",
+            "M15 3h6v6",
+            "M10 14L21 3",
+            "M18 13v6a2 2 0 0 1 -2 2H5a2 2 0 0 1 -2 -2V8a2 2 0 0 1 2 -2h6",
         )
     val FullScreen =
         stroke(

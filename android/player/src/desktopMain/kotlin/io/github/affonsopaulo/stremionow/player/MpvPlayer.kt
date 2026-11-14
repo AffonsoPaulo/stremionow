@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import java.awt.Canvas
 import java.io.File
-import java.lang.management.ManagementFactory
 import java.util.Locale
 import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
@@ -247,11 +246,6 @@ class MpvPlayer private constructor(
         /** mpv's own scale goes up to 130 %, which distorts; the app offers up to 100 %. */
         private const val MAX_VOLUME = 100
 
-        /** The computer's physical memory, or 0 (the lightest level) when the JVM cannot tell. */
-        private fun totalMemoryBytes(): Long =
-            (ManagementFactory.getOperatingSystemMXBean() as? com.sun.management.OperatingSystemMXBean)
-                ?.totalMemorySize ?: 0L
-
         /** Logged once per file, to report what mpv chose. */
         private val VIDEO_INFO_PROPERTIES =
             listOf(
@@ -334,8 +328,9 @@ class MpvPlayer private constructor(
                     put("cache", "yes")
                     // Sized by the computer's memory (see StreamMemory): the 16 MiB kept behind
                     // before held 2 s of a 4K file, so going back 10 s opened the source again
-                    // and showed black until it answered.
-                    val memory = options.streamMemory ?: StreamMemory.forDeviceMemory(totalMemoryBytes())
+                    // and showed black until it answered. The user's exact sizes come first.
+                    val memory =
+                        options.streamMemorySizes ?: (options.streamMemory ?: StreamMemory.forThisComputer()).sizes
                     put("demuxer-max-bytes", "${memory.aheadMiB}MiB")
                     put("demuxer-max-back-bytes", "${memory.behindMiB}MiB")
 

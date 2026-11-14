@@ -47,6 +47,7 @@ import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
+import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
@@ -73,7 +74,6 @@ private enum class Step { Welcome, SignIn, Preferences, Debrid }
 
 data class OnboardingState(
     val busy: Boolean = false,
-    val signInFailed: Boolean = false,
     val debridFailed: Boolean = false,
 )
 
@@ -82,23 +82,6 @@ class OnboardingViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(OnboardingState())
     val state = mutableState.asStateFlow()
-
-    /** Signs in and keeps the session key in the Keystore-backed store; false on failure. */
-    fun signIn(
-        context: PlatformContext,
-        email: String,
-        password: String,
-        onDone: () -> Unit,
-    ) {
-        if (state.value.busy) return
-        mutableState.update { it.copy(busy = true, signInFailed = false) }
-        viewModelScope.launch {
-            val authKey = runCatching { core.signIn(email.trim(), password) }.getOrNull()
-            if (authKey != null) SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, authKey)
-            mutableState.update { it.copy(busy = false, signInFailed = authKey == null) }
-            if (authKey != null) onDone()
-        }
-    }
 
     fun savePreferences(
         audio: String,
@@ -161,14 +144,11 @@ class OnboardingViewModel(
  * sources with), and an optional debrid service. Every step can be changed later.
  */
 @Composable
-fun OnboardingScreen(
-    onFinished: () -> Unit,
-    signInOnly: Boolean = false,
-) {
+fun OnboardingScreen(onFinished: () -> Unit) {
     val context = LocalPlatformContext.current
     val viewModel = viewModel { OnboardingViewModel(AppGraph.core(context)) }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var step by rememberSaveable { mutableStateOf(if (signInOnly) Step.SignIn else Step.Welcome) }
+    var step by rememberSaveable { mutableStateOf(Step.Welcome) }
     SnBackHandler(enabled = step != Step.Welcome) {
         step = if (step == Step.Debrid) Step.Preferences else Step.Welcome
     }
@@ -189,15 +169,11 @@ fun OnboardingScreen(
                 }
 
                 Step.SignIn -> {
-                    SignIn(
-                        state = state,
-                        onSubmit = { email, password ->
-                            viewModel.signIn(context, email, password) {
-                                if (signInOnly) onFinished() else step = Step.Preferences
-                            }
-                        },
-                        onBack = { if (signInOnly) onFinished() else step = Step.Welcome },
-                    )
+                    // Every way to sign in, as in the sign-in dialog; TV starts on the link code.
+                    val flow = rememberSignInFlow(onSignedIn = { step = Step.Preferences })
+                    if (LocalIsTv.current) StartOnLinkCode(flow)
+                    Title(stringResource(Res.string.onboarding_sign_in_title))
+                    SignInPanel(flow, onCancel = { step = Step.Welcome })
                 }
 
                 Step.Preferences -> {
@@ -246,49 +222,6 @@ private fun Welcome(
         )
     }
     Caption(stringResource(Res.string.onboarding_local_note))
-}
-
-@Composable
-private fun SignIn(
-    state: OnboardingState,
-    onSubmit: (String, String) -> Unit,
-    onBack: () -> Unit,
-) {
-    var email by rememberSaveable { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    val canSubmit = email.contains('@') && password.isNotEmpty() && !state.busy
-    Title(stringResource(Res.string.onboarding_sign_in_title))
-    Body(stringResource(Res.string.onboarding_sign_in_body))
-    Field(
-        value = email,
-        onValueChange = { email = it.take(254) },
-        label = stringResource(Res.string.onboarding_email),
-        keyboardType = KeyboardType.Email,
-        imeAction = ImeAction.Next,
-    )
-    Field(
-        value = password,
-        onValueChange = { password = it.take(256) },
-        label = stringResource(Res.string.onboarding_password),
-        keyboardType = KeyboardType.Password,
-        imeAction = ImeAction.Done,
-        secret = true,
-        onDone = { if (canSubmit) onSubmit(email, password) },
-    )
-    if (state.signInFailed) {
-        BasicText(
-            stringResource(Res.string.onboarding_sign_in_failed),
-            style = SnTypography.body.copy(color = SnColors.danger),
-        )
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
-        SnButton(stringResource(Res.string.nav_back), onBack, style = SnButtonStyle.Ghost)
-        SnButton(
-            stringResource(if (state.busy) Res.string.onboarding_signing_in else Res.string.onboarding_sign_in),
-            { onSubmit(email, password) },
-            enabled = canSubmit,
-        )
-    }
 }
 
 @Composable

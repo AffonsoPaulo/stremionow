@@ -3,6 +3,8 @@ package io.github.affonsopaulo.stremionow.ui.platform
 
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
+import io.github.affonsopaulo.stremionow.player.StreamMemory
+import io.github.affonsopaulo.stremionow.player.forThisComputer
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
@@ -46,3 +48,5 @@ internal actual fun openExternalLink(
 internal actual fun appVersion(context: PlatformContext): String? = System.getProperty("stremionow.version")
 
 internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSupported
+
+internal actual fun automaticStreamMemory(): StreamMemory? = StreamMemory.forThisComputer()

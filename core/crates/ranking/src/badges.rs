@@ -23,7 +23,7 @@ pub fn badges(traits: &Traits) -> Vec<String> {
 
 /// Formats a size with powers of 1024, matching how addons compute it: `"14.2 GB"`,
 /// `"700 MB"`.
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     // Precision loss above 2^53 bytes is irrelevant for one decimal.
     let mut value = bytes as f64;

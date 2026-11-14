@@ -42,7 +42,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
 /** Destinations of the main navigation. */
-enum class TopDestination { Search, Home, Series, Movies, MyList, Profile }
+enum class TopDestination { Search, Home, Series, Movies, MyList }
 
 /** Destinations shown as pills in the large-screen header, between search and the avatar. */
 private val HeaderPills =
@@ -55,6 +55,9 @@ private val HeaderPills =
  * Where a pointer and keyboard drive the screen, [search] is given: the search field that
  * sits just before the avatar and expands in place. On TV it is null, and search is the first
  * stop of the navigation row, where the remote reaches it like any other destination.
+ *
+ * The avatar calls [onAvatar]: it opens the account menu, composed in [avatarMenu] so it can
+ * anchor to the avatar, or Settings on TV. [avatarSelected] marks it while Settings shows.
  */
 @Composable
 fun SnHeader(
@@ -63,6 +66,9 @@ fun SnHeader(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
     search: (@Composable () -> Unit)? = null,
+    avatarSelected: Boolean = false,
+    onAvatar: () -> Unit = {},
+    avatarMenu: @Composable () -> Unit = {},
 ) {
     val pill = RoundedCornerShape(SnRadius.radiusFull)
     val spacing = SnSpacing.space4
@@ -123,10 +129,7 @@ fun SnHeader(
             }
             // Before the avatar, so keyboard focus meets them in the order they show.
             search?.invoke()
-            SnAvatarButton(
-                selected = current == TopDestination.Profile,
-                onClick = { onNavigate(TopDestination.Profile) },
-            )
+            SnAvatarButton(selected = avatarSelected, onClick = onAvatar, menu = avatarMenu)
         },
     ) { measurables, constraints ->
         // The navigation stays centred on the window whatever sits at its sides (the back
@@ -174,20 +177,19 @@ internal fun TopDestination.label(): StringResource =
         TopDestination.Series -> Res.string.nav_series
         TopDestination.Movies -> Res.string.nav_movies
         TopDestination.MyList -> Res.string.nav_my_list
-        TopDestination.Profile -> Res.string.profile_title
     }
 
 /**
  * Top bar of the phone layout, where the tab bar holds the main destinations. It carries the
  * page title, so pages do not repeat it below: the wordmark on Home, the page name elsewhere,
- * with a back button before it on inner pages, and the avatar for the profile and settings.
+ * with a back button before it on inner pages, and the avatar, which opens the account sheet.
  */
 @Composable
 fun SnPhoneHeader(
     title: String?,
     onBack: (() -> Unit)?,
-    profileSelected: Boolean,
-    onOpenProfile: () -> Unit,
+    accountSelected: Boolean,
+    onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -224,19 +226,21 @@ fun SnPhoneHeader(
                 }
             }
         }
-        SnAvatarButton(selected = profileSelected, onClick = onOpenProfile)
+        SnAvatarButton(selected = accountSelected, onClick = onOpenAccount)
     }
 }
 
 /**
- * The profile avatar. Without a Stremio account there is no picture, so it shows a person
- * glyph; the light fill marks it as the current destination, like the pills.
+ * The account avatar. Without a Stremio account there is no picture, so it shows a person
+ * glyph; the light fill marks Settings as the current page, like the pills. [menu] is composed
+ * inside it, so a popup there anchors to the avatar.
  */
 @Composable
 fun SnAvatarButton(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    menu: @Composable () -> Unit = {},
 ) {
     val circle = RoundedCornerShape(SnRadius.radiusFull)
     val label = stringResource(Res.string.nav_profile)
@@ -256,6 +260,7 @@ fun SnAvatarButton(
             modifier = Modifier.size(20.dp),
             colorFilter = ColorFilter.tint(if (selected) SnColors.onInverse else SnColors.fgSecondary),
         )
+        menu()
     }
 }
 

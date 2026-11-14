@@ -13,8 +13,8 @@
   <string name="nav_back">Back</string>
   <!-- Accessibility label for the search button in the header. -->
   <string name="nav_search">Search</string>
-  <!-- Accessibility label for the avatar button that opens the profile menu. -->
-  <string name="nav_profile">Profile, account and settings</string>
+  <!-- Accessibility label for the avatar button, which opens the account menu (Settings on TV). -->
+  <string name="nav_profile">Account and settings</string>
 
   <!-- Primary actions on a title. -->
   <string name="action_watch">Watch</string>
@@ -227,15 +227,10 @@
   <string name="addons_remove_meta_body">It\'s the only addon that gives information about movies and series. Without it, titles won\'t open and Home may be empty. You can install it again from Discover.</string>
   <string name="addons_turn_off">Turn off</string>
 
-  <!-- Profile screen, opened from the avatar. -->
-  <string name="profile_title">Profile</string>
+  <!-- The account, in the avatar's menu and in Settings › Account. -->
   <!-- Name shown while no Stremio account is connected. -->
   <string name="profile_local_name">This device</string>
   <string name="profile_local_body">Your addons and list are saved only on this device.</string>
-  <plurals name="profile_addons_count">
-    <item quantity="one">%1$d installed</item>
-    <item quantity="other">%1$d installed</item>
-  </plurals>
   <!-- %1$s is the app version, for example "0.1.0". -->
   <string name="profile_version">StremioNow %1$s</string>
 
@@ -404,7 +399,7 @@
   <string name="onboarding_connect">Connect</string>
   <string name="settings_playback">Playback</string>
 
-  <!-- Account in the profile. -->
+  <!-- Signed in to a Stremio account. -->
   <string name="profile_account_body">Your addons, list and progress sync with your Stremio account.</string>
   <string name="profile_sign_out">Sign out</string>
   <string name="profile_sign_out_title">Sign out of Stremio?</string>
@@ -471,8 +466,6 @@
   <string name="debug_crash_abort" translatable="false">Native abort in the core</string>
   <string name="debug_crash_anr" translatable="false">Freeze the interface for 20 s (not responding)</string>
   <!-- Settings > Other devices: one device downloads torrents for the others on the home network. -->
-  <string name="settings_devices">Other devices</string>
-  <string name="settings_devices_body">Download torrents on one device and watch on another.</string>
   <string name="devices_title">Other devices</string>
   <string name="devices_intro">A device on your home network can download torrents for the others. A TV with a weak connection can play through your computer.</string>
   <!-- Heading of the part of Other devices where this device serves the others. -->
@@ -553,5 +546,87 @@
   <string name="torrent_fallback_unreachable">Couldn\'t reach %1$s. Downloading on this device.</string>
   <string name="torrent_fallback_unpaired">%1$s no longer recognizes this device. Downloading here; pair again in Settings.</string>
   <string name="torrent_fallback_paused">%1$s is on mobile data. Downloading on this device.</string>
+
+  <!-- Settings sections, in the side menu (large screens and TV) and the list (phones). -->
+  <string name="settings_account">Account</string>
+  <string name="settings_about">About</string>
+  <!-- About: the licence, under the version. -->
+  <string name="settings_about_license">Free software under the GNU General Public License, version 3 or later.</string>
+  <!-- About: opens the project's code repository. -->
+  <string name="settings_about_source">Source code</string>
+  <!-- About: opens the form to report a problem. -->
+  <string name="settings_about_report">Report a problem</string>
+
+  <!-- Settings › Playback: how much of the video is kept in memory for skipping. Not the torrent cache, which is disk space. -->
+  <string name="settings_memory">Memory for the video</string>
+  <string name="settings_memory_body">How much of the video StremioNow keeps in memory around where you are, so skipping back or forward doesn\'t load it again. It\'s separate from the torrent cache, which is disk space for downloads. Applies from the next video.</string>
+  <string name="settings_memory_light">Light</string>
+  <string name="settings_memory_light_body">Uses less memory. Going back or forward a few seconds may load the video again.</string>
+  <string name="settings_memory_balanced">Balanced</string>
+  <string name="settings_memory_balanced_body">Skips back and forward at once most of the time, without weighing on the computer.</string>
+  <string name="settings_memory_smooth">Smooth</string>
+  <string name="settings_memory_smooth_body">Keeps more of the video to skip without waiting. Uses more memory.</string>
+  <!-- Under each level. %1$s and %2$s are rough durations, such as "40 s" and "4 min" (settings_duration_*). -->
+  <string name="settings_memory_keeps">Keeps about %1$s of a 4K film, or %2$s of a 1080p one.</string>
+  <!-- On the level the app picks from this computer's memory. -->
+  <string name="settings_memory_suggested">Suggested for this computer</string>
+  <!-- Shows the exact sizes. -->
+  <string name="settings_memory_advanced">Advanced</string>
+  <!-- Shown when the exact sizes match no level. -->
+  <string name="settings_memory_custom">Custom</string>
+  <!-- Size of what is read ahead of the playback position, in mebibytes. -->
+  <string name="settings_memory_ahead">Ahead (MiB)</string>
+  <!-- Size of what is kept behind the playback position, in mebibytes. -->
+  <string name="settings_memory_behind">Behind (MiB)</string>
+  <!-- %1$d and %2$d are the smallest and largest sizes allowed. -->
+  <string name="settings_memory_range">From %1$d to %2$d MiB.</string>
+  <!-- A rough duration in seconds, used in settings_memory_keeps. -->
+  <plurals name="settings_duration_seconds">
+    <item quantity="one">%1$d s</item>
+    <item quantity="other">%1$d s</item>
+  </plurals>
+  <!-- A rough duration in minutes, used in settings_memory_keeps. -->
+  <plurals name="settings_duration_minutes">
+    <item quantity="one">%1$d min</item>
+    <item quantity="other">%1$d min</item>
+  </plurals>
+
+  <!-- The avatar's menu (a sheet on phones), announced by screen readers. -->
+  <string name="account_menu">Account</string>
+  <!-- Under the account's email: the last sync. -->
+  <string name="account_synced_just_now">Synced just now</string>
+  <!-- %1$s is a time ("14:32") or a date and time, in the region's format. -->
+  <string name="account_synced_at">Last synced %1$s</string>
+  <string name="account_not_synced">Not synced yet</string>
+  <string name="account_sync_now">Sync now</string>
+  <string name="account_syncing">Syncing…</string>
+  <string name="account_sync_failed">Couldn\'t sync. Check your connection and try again.</string>
+
+  <!-- Sign-in dialog (and the first-run setup's sign-in step). -->
+  <string name="signin_body">Your addons, list and progress come with you. Choose how your Stremio account signs in.</string>
+  <!-- Signs in with a code confirmed in the browser, where the user is already signed in to Stremio by any method. -->
+  <string name="signin_with_browser">Sign in with the browser</string>
+  <!-- TV: the same, with a code shown on screen and confirmed on a phone. -->
+  <string name="signin_with_code">Sign in with a code</string>
+  <string name="signin_facebook">Continue with Facebook</string>
+  <string name="signin_apple">Continue with Apple</string>
+  <string name="signin_email">Use email and password</string>
+  <string name="signin_code_body">Open the link on a phone or computer where you\'re signed in to Stremio, or scan the QR code, and confirm the code there.</string>
+  <!-- TV. %1$s is the address of the page where the code is confirmed. -->
+  <string name="signin_code_body_tv">Scan the QR code with your phone, or open %1$s on a computer where you\'re signed in to Stremio, and confirm the code there.</string>
+  <string name="signin_code_label">Code</string>
+  <!-- Read by screen readers for the QR code. -->
+  <string name="signin_code_qr">QR code that opens the page to confirm the code</string>
+  <string name="signin_waiting">Waiting for confirmation…</string>
+  <string name="signin_code_expired">The code expired.</string>
+  <string name="signin_new_code">Get a new code</string>
+  <string name="signin_code_failed">Couldn\'t get a code. Check your connection.</string>
+  <string name="signin_open_browser">Open in the browser</string>
+  <string name="signin_browser_facebook_body">Sign in with Facebook in the browser window that opened. This updates by itself when you\'re done.</string>
+  <string name="signin_browser_apple_body">Sign in with Apple in the browser window that opened. This updates by itself when you\'re done.</string>
+  <string name="signin_open_again">Open the page again</string>
+  <string name="signin_browser_timeout">It didn\'t finish in time.</string>
+  <string name="signin_failed">Couldn\'t sign in. Check your connection and try again.</string>
+  <string name="signin_other_ways">Other ways to sign in</string>
 
 </resources>

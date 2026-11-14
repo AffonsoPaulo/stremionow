@@ -210,10 +210,13 @@ fun HomeScreen(
     val viewModel =
         viewModel {
             HomeViewModel(AppGraph.core(context)) {
-                SecureStore.clear(context, SecureStore.STREMIO_AUTH_KEY)
-                AppGraph.scope.launch { runCatching { AppGraph.core(context).signOut() } }
+                signOutOfStremio(context)
             }
         }
+    // Signing in or out from the avatar's dialog leaves Home on screen: load it again.
+    val accountChanges by AccountEvents.changes.collectAsState()
+    val accountAtStart = remember { accountChanges }
+    LaunchedEffect(accountChanges) { if (accountChanges != accountAtStart) viewModel.load() }
     val state by viewModel.feed.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {

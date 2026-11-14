@@ -65,20 +65,24 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
-import io.github.affonsopaulo.stremionow.ui.screens.AddonsScreen
+import io.github.affonsopaulo.stremionow.ui.screens.AccountMenuPopup
+import io.github.affonsopaulo.stremionow.ui.screens.AccountOverlays
+import io.github.affonsopaulo.stremionow.ui.screens.AccountUi
 import io.github.affonsopaulo.stremionow.ui.screens.DetailsScreen
-import io.github.affonsopaulo.stremionow.ui.screens.DevicesScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ExploreScreen
 import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
 import io.github.affonsopaulo.stremionow.ui.screens.OnboardingScreen
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
-import io.github.affonsopaulo.stremionow.ui.screens.ProfileScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
+import io.github.affonsopaulo.stremionow.ui.screens.SettingsPage
+import io.github.affonsopaulo.stremionow.ui.screens.SettingsRoutes
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SourcesScreen
+import io.github.affonsopaulo.stremionow.ui.screens.title
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -92,16 +96,13 @@ private object Routes {
     const val MOVIES = "explore/movie"
     const val SEARCH = "search"
     const val LIBRARY = "library"
-    const val PROFILE = "profile"
-    const val ADDONS = "addons"
     const val DETAILS = "details/{kind}/{id}"
     const val GENRE = "genre/{kind}/{genre}"
     const val PERSON = "person/{name}"
     const val SOURCES = "sources"
-    const val SETTINGS = "settings"
-    const val DEVICES = "settings/devices"
+    const val SETTINGS = SettingsRoutes.LIST
+    const val SETTINGS_SECTION = SettingsRoutes.SECTION
     const val ONBOARDING = "onboarding"
-    const val SIGN_IN = "sign-in"
     const val PLAYER = "player"
 
     fun details(
@@ -156,7 +157,6 @@ fun StremioNowApp(
                 Routes.MOVIES -> TopDestination.Movies
                 Routes.SEARCH -> TopDestination.Search
                 Routes.LIBRARY -> TopDestination.MyList
-                Routes.PROFILE -> TopDestination.Profile
                 else -> null
             }
         // The tab whose stack the user is in, so it stays highlighted on inner pages too. Kept
@@ -180,7 +180,10 @@ fun StremioNowApp(
                 val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
                 if (onboarded) Routes.HOME else Routes.ONBOARDING
             }
-        val setup = entry?.destination?.route == Routes.ONBOARDING || entry?.destination?.route == Routes.SIGN_IN
+        val setup = entry?.destination?.route == Routes.ONBOARDING
+        // What the avatar opens: a menu, a sheet on phones, Settings on TV.
+        val accountUi = remember { AccountUi() }
+        val openSettings = { page: SettingsPage? -> navController.openSettings(page) }
         // Bumped when Search is chosen while already open, to focus the field and raise the keyboard.
         var searchFocusRequests by remember { mutableIntStateOf(0) }
         val openTab = { destination: TopDestination ->
@@ -239,6 +242,8 @@ fun StremioNowApp(
                                 section,
                                 navController,
                                 openTab,
+                                accountUi,
+                                openSettings,
                                 opacity = { headerOpacity.value },
                                 search =
                                     if (searchInHeader) {
@@ -267,6 +272,7 @@ fun StremioNowApp(
                         searchFocusRequests,
                         openTab,
                         headerQuery = if (searchInHeader) headerSearch.query else null,
+                        onSignIn = { accountUi.signInOpen = true },
                     )
                 }
             }
@@ -280,6 +286,14 @@ fun StremioNowApp(
             if (phone && !keyboardOpen && !immersive && !setup) {
                 SnTabBar(current = section, onNavigate = openTab)
             }
+            // Dialogs, over whatever page shows: the phone's account sheet, signing in and out.
+            AccountOverlays(
+                ui = accountUi,
+                sheet = phone,
+                onOpenAddons = { openSettings(SettingsPage.Addons) },
+                // Phones show the list of sections; elsewhere, the first section after Addons.
+                onOpenSettings = { openSettings(if (phone) null else SettingsPage.Playback) },
+            )
         }
     }
 }
@@ -295,9 +309,13 @@ private fun AppHeader(
     section: TopDestination?,
     navController: NavHostController,
     openTab: (TopDestination) -> Unit,
+    accountUi: AccountUi,
+    openSettings: (SettingsPage?) -> Unit,
     opacity: () -> Float,
     search: (@Composable () -> Unit)?,
 ) {
+    val route = entry?.destination?.route
+    val inSettings = route == Routes.SETTINGS || route == Routes.SETTINGS_SECTION
     Box(
         Modifier
             .fillMaxWidth()
@@ -306,12 +324,18 @@ private fun AppHeader(
     ) {
         if (SnLayout.formFactor == FormFactor.Phone) {
             SnPhoneHeader(
-                title = phoneTitle(entry?.destination?.route, entry?.arguments?.read { getStringOrNull("genre") }),
+                title =
+                    phoneTitle(
+                        route,
+                        entry?.arguments?.read { getStringOrNull("genre") },
+                        entry?.arguments?.read { getStringOrNull(SettingsRoutes.SECTION_ARGUMENT) },
+                    ),
                 onBack = if (current == null) ({ navController.navigateUp() }) else null,
-                profileSelected = section == TopDestination.Profile,
-                onOpenProfile = { openTab(TopDestination.Profile) },
+                accountSelected = inSettings,
+                onOpenAccount = { accountUi.menuOpen = true },
             )
         } else {
+            val tv = SnLayout.formFactor == FormFactor.Tv
             SnHeader(
                 current = section,
                 onNavigate = openTab,
@@ -322,6 +346,18 @@ private fun AppHeader(
                         null
                     },
                 search = search,
+                avatarSelected = inSettings,
+                onAvatar = {
+                    // TV has no floating menu: the avatar opens Settings, where the account lives.
+                    if (tv) openSettings(SettingsPage.Account) else accountUi.menuOpen = true
+                },
+                avatarMenu = {
+                    AccountMenuPopup(
+                        ui = accountUi,
+                        onOpenAddons = { openSettings(SettingsPage.Addons) },
+                        onOpenSettings = { openSettings(SettingsPage.Playback) },
+                    )
+                },
             )
         }
     }
@@ -335,6 +371,7 @@ private fun AppNavHost(
     searchFocusRequests: Int,
     openTab: (TopDestination) -> Unit,
     headerQuery: String?,
+    onSignIn: () -> Unit,
 ) {
     NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
         val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
@@ -346,7 +383,7 @@ private fun AppNavHost(
             HomeScreen(
                 onOpenTitle = { openTitle(it.kind, it.id) },
                 onOpenProgress = { openTitle(it.kind, it.id) },
-                onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
+                onOpenAddons = { navController.openSettings(SettingsPage.Addons) },
             )
         }
         page(Routes.SERIES) { ExploreScreen("series", onOpenTitle = { openTitle(it.kind, it.id) }) }
@@ -384,20 +421,35 @@ private fun AppNavHost(
         page(Routes.LIBRARY) {
             LibraryScreen(onOpenTitle = openTitle, onExplore = { openTab(TopDestination.Series) })
         }
-        page(Routes.PROFILE) {
-            ProfileScreen(
-                onOpenAddons = { navController.navigate(Routes.ADDONS) { launchSingleTop = true } },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) { launchSingleTop = true } },
-                onSignIn = { navController.navigate(Routes.SIGN_IN) { launchSingleTop = true } },
+        page(Routes.SETTINGS) {
+            SettingsScreen(
+                page = null,
+                onOpenPage = { navController.navigate(SettingsRoutes.of(it)) },
+                onSignIn = onSignIn,
             )
         }
-        page(Routes.ADDONS) { AddonsScreen() }
-        page(Routes.SETTINGS) {
-            SettingsScreen(onOpenDevices = { navController.navigate(Routes.DEVICES) { launchSingleTop = true } })
+        page(
+            Routes.SETTINGS_SECTION,
+            arguments = listOf(navArgument(SettingsRoutes.SECTION_ARGUMENT) { type = NavType.StringType }),
+        ) { backStack ->
+            SettingsScreen(
+                page =
+                    SettingsRoutes.pageOf(
+                        backStack.arguments?.read { getStringOrNull(SettingsRoutes.SECTION_ARGUMENT) },
+                    ),
+                onOpenPage = { navController.navigate(SettingsRoutes.of(it)) },
+                onSignIn = onSignIn,
+            )
         }
-        page(Routes.DEVICES) { DevicesScreen() }
-        page(Routes.SIGN_IN) {
-            OnboardingScreen(onFinished = { navController.popBackStack() }, signInOnly = true)
+        // The Profile and Addons pages of earlier versions became Settings sections; their
+        // routes lead there, so nothing that links to them breaks.
+        for (legacy in listOf(SettingsRoutes.LEGACY_PROFILE, SettingsRoutes.LEGACY_ADDONS)) {
+            composable(legacy) {
+                LaunchedEffect(Unit) {
+                    val target = SettingsRoutes.redirect(legacy) ?: return@LaunchedEffect
+                    navController.navigate(target) { popUpTo(legacy) { inclusive = true } }
+                }
+            }
         }
         page(Routes.ONBOARDING) {
             OnboardingScreen(
@@ -535,6 +587,7 @@ private const val HEADER_FADE_MS = 180
 private fun phoneTitle(
     route: String?,
     genre: String?,
+    settingsSection: String?,
 ): String? =
     when (route) {
         Routes.GENRE -> genre.orEmpty()
@@ -543,14 +596,16 @@ private fun phoneTitle(
         Routes.MOVIES -> stringResource(Res.string.nav_movies)
         Routes.SEARCH -> stringResource(Res.string.nav_search)
         Routes.LIBRARY -> stringResource(Res.string.nav_my_list)
-        Routes.PROFILE -> stringResource(Res.string.profile_title)
-        Routes.ADDONS -> stringResource(Res.string.nav_addons)
         Routes.DETAILS -> ""
         Routes.SOURCES -> stringResource(Res.string.sources_title)
         Routes.SETTINGS -> stringResource(Res.string.settings_title)
-        Routes.DEVICES -> stringResource(Res.string.devices_title)
+        Routes.SETTINGS_SECTION -> stringResource(settingsTitle(settingsSection))
         else -> null
     }
+
+/** A Settings section's title, or Settings' own for an unknown one. */
+private fun settingsTitle(section: String?): StringResource =
+    SettingsRoutes.pageOf(section)?.title() ?: Res.string.settings_title
 
 /** Routes of the top-level destinations. */
 private val TopRoutes =
@@ -560,8 +615,18 @@ private val TopRoutes =
         Routes.MOVIES to TopDestination.Movies,
         Routes.SEARCH to TopDestination.Search,
         Routes.LIBRARY to TopDestination.MyList,
-        Routes.PROFILE to TopDestination.Profile,
     )
+
+/**
+ * Opens Settings on [page], or on its list of sections (phones) or first section (elsewhere)
+ * when null. There is one Settings on the back stack: opening it again replaces it, so Back
+ * leaves Settings rather than stepping through the sections visited.
+ */
+private fun NavHostController.openSettings(page: SettingsPage?) {
+    popBackStack(Routes.SETTINGS_SECTION, inclusive = true)
+    popBackStack(Routes.SETTINGS, inclusive = true)
+    navigate(page?.let(SettingsRoutes::of) ?: Routes.SETTINGS) { launchSingleTop = true }
+}
 
 /**
  * Opens a top-level destination, keeping a single copy of each on the back stack and each

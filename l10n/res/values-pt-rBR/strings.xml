@@ -8,7 +8,7 @@
   <string name="nav_addons">Addons</string>
   <string name="nav_back">Voltar</string>
   <string name="nav_search">Buscar</string>
-  <string name="nav_profile">Perfil, conta e configurações</string>
+  <string name="nav_profile">Conta e configurações</string>
 
   <string name="action_watch">Assistir</string>
   <string name="action_more_info">Mais informações</string>
@@ -167,15 +167,9 @@
   <string name="addons_remove_meta_body">É o único addon com informações de filmes e séries. Sem ele, os títulos não abrem e o Início pode ficar vazio. Você pode instalá-lo de novo em Descobrir.</string>
   <string name="addons_turn_off">Desativar</string>
 
-  <!-- Profile screen, opened from the avatar. -->
-  <string name="profile_title">Perfil</string>
+  <!-- The account, in the avatar's menu and in Settings › Account. -->
   <string name="profile_local_name">Este aparelho</string>
   <string name="profile_local_body">Seus addons e sua lista ficam salvos só neste aparelho.</string>
-  <plurals name="profile_addons_count">
-    <item quantity="one">%1$d instalado</item>
-    <item quantity="many">%1$d instalados</item>
-    <item quantity="other">%1$d instalados</item>
-  </plurals>
   <string name="profile_version">StremioNow %1$s</string>
 
   <string name="action_resume">Continuar</string>
@@ -339,8 +333,6 @@
   <string name="settings_crash_reports_body">Quando o StremioNow fecha inesperadamente, ele pode salvar um relatório neste aparelho. Com Perguntar antes de enviar, você pode revisá-lo e decidir se quer enviá-lo na próxima vez que abrir o app. Nada é enviado sozinho.</string>
   <string name="settings_crash_ask">Perguntar antes de enviar</string>
   <string name="settings_crash_never">Nunca</string>
-  <string name="settings_devices">Outros aparelhos</string>
-  <string name="settings_devices_body">Baixe torrents em um aparelho e assista em outro.</string>
   <string name="devices_title">Outros aparelhos</string>
   <string name="devices_intro">Um aparelho da sua rede de casa pode baixar torrents para os outros. Uma TV com conexão fraca pode reproduzir pelo seu computador.</string>
   <string name="devices_section_serve">Compartilhar este aparelho</string>
@@ -409,5 +401,65 @@
   <string name="torrent_fallback_unreachable">Não foi possível alcançar %1$s. Baixando neste aparelho.</string>
   <string name="torrent_fallback_unpaired">%1$s não reconhece mais este aparelho. Baixando aqui; pareie de novo nas Configurações.</string>
   <string name="torrent_fallback_paused">%1$s está usando dados móveis. Baixando neste aparelho.</string>
+
+  <string name="settings_account">Conta</string>
+  <string name="settings_about">Sobre</string>
+  <string name="settings_about_license">Software livre sob a Licença Pública Geral GNU, versão 3 ou posterior.</string>
+  <string name="settings_about_source">Código-fonte</string>
+  <string name="settings_about_report">Relatar um problema</string>
+
+  <string name="settings_memory">Memória para o vídeo</string>
+  <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>
+  <string name="settings_memory_light">Leve</string>
+  <string name="settings_memory_light_body">Usa menos memória. Voltar ou avançar alguns segundos pode carregar o vídeo de novo.</string>
+  <string name="settings_memory_balanced">Equilibrado</string>
+  <string name="settings_memory_balanced_body">Volta e avança na hora quase sempre, sem pesar no computador.</string>
+  <string name="settings_memory_smooth">Fluido</string>
+  <string name="settings_memory_smooth_body">Guarda mais do vídeo para pular sem esperar. Usa mais memória.</string>
+  <string name="settings_memory_keeps">Guarda cerca de %1$s de um filme em 4K, ou %2$s de um em 1080p.</string>
+  <string name="settings_memory_suggested">Sugerido para este computador</string>
+  <string name="settings_memory_advanced">Avançado</string>
+  <string name="settings_memory_custom">Personalizado</string>
+  <string name="settings_memory_ahead">À frente (MiB)</string>
+  <string name="settings_memory_behind">Para trás (MiB)</string>
+  <string name="settings_memory_range">De %1$d a %2$d MiB.</string>
+  <plurals name="settings_duration_seconds">
+    <item quantity="one">%1$d s</item>
+    <item quantity="other">%1$d s</item>
+  </plurals>
+  <plurals name="settings_duration_minutes">
+    <item quantity="one">%1$d min</item>
+    <item quantity="other">%1$d min</item>
+  </plurals>
+
+  <string name="account_menu">Conta</string>
+  <string name="account_synced_just_now">Sincronizado agora</string>
+  <string name="account_synced_at">Última sincronização: %1$s</string>
+  <string name="account_not_synced">Ainda não sincronizado</string>
+  <string name="account_sync_now">Sincronizar agora</string>
+  <string name="account_syncing">Sincronizando…</string>
+  <string name="account_sync_failed">Não foi possível sincronizar. Verifique sua conexão e tente de novo.</string>
+
+  <string name="signin_body">Seus addons, sua lista e seu progresso vêm junto. Escolha como entrar na sua conta do Stremio.</string>
+  <string name="signin_with_browser">Entrar pelo navegador</string>
+  <string name="signin_with_code">Entrar com um código</string>
+  <string name="signin_facebook">Continuar com o Facebook</string>
+  <string name="signin_apple">Continuar com a Apple</string>
+  <string name="signin_email">Usar e-mail e senha</string>
+  <string name="signin_code_body">Abra o link num celular ou computador em que você já entrou no Stremio, ou leia o QR code, e confirme o código lá.</string>
+  <string name="signin_code_body_tv">Leia o QR code com o celular, ou abra %1$s num computador em que você já entrou no Stremio, e confirme o código lá.</string>
+  <string name="signin_code_label">Código</string>
+  <string name="signin_code_qr">QR code que abre a página para confirmar o código</string>
+  <string name="signin_waiting">Aguardando a confirmação…</string>
+  <string name="signin_code_expired">O código expirou.</string>
+  <string name="signin_new_code">Gerar um novo código</string>
+  <string name="signin_code_failed">Não foi possível gerar um código. Verifique sua conexão.</string>
+  <string name="signin_open_browser">Abrir no navegador</string>
+  <string name="signin_browser_facebook_body">Entre com o Facebook na janela do navegador que abriu. Isto se atualiza sozinho quando você terminar.</string>
+  <string name="signin_browser_apple_body">Entre com a Apple na janela do navegador que abriu. Isto se atualiza sozinho quando você terminar.</string>
+  <string name="signin_open_again">Abrir a página de novo</string>
+  <string name="signin_browser_timeout">Não terminou a tempo.</string>
+  <string name="signin_failed">Não foi possível entrar. Verifique sua conexão e tente de novo.</string>
+  <string name="signin_other_ways">Outras formas de entrar</string>
 
 </resources>

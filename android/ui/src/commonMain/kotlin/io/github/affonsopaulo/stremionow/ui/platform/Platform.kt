@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.platform
 
 import androidx.compose.runtime.ProvidableCompositionLocal
+import io.github.affonsopaulo.stremionow.player.StreamMemory
 
 /**
  * Where platform services come from: Android's `Context`, or a single instance on the desktop.
@@ -39,3 +40,10 @@ internal expect fun appVersion(context: PlatformContext): String?
  * through the system's own setting.
  */
 internal expect fun displaySwitchingSupported(): Boolean
+
+/**
+ * The level of "Memory for the video" the player picks on this device when the user has not
+ * chosen one, where the user can choose: on the desktop. Null on Android, which keeps its own
+ * sizes until it gets levels of its own.
+ */
+internal expect fun automaticStreamMemory(): StreamMemory?

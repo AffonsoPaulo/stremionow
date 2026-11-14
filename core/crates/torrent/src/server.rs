@@ -20,7 +20,7 @@ use crate::http::{self, Body};
 use crate::lan::{RemoteError, RemoteServer, RemoteTorrent, TorrentRoute};
 use crate::magnet::{self, InfoHash};
 use crate::proxy::Proxy;
-use crate::torrent::{Engine, Network};
+use crate::torrent::{LazyEngine, Network};
 use crate::{TorrentError, TorrentStatus, cache, secret};
 
 /// Settings for [`StreamServer::start`].
@@ -56,7 +56,7 @@ pub(crate) struct Shared {
     /// `http://127.0.0.1:<port>/<secret>`, the prefix of every URL handed out.
     base_url: String,
     max_cache_bytes: u64,
-    pub(crate) engine: Engine,
+    pub(crate) engine: LazyEngine,
     proxy: Proxy,
     /// Who uses each torrent in the engine: this device's player, paired devices or both.
     /// A torrent stops when its last holder lets go.
@@ -93,6 +93,9 @@ impl StreamServer {
     /// Binds `127.0.0.1` on a random port and starts the torrent session, with DHT on and
     /// incoming peers accepted on a random port. Data is downloaded under
     /// `config.cache_dir`.
+    ///
+    /// A torrent session that cannot start does not fail the server: remote sources do not
+    /// need it, and torrent requests start it again, returning its error if it still fails.
     pub async fn start(config: ServerConfig) -> Result<Self, TorrentError> {
         Self::start_with(config, Network::Online).await
     }
@@ -108,7 +111,8 @@ impl StreamServer {
         let port = listener.local_addr()?.port();
         let secret = secret::random_hex()?;
         let proxy = Proxy::new()?;
-        let engine = Engine::start(&config.cache_dir, &shutdown, network).await?;
+        let engine = LazyEngine::new(&config.cache_dir, &shutdown, network);
+        engine.warm_up().await;
         let shared = Arc::new(Shared {
             port,
             base_url: format!("http://127.0.0.1:{port}/{secret}"),
@@ -140,7 +144,7 @@ impl StreamServer {
     ///
     /// `info_hash` is the 40-digit hex hash. `trackers` are the stream's `sources` as
     /// Stremio addons send them: `tracker:<url>` entries are announced to, `dht:` entries
-    /// are ignored (DHT is always on). The call waits until peers send the file list, for a
+    /// are ignored (the DHT is on whenever it can start). The call waits until peers send the file list, for a
     /// minute at most, then downloads only the chosen file: `file_idx` when it names a file
     /// of the torrent, otherwise the largest video.
     ///

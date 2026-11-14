@@ -104,23 +104,71 @@ struct Selection {
     file: TorrentFile,
 }
 
+/// How the session's DHT starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dht {
+    /// On the port saved with the routing table, so nodes that know this one find it again.
+    SavedPort,
+    /// On any free port, keeping the saved routing table. The saved port can become
+    /// impossible to open: Windows reserves port ranges for Hyper-V, WSL and Docker that
+    /// change on every boot, and opening a reserved port fails with "access forbidden".
+    AnyPort,
+    /// Off: torrents find peers through their trackers only.
+    Off,
+}
+
+/// The ways [`Engine::start`] tries to start the session, in order: (IPv4 only, DHT). IPv4
+/// only is for devices that cannot open dual-stack sockets.
+const START_ATTEMPTS: [(bool, Dht); 6] = [
+    (false, Dht::SavedPort),
+    (false, Dht::AnyPort),
+    (false, Dht::Off),
+    (true, Dht::SavedPort),
+    (true, Dht::AnyPort),
+    (true, Dht::Off),
+];
+
 impl Engine {
-    /// Starts a librqbit session storing data under `cache_dir`. Retries with IPv4 only when
-    /// the device cannot open dual-stack sockets.
+    /// Starts a librqbit session storing data under `cache_dir`, trying each of
+    /// [`START_ATTEMPTS`] until one works. Returns the first attempt's error if none does.
     pub(crate) async fn start(
         cache_dir: &Path,
         shutdown: &CancellationToken,
         network: Network,
     ) -> Result<Self, TorrentError> {
+        Self::start_trying(cache_dir, shutdown, network, &START_ATTEMPTS).await
+    }
+
+    async fn start_trying(
+        cache_dir: &Path,
+        shutdown: &CancellationToken,
+        network: Network,
+        attempts: &[(bool, Dht)],
+    ) -> Result<Self, TorrentError> {
         let data_dir = cache_dir.join(DATA_DIR);
         tokio::fs::create_dir_all(&data_dir).await?;
         install_tls_provider();
-        let session = match start_session(cache_dir, &data_dir, shutdown, network, false).await {
-            Ok(session) => session,
-            Err(error) => {
-                log::warn!("torrent: dual-stack start failed, retrying with IPv4 only: {error}");
-                start_session(cache_dir, &data_dir, shutdown, network, true).await?
+        let mut first_error = None;
+        let mut session = None;
+        for &(ipv4_only, dht) in attempts {
+            match start_session(cache_dir, &data_dir, shutdown, network, ipv4_only, dht).await {
+                Ok(started) => {
+                    if first_error.is_some() {
+                        log::warn!("torrent: started with ipv4_only={ipv4_only}, dht={dht:?}");
+                    }
+                    session = Some(started);
+                    break;
+                }
+                Err(error) => {
+                    log::warn!(
+                        "torrent: start failed with ipv4_only={ipv4_only}, dht={dht:?}: {error}"
+                    );
+                    first_error.get_or_insert(error);
+                }
             }
+        }
+        let Some(session) = session else {
+            return Err(first_error.unwrap_or_else(|| TorrentError::engine("no start attempt")));
         };
         Ok(Self {
             session,
@@ -325,6 +373,7 @@ impl Engine {
         &self.data_dir
     }
 
+    /// Folder holding the downloaded data of all torrents.
     /// Answers a player request for file `index` of torrent `hash`, ranges included. Only
     /// the selected file of a torrent the app added is served; anything else is 404.
     pub(crate) async fn respond(
@@ -595,11 +644,14 @@ async fn start_session(
     shutdown: &CancellationToken,
     network: Network,
     ipv4_only: bool,
+    dht: Dht,
 ) -> Result<Arc<Session>, TorrentError> {
     let token = shutdown.child_token();
     let online = network == Network::Online;
     let options = SessionOptions {
-        dht: online.then(|| DhtSessionConfig {
+        dht: (online && dht != Dht::Off).then(|| DhtSessionConfig {
+            // An explicit port wins over the saved one; port 0 is any free port.
+            port: (dht == Dht::AnyPort).then_some(0),
             persistence: Some(DhtPersistenceConfig {
                 config_filename: Some(cache_dir.join(DHT_FILE)),
                 dump_interval: None,
@@ -635,9 +687,72 @@ async fn start_session(
 mod tests {
     use super::*;
 
+    use std::net::{Ipv4Addr, UdpSocket};
+
     #[test]
     fn file_name_is_the_last_component() {
         assert_eq!(file_name("Show/Season 1/S01E01.mkv"), "S01E01.mkv");
         assert_eq!(file_name("movie.mp4"), "movie.mp4");
+    }
+
+    /// Saves a DHT state with `port`, in the format librqbit writes, with an empty routing
+    /// table.
+    fn save_dht_port(cache_dir: &Path, port: u16) {
+        let json = format!(
+            r#"{{"addr":"0.0.0.0:{port}","table":{{"id":"0123456789abcdef0123456789abcdef01234567","size":0,"buckets":{{"data":[{{"bits":160,"start":"0000000000000000000000000000000000000000","end_inclusive":"ffffffffffffffffffffffffffffffffffffffff","data":{{"Leaf":{{"nodes":[]}}}}}}],"size":1,"max_size":512}}}}}}"#
+        );
+        std::fs::write(cache_dir.join(DHT_FILE), json).expect("write DHT state");
+    }
+
+    /// Holds a UDP port, like one Windows has reserved since the last run, and saves it as
+    /// the DHT's port. IPv4 only: a dual-stack socket may still open a port held for IPv4.
+    fn saved_port_in_use(cache_dir: &Path) -> (UdpSocket, u16) {
+        let held = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).expect("bind");
+        let port = held.local_addr().expect("address").port();
+        save_dht_port(cache_dir, port);
+        (held, port)
+    }
+
+    // Online: the DHT binds a real UDP port. Starting it does not wait for the network.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_saved_dht_port_that_cannot_be_opened_falls_back_to_another() {
+        let cache = tempfile::tempdir().expect("temp dir");
+        let (_held, port) = saved_port_in_use(cache.path());
+        let shutdown = CancellationToken::new();
+
+        // The saved state really pins the port: on its own, that attempt fails.
+        let pinned = Engine::start_trying(
+            cache.path(),
+            &shutdown,
+            Network::Online,
+            &[(true, Dht::SavedPort)],
+        )
+        .await;
+        assert!(
+            pinned.is_err(),
+            "the saved port should be impossible to open"
+        );
+
+        let attempts = [(true, Dht::SavedPort), (true, Dht::AnyPort)];
+        let engine = Engine::start_trying(cache.path(), &shutdown, Network::Online, &attempts)
+            .await
+            .expect("engine starts");
+        let dht = engine.session.get_dht().expect("DHT on");
+        assert_ne!(dht.listen_addr().port(), port);
+        shutdown.cancel();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_engine_starts_without_dht_when_it_cannot_open_one() {
+        let cache = tempfile::tempdir().expect("temp dir");
+        let (_held, _) = saved_port_in_use(cache.path());
+        let shutdown = CancellationToken::new();
+
+        let attempts = [(true, Dht::SavedPort), (true, Dht::Off)];
+        let engine = Engine::start_trying(cache.path(), &shutdown, Network::Online, &attempts)
+            .await
+            .expect("engine starts");
+        assert!(engine.session.get_dht().is_none());
+        shutdown.cancel();
     }
 }

@@ -12,6 +12,7 @@ mod core;
 mod home;
 mod panics;
 mod playback;
+mod ratings;
 mod records;
 mod settings;
 mod sharing;

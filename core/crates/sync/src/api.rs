@@ -42,27 +42,8 @@ pub struct StremioApi {
 impl StremioApi {
     /// Creates a client for the official API whose requests give up after `timeout`.
     pub fn new(timeout: Duration) -> Result<Self, SyncError> {
-        let roots = rustls::RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| SyncError::Network(e.to_string()))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-        let http = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
-            .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(timeout)
-            .timeout(timeout)
-            // A redirected POST could resend the password elsewhere; the API never redirects.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|e| SyncError::Network(e.to_string()))?;
         Ok(Self {
-            http,
+            http: http_client(timeout)?,
             base_url: DEFAULT_BASE_URL.to_owned(),
         })
     }
@@ -194,28 +175,58 @@ impl StremioApi {
     }
 }
 
+/// An HTTPS client for Stremio's services whose requests give up after `timeout`. It never
+/// follows redirects: a redirected request could resend the password or the auth key
+/// elsewhere, and the services never redirect.
+pub(crate) fn http_client(timeout: Duration) -> Result<reqwest::Client, SyncError> {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| SyncError::Network(e.to_string()))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(tls)
+        .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(timeout)
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| SyncError::Network(e.to_string()))
+}
+
 /// Reads the body, refusing anything larger than [`MAX_RESPONSE_BYTES`].
-async fn read_body(mut response: reqwest::Response) -> Result<Vec<u8>, SyncError> {
+async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, SyncError> {
+    read_limited(response, MAX_RESPONSE_BYTES).await
+}
+
+/// Reads the body, refusing anything larger than `max` bytes.
+pub(crate) async fn read_limited(
+    mut response: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, SyncError> {
     if response
         .content_length()
-        .is_some_and(|len| len > MAX_RESPONSE_BYTES as u64)
+        .is_some_and(|len| len > max as u64)
     {
-        return Err(too_large());
+        return Err(too_large(max));
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(SyncError::from_reqwest)? {
-        if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
-            return Err(too_large());
+        if bytes.len() + chunk.len() > max {
+            return Err(too_large(max));
         }
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
 }
 
-fn too_large() -> SyncError {
-    SyncError::InvalidResponse(format!(
-        "the response is larger than {MAX_RESPONSE_BYTES} bytes"
-    ))
+fn too_large(max: usize) -> SyncError {
+    SyncError::InvalidResponse(format!("the response is larger than {max} bytes"))
 }
 
 /// The `{"result"}` / `{"error"}` envelope of every response.

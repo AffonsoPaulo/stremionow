@@ -375,3 +375,36 @@ async fn prune_keeps_torrents_in_use() {
     assert!(server.prune_cache().await.expect("prune") >= 5_000);
     assert!(!data.join(HASH).exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_sources_play_when_the_torrent_engine_cannot_start() {
+    let upstream = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/movie.mkv"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(film(100), "video/x-matroska"))
+        .mount(&upstream)
+        .await;
+    // A cache "folder" that is a file: the engine cannot create its data folder in it.
+    let parent = tempfile::tempdir().expect("temp dir");
+    let cache_dir = parent.path().join("cache");
+    fs::write(&cache_dir, b"not a folder").expect("write file");
+    let config = ServerConfig {
+        cache_dir,
+        max_cache_bytes: 0,
+    };
+    let server = StreamServer::start_with(config, Network::Offline)
+        .await
+        .expect("server starts without the engine");
+
+    let url = server
+        .proxy_url(&format!("{}/movie.mkv", upstream.uri()))
+        .expect("proxy url");
+    let response = get(&url, None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.bytes().await.expect("body"), film(100));
+
+    // Torrents report the engine's error, and nothing claims to be running.
+    assert!(server.torrent_url(HASH, None, &[]).await.is_err());
+    assert!(server.status(HASH).is_none());
+    assert!(server.torrent_route(HASH).is_none());
+}

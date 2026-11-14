@@ -128,6 +128,115 @@ const START_ATTEMPTS: [(bool, Dht); 6] = [
     (true, Dht::Off),
 ];
 
+/// The torrent engine, started on the first torrent request (and by [`Self::warm_up`]). A
+/// failure to start it is returned to that request and the next one tries again, so it never
+/// stops the server from relaying remote sources, which do not need it.
+pub(crate) struct LazyEngine {
+    engine: tokio::sync::OnceCell<Engine>,
+    cache_dir: PathBuf,
+    data_dir: PathBuf,
+    shutdown: CancellationToken,
+    network: Network,
+}
+
+impl LazyEngine {
+    pub(crate) fn new(cache_dir: &Path, shutdown: &CancellationToken, network: Network) -> Self {
+        Self {
+            engine: tokio::sync::OnceCell::new(),
+            cache_dir: cache_dir.to_path_buf(),
+            data_dir: cache_dir.join(DATA_DIR),
+            shutdown: shutdown.clone(),
+            network,
+        }
+    }
+
+    /// Starts the engine ahead of the first torrent, so the DHT is already finding nodes by
+    /// then. A failure is only logged: the first torrent tries again.
+    pub(crate) async fn warm_up(&self) {
+        if let Err(error) = self.get().await {
+            log::warn!("torrent: engine not started, will retry on the first torrent: {error}");
+        }
+    }
+
+    /// The engine, starting it if needed.
+    async fn get(&self) -> Result<&Engine, TorrentError> {
+        self.engine
+            .get_or_try_init(|| Engine::start(&self.cache_dir, &self.shutdown, self.network))
+            .await
+    }
+
+    /// The engine if it has started; when it has not, no torrent is running.
+    fn started(&self) -> Option<&Engine> {
+        self.engine.get()
+    }
+
+    /// See [`Engine::add`].
+    pub(crate) async fn add(
+        &self,
+        hash: InfoHash,
+        requested: Option<usize>,
+        trackers: &[String],
+    ) -> Result<usize, TorrentError> {
+        self.get().await?.add(hash, requested, trackers).await
+    }
+
+    /// See [`Engine::status`].
+    pub(crate) fn status(&self, hash: InfoHash) -> Option<TorrentStatus> {
+        self.started()?.status(hash)
+    }
+
+    /// See [`Engine::selected_index`].
+    pub(crate) fn selected_index(&self, hash: InfoHash) -> Option<usize> {
+        self.started()?.selected_index(hash)
+    }
+
+    /// See [`Engine::stop`].
+    pub(crate) async fn stop(&self, hash: InfoHash) {
+        if let Some(engine) = self.started() {
+            engine.stop(hash).await;
+        }
+    }
+
+    /// See [`Engine::in_use`].
+    pub(crate) fn in_use(&self, name: &str) -> bool {
+        self.started().is_some_and(|engine| engine.in_use(name))
+    }
+
+    /// The folder holding one folder of data per torrent. Known before the engine starts, so
+    /// the cache can be pruned without starting it.
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// See [`Engine::respond`].
+    pub(crate) async fn respond(
+        &self,
+        hash: &str,
+        index: &str,
+        method: &Method,
+        range: Option<&str>,
+    ) -> Response<Body> {
+        match self.started() {
+            Some(engine) => engine.respond(hash, index, method, range).await,
+            None => http::not_found(),
+        }
+    }
+
+    /// See [`Engine::add_torrent_file`].
+    #[cfg(test)]
+    pub(crate) async fn add_torrent_file(
+        &self,
+        hash: InfoHash,
+        torrent: Bytes,
+        files: Vec<TorrentFile>,
+    ) -> Result<usize, TorrentError> {
+        self.get()
+            .await?
+            .add_torrent_file(hash, torrent, files)
+            .await
+    }
+}
+
 impl Engine {
     /// Starts a librqbit session storing data under `cache_dir`, trying each of
     /// [`START_ATTEMPTS`] until one works. Returns the first attempt's error if none does.
@@ -366,11 +475,6 @@ impl Engine {
     /// Whether the cache entry called `name` belongs to a torrent the app is using.
     pub(crate) fn in_use(&self, name: &str) -> bool {
         InfoHash::parse(name).is_some_and(|hash| self.torrents().contains_key(&hash))
-    }
-
-    /// Folder holding the downloaded data of all torrents.
-    pub(crate) fn data_dir(&self) -> &Path {
-        &self.data_dir
     }
 
     /// Folder holding the downloaded data of all torrents.

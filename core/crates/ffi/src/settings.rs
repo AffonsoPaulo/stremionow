@@ -19,6 +19,17 @@ const HDR_TITLE_PREFIX: &str = "hdr_title:";
 const MAX_META_ID_LEN: usize = 200;
 const SERVE_TO_DEVICES: &str = "serve_to_devices";
 const SERVE_NAME: &str = "serve_name";
+const STREAM_MEMORY: &str = "stream_memory";
+const STREAM_MEMORY_AHEAD_MIB: &str = "stream_memory_ahead_mib";
+const STREAM_MEMORY_BEHIND_MIB: &str = "stream_memory_behind_mib";
+
+/// Custom stream memory read ahead, in MiB: the player's `StreamMemorySizes` takes the same
+/// range. Below it, a few seconds of a 4K film; above it, more memory than any level uses.
+pub const STREAM_AHEAD_MIB_RANGE: (u32, u32) = (16, 1024);
+/// Custom stream memory kept behind, in MiB; the same range as the player's.
+pub const STREAM_BEHIND_MIB_RANGE: (u32, u32) = (8, 1024);
+/// Custom sizes before the user changes them: the balanced level's.
+const DEFAULT_STREAM_MIB: u32 = 128;
 
 /// Longest name for this device as a server, in characters.
 const MAX_SERVE_NAME_CHARS: usize = 40;
@@ -56,6 +67,43 @@ impl DisplaySwitch {
     }
 }
 
+/// How much of the stream the player keeps in memory, ahead of and behind the playback
+/// position ("Memory for the video" in Settings). The sizes of each level belong to the
+/// player (`StreamMemory`); this is only the user's choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum StreamMemoryChoice {
+    /// The player picks a level from the device's memory.
+    #[default]
+    Automatic,
+    Light,
+    Balanced,
+    Smooth,
+    /// The exact sizes in `stream_memory_ahead_mib` and `stream_memory_behind_mib`.
+    Custom,
+}
+
+impl StreamMemoryChoice {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::Light => "light",
+            Self::Balanced => "balanced",
+            Self::Smooth => "smooth",
+            Self::Custom => "custom",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "light" => Self::Light,
+            "balanced" => Self::Balanced,
+            "smooth" => Self::Smooth,
+            "custom" => Self::Custom,
+            _ => Self::Automatic,
+        }
+    }
+}
+
 /// Preferences the user can change in Settings.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppSettings {
@@ -83,6 +131,12 @@ pub struct AppSettings {
     /// The name other devices see for this one when it serves, announced on the network;
     /// empty until the user turns serving on, when the app sets a neutral default.
     pub serve_name: String,
+    /// How much of the stream the player keeps in memory; applies from the next video.
+    pub stream_memory: StreamMemoryChoice,
+    /// Read ahead with [`StreamMemoryChoice::Custom`], in MiB, within [`STREAM_AHEAD_MIB_RANGE`].
+    pub stream_memory_ahead_mib: u32,
+    /// Kept behind with [`StreamMemoryChoice::Custom`], in MiB, within [`STREAM_BEHIND_MIB_RANGE`].
+    pub stream_memory_behind_mib: u32,
 }
 
 impl Default for AppSettings {
@@ -99,6 +153,9 @@ impl Default for AppSettings {
             match_refresh_rate: false,
             serve_to_devices: false,
             serve_name: String::new(),
+            stream_memory: StreamMemoryChoice::Automatic,
+            stream_memory_ahead_mib: DEFAULT_STREAM_MIB,
+            stream_memory_behind_mib: DEFAULT_STREAM_MIB,
         }
     }
 }
@@ -143,6 +200,23 @@ impl StremioCore {
             serve_name: store
                 .setting(SERVE_NAME)?
                 .map_or(defaults.serve_name, |value| serve_name(&value)),
+            stream_memory: store
+                .setting(STREAM_MEMORY)?
+                .map_or(defaults.stream_memory, |value| {
+                    StreamMemoryChoice::parse(&value)
+                }),
+            stream_memory_ahead_mib: store
+                .setting(STREAM_MEMORY_AHEAD_MIB)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.stream_memory_ahead_mib, |mib| {
+                    clamp_range(mib, STREAM_AHEAD_MIB_RANGE)
+                }),
+            stream_memory_behind_mib: store
+                .setting(STREAM_MEMORY_BEHIND_MIB)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.stream_memory_behind_mib, |mib| {
+                    clamp_range(mib, STREAM_BEHIND_MIB_RANGE)
+                }),
         })
     }
 
@@ -182,6 +256,15 @@ impl StremioCore {
             if settings.serve_to_devices { "1" } else { "0" },
         )?;
         store.set_setting(SERVE_NAME, &serve_name(&settings.serve_name))?;
+        store.set_setting(STREAM_MEMORY, settings.stream_memory.as_str())?;
+        store.set_setting(
+            STREAM_MEMORY_AHEAD_MIB,
+            &clamp_range(settings.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE).to_string(),
+        )?;
+        store.set_setting(
+            STREAM_MEMORY_BEHIND_MIB,
+            &clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
+        )?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
         self.apply_network_policy();
@@ -260,6 +343,11 @@ fn clamp_resolution(lines: u32) -> u32 {
     }
 }
 
+/// Keeps `value` within the inclusive `(min, max)` range.
+fn clamp_range(value: u32, (min, max): (u32, u32)) -> u32 {
+    value.clamp(min, max)
+}
+
 /// Keeps a cache size within the offered range.
 fn clamp_cache(megabytes: u32) -> u32 {
     let (min, max) = (TORRENT_CACHE_CHOICES_MB[0], TORRENT_CACHE_CHOICES_MB[4]);
@@ -288,6 +376,9 @@ mod tests {
             match_refresh_rate: true,
             serve_to_devices: true,
             serve_name: "  StremioNow\non   TV ".into(),
+            stream_memory: StreamMemoryChoice::Custom,
+            stream_memory_ahead_mib: 4,
+            stream_memory_behind_mib: 99_999,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -305,6 +396,44 @@ mod tests {
         assert!(saved.match_refresh_rate);
         assert!(saved.serve_to_devices);
         assert_eq!(saved.serve_name, "StremioNow on TV");
+        assert_eq!(saved.stream_memory, StreamMemoryChoice::Custom);
+        assert_eq!(
+            saved.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE.0,
+            "too little is raised"
+        );
+        assert_eq!(
+            saved.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE.1,
+            "too much is lowered"
+        );
+    }
+
+    #[test]
+    fn stream_memory_choices_round_trip() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert_eq!(
+            core.settings().expect("reads").stream_memory,
+            StreamMemoryChoice::Automatic,
+            "the device decides until the user does"
+        );
+        for choice in [
+            StreamMemoryChoice::Light,
+            StreamMemoryChoice::Balanced,
+            StreamMemoryChoice::Smooth,
+            StreamMemoryChoice::Custom,
+            StreamMemoryChoice::Automatic,
+        ] {
+            core.update_settings(AppSettings {
+                stream_memory: choice,
+                ..AppSettings::default()
+            })
+            .expect("saves");
+            assert_eq!(core.settings().expect("reads").stream_memory, choice);
+        }
+        assert_eq!(
+            StreamMemoryChoice::parse("something else"),
+            StreamMemoryChoice::Automatic
+        );
     }
 
     #[test]

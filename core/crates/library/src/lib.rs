@@ -401,6 +401,15 @@ impl Store {
         Ok(())
     }
 
+    /// Marks a video of title `id` as not watched. Does nothing when it was not watched.
+    pub fn unmark_watched(&self, id: &str, video_id: &str) -> Result<(), StoreError> {
+        self.connection.execute(
+            "DELETE FROM watched WHERE video_id = ?1 AND id = ?2",
+            params![video_id, id],
+        )?;
+        Ok(())
+    }
+
     /// Ids of the watched videos of title `id`.
     pub fn watched_videos(&self, id: &str) -> Result<Vec<String>, StoreError> {
         let mut statement = self
@@ -682,5 +691,20 @@ mod tests {
         store.mark_watched("a", "a:1:1", 2).expect("marks again");
         store.mark_watched("b", "b:1:1", 3).expect("marks");
         assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
+    }
+
+    #[test]
+    fn unmarking_forgets_only_that_video() {
+        let store = Store::open_in_memory().expect("store");
+        store.mark_watched("a", "a:1:1", 1).expect("marks");
+        store.mark_watched("a", "a:1:2", 1).expect("marks");
+        store.unmark_watched("a", "a:1:1").expect("unmarks");
+        store
+            .unmark_watched("b", "a:1:2")
+            .expect("another title's id leaves it alone");
+        store
+            .unmark_watched("a", "a:9:9")
+            .expect("unwatched is fine");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:2"]);
     }
 }

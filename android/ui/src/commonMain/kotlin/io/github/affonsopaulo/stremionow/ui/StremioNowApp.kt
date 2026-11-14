@@ -45,8 +45,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.savedstate.read
-import io.github.affonsopaulo.stremionow.core.Episode
-import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.ui.components.AppShortcuts
 import io.github.affonsopaulo.stremionow.ui.components.HeaderOverlay
 import io.github.affonsopaulo.stremionow.ui.components.HeaderSearchState
@@ -78,7 +76,6 @@ import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
 import io.github.affonsopaulo.stremionow.ui.screens.ProfileScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsScreen
-import io.github.affonsopaulo.stremionow.ui.screens.SourcesScreen
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -97,7 +94,6 @@ private object Routes {
     const val DETAILS = "details/{kind}/{id}"
     const val GENRE = "genre/{kind}/{genre}"
     const val PERSON = "person/{name}"
-    const val SOURCES = "sources"
     const val SETTINGS = "settings"
     const val DEVICES = "settings/devices"
     const val ONBOARDING = "onboarding"
@@ -338,10 +334,6 @@ private fun AppNavHost(
 ) {
     NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
         val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
-        val watch = { details: MetaDetails, episode: Episode? ->
-            PlaybackSession.select(PlaybackSession.Selection(details, episode))
-            navController.navigate(Routes.SOURCES) { launchSingleTop = true }
-        }
         page(Routes.HOME, underHeader = true) {
             HomeScreen(
                 onOpenTitle = { openTitle(it.kind, it.id) },
@@ -421,32 +413,26 @@ private fun AppNavHost(
                 onOpenTitle = { openTitle(it.kind, it.id) },
                 onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
                 onSearchPerson = { navController.navigate(Routes.person(it)) },
-                onPlay = watch,
-            )
-        }
-        page(Routes.SOURCES) {
-            SourcesScreen(
-                // The picker gives way to the player, so Back from the player returns
-                // to the title rather than to the list.
-                onPlay = {
-                    navController.navigate(
-                        Routes.PLAYER,
-                    ) { popUpTo(Routes.SOURCES) { inclusive = true } }
-                },
-                onGone = { navController.popBackStack() },
+                // The sources are on the title's page, so Back from the player returns there.
+                onPlay = { navController.navigate(Routes.PLAYER) { launchSingleTop = true } },
             )
         }
         page(Routes.PLAYER) {
             PlayerScreen(
                 onBack = { navController.popBackStack() },
+                // Both return to the title's page, which shows the sources in place of the
+                // episodes; for the next episode it plays the source of the same binge group
+                // by itself when one shows up.
                 onChangeSource = {
-                    navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                    PlaybackSession.returnToSources()
+                    navController.popBackStack()
                 },
                 onOpenEpisode = { episode ->
                     val current = PlaybackSession.selection ?: return@PlayerScreen
                     PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
                     PlaybackSession.select(current.copy(episode = episode))
-                    navController.navigate(Routes.SOURCES) { popUpTo(Routes.PLAYER) { inclusive = true } }
+                    PlaybackSession.returnToSources()
+                    navController.popBackStack()
                 },
             )
         }
@@ -546,7 +532,6 @@ private fun phoneTitle(
         Routes.PROFILE -> stringResource(Res.string.profile_title)
         Routes.ADDONS -> stringResource(Res.string.nav_addons)
         Routes.DETAILS -> ""
-        Routes.SOURCES -> stringResource(Res.string.sources_title)
         Routes.SETTINGS -> stringResource(Res.string.settings_title)
         Routes.DEVICES -> stringResource(Res.string.devices_title)
         else -> null

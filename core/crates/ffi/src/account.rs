@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use stremionow_library::{LibraryEntry, ProgressEntry, Store};
 use stremionow_protocol::AddonUrl;
-use stremionow_sync::{RemoteLibraryItem, StremioApi, SyncError, merge_library};
+use stremionow_sync::{LikesApi, RemoteLibraryItem, StremioApi, SyncError, merge_library};
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::CoreError;
@@ -30,6 +30,7 @@ const SKIPPED_KIND: &str = "other";
 /// The account half of the core.
 pub(crate) struct Account {
     api: StremioApi,
+    pub(crate) likes: LikesApi,
     auth_key: Mutex<Option<String>>,
 }
 
@@ -37,20 +38,23 @@ impl Account {
     pub(crate) fn new() -> Result<Self, CoreError> {
         Ok(Self {
             api: StremioApi::new(API_TIMEOUT)?,
+            likes: LikesApi::new(API_TIMEOUT)?,
             auth_key: Mutex::new(None),
         })
     }
 
-    /// An account client talking to another server, for tests.
+    /// An account client talking to another server, for tests: the account API and the likes
+    /// service both answer there.
     #[cfg(test)]
     pub(crate) fn with_base_url(url: &str) -> Result<Self, CoreError> {
         Ok(Self {
             api: StremioApi::new(API_TIMEOUT)?.with_base_url(url),
+            likes: LikesApi::new(API_TIMEOUT)?.with_base_url(url),
             auth_key: Mutex::new(None),
         })
     }
 
-    fn auth_key(&self) -> Option<String> {
+    pub(crate) fn auth_key(&self) -> Option<String> {
         self.auth_key.lock().ok().and_then(|key| key.clone())
     }
 
@@ -133,6 +137,8 @@ impl StremioCore {
         store.set_setting(ACCOUNT_EMAIL, "")?;
         store.set_setting(PENDING_REMOVALS, "{}")?;
         store.set_setting(ADDONS_CHANGED, "0")?;
+        // Ratings stay on the device; the next account must not receive this one's.
+        store.delete_settings_with_prefix(crate::ratings::PENDING_PREFIX)?;
         Ok(())
     }
 

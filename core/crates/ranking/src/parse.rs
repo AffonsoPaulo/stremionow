@@ -30,7 +30,46 @@ pub fn parse(text: &SourceText<'_>) -> Traits {
         languages: languages(&joined, &tokens),
         multi_audio: multi_audio(&tokens),
         provider: provider(&joined),
+        release_group: release_group(&joined),
     }
+}
+
+/// Endings of scene names that follow the last `-` but are not groups.
+const NOT_GROUPS: &[&str] = &[
+    "dl", "rip", "hd", "sd", "x264", "x265", "h264", "h265", "hevc", "avc", "aac", "dts", "ac3",
+    "web", "hdr", "dv", "uhd",
+];
+/// File extensions dropped before looking for the group.
+const VIDEO_EXTENSIONS: &[&str] = &[".mkv", ".mp4", ".avi", ".m4v", ".ts", ".webm", ".mov"];
+
+/// The release group of the first scene-style name in `text`: a word with dots between its
+/// parts whose last `-` precedes the group, as in `Movie.2023.1080p.WEB-DL.H264-GRP.mkv`.
+fn release_group(text: &str) -> Option<String> {
+    text.split_whitespace().find_map(group_of)
+}
+
+fn group_of(word: &str) -> Option<String> {
+    let lower = word.to_ascii_lowercase();
+    let mut end = word.len();
+    if let Some(extension) = VIDEO_EXTENSIONS.iter().find(|e| lower.ends_with(*e)) {
+        end -= extension.len();
+    }
+    let mut name = word.get(..end)?;
+    // A site tag after the group, as in `-ETHEL[eztv.re]`.
+    if name.ends_with(']')
+        && let Some(open) = name.rfind('[')
+    {
+        name = &name[..open];
+    }
+    if name.matches('.').count() < 2 {
+        return None;
+    }
+    let (_, group) = name.rsplit_once('-')?;
+    let plausible = (2..=20).contains(&group.len())
+        && group.bytes().all(|b| b.is_ascii_alphanumeric())
+        && group.bytes().any(|b| b.is_ascii_alphabetic())
+        && !NOT_GROUPS.contains(&group.to_ascii_lowercase().as_str());
+    plausible.then(|| group.to_owned())
 }
 
 fn sorted_unique<T: Ord>(mut values: Vec<T>) -> Vec<T> {
@@ -390,6 +429,7 @@ mod tests {
         assert_eq!(t.languages, ["en", "it"]);
         assert!(t.multi_audio);
         assert_eq!(t.provider.as_deref(), Some("ThePirateBay"));
+        assert_eq!(t.release_group.as_deref(), Some("GRP"));
     }
 
     #[test]
@@ -639,6 +679,33 @@ mod tests {
         assert_eq!(t.resolution, None);
         assert_eq!(t.provider, None);
         assert_eq!(t.cached, None);
+    }
+
+    #[test]
+    fn finds_release_groups_in_scene_names_only() {
+        for (title, group) in [
+            (
+                "Show.S01E01.1080p.WEB.h264-ETHEL[eztv.re].mkv",
+                Some("ETHEL"),
+            ),
+            ("Movie.2023.1080p.BluRay.x264-SPARKS.mp4", Some("SPARKS")),
+            ("Movie.2023.1080p.WEB-DL", None),
+            ("Movie.2023.1080p.WEB.x265-", None),
+            ("Movie 2023 1080p WEB-DL x264-GRP", None),
+            ("Movie.2023.1080p-12345", None),
+            (
+                "Movie.2023.1080p.BluRay.x264-THISNAMEISFARTOOLONGTOBEAGROUP",
+                None,
+            ),
+            ("Movie.2023.1080p.HDR-DV", None),
+            ("", None),
+        ] {
+            assert_eq!(
+                parse_title(title).release_group.as_deref(),
+                group,
+                "{title}"
+            );
+        }
     }
 
     #[test]

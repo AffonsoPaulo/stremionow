@@ -5,7 +5,9 @@
 mod catalog;
 mod client;
 mod fingerprint;
+mod icons;
 
 pub use catalog::{AddonList, DISCOVER_SOURCE, DiscoverableAddon, discoverable};
 pub use client::{AddonClient, AddonError, InstalledAddon};
 pub use fingerprint::manifest_fingerprint;
+pub use icons::{IconClient, MAX_ICON_BYTES, icon_host, is_icon_image};

@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use serde::de::DeserializeOwned;
 use stremionow_addons::{
-    AddonClient, AddonError, AddonList, DISCOVER_SOURCE, InstalledAddon, discoverable,
+    AddonClient, AddonError, AddonList, DISCOVER_SOURCE, IconClient, InstalledAddon, discoverable,
     manifest_fingerprint,
 };
 use stremionow_library::{LibraryEntry, Store};
@@ -67,6 +67,7 @@ pub struct StremioCore {
     pub(crate) streaming: Streaming,
     pub(crate) account: Account,
     pub(crate) aniskip: AniSkip,
+    pub(crate) icons: IconClient,
     /// Manifests downloaded for the user to confirm, oldest first.
     previews: Mutex<Vec<InstalledAddon>>,
     /// The last home screen worked out, for a while (see `home.rs`).
@@ -419,6 +420,7 @@ impl StremioCore {
             streaming: Streaming::new(directory.join("streams"))?,
             account,
             aniskip,
+            icons: IconClient::new(crate::icons::ICON_TIMEOUT)?,
             previews: Mutex::new(Vec::new()),
             recent_home: Mutex::new(None),
         }))

@@ -484,7 +484,6 @@
   <string name="account_sync_failed">Não foi possível sincronizar. Verifique sua conexão e tente de novo.</string>
 
   <string name="signin_body">Seus addons, sua lista e seu progresso vêm junto. Escolha como entrar na sua conta do Stremio.</string>
-  <string name="signin_with_browser">Entrar pelo navegador</string>
   <string name="signin_with_code">Entrar com um código</string>
   <string name="signin_facebook">Continuar com o Facebook</string>
   <string name="signin_apple">Continuar com a Apple</string>
@@ -504,5 +503,9 @@
   <string name="signin_browser_timeout">Não terminou a tempo.</string>
   <string name="signin_failed">Não foi possível entrar. Verifique sua conexão e tente de novo.</string>
   <string name="signin_other_ways">Outras formas de entrar</string>
+  <string name="signin_intro">Seus addons, sua lista e seu progresso vêm junto.</string>
+  <string name="signin_submit">Entrar</string>
+  <string name="signin_or">ou</string>
+  <string name="signin_with_browser_qr">Entrar pelo navegador (QR code)</string>
 
 </resources>

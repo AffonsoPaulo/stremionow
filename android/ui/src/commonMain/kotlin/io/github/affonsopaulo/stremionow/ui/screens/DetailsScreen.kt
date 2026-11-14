@@ -478,7 +478,7 @@ private fun DetailsContent(
         watchedChoices(details, sourcesEpisode ?: next.episode, season.toUInt(), watched, now, viewModel)
     val actions =
         DetailActions(
-            onTrailer = trailer,
+            onTrailer = rowTrailer(isSeries, trailer),
             inLibrary = inLibrary,
             onToggleLibrary = { viewModel.toggleLibrary(item) },
             watched = allWatched(seriesCovered, watched),

@@ -2,16 +2,14 @@
 package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -26,12 +24,17 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import io.github.affonsopaulo.stremionow.core.TitleRating
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
@@ -47,13 +50,14 @@ import io.github.affonsopaulo.stremionow.ui.platform.shareText
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
+import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
-import io.github.affonsopaulo.stremionow.ui.theme.SnSize
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
 /** What the action row shows and does; null actions are left out. */
 internal class DetailActions(
+    /** Null on movies too, whose second hero button already plays the trailer (see [rowTrailer]). */
     val onTrailer: (() -> Unit)?,
     val inLibrary: Boolean,
     val onToggleLibrary: () -> Unit,
@@ -65,98 +69,206 @@ internal class DetailActions(
     val onShare: (() -> Unit)?,
 )
 
+/** The tiles of the action row. */
+internal enum class DetailAction { Trailer, MyList, Watched, Like, Love, Share }
+
+/** The tiles [actions] shows, in order. */
+internal fun shownActions(actions: DetailActions): List<DetailAction> =
+    buildList {
+        if (actions.onTrailer != null) add(DetailAction.Trailer)
+        add(DetailAction.MyList)
+        add(DetailAction.Watched)
+        add(DetailAction.Like)
+        add(DetailAction.Love)
+        if (actions.onShare != null) add(DetailAction.Share)
+    }
+
 /**
- * The actions of the official app under a title's buttons, as icons with their names:
- * trailer, My list, mark as watched, like, love and share. A row that wraps on narrow screens.
+ * The row's trailer: only on a series. A movie's second hero button is already "Trailer", and
+ * a series' is "Start over" (or nothing), so only there does the row need its own.
  */
-@OptIn(ExperimentalLayoutApi::class)
+internal fun <T : Any> rowTrailer(
+    isSeries: Boolean,
+    trailer: T?,
+): T? = trailer?.takeIf { isSeries }
+
+/** The rating after choosing [chosen]: choosing the current one again clears it. */
+internal fun ratingAfter(
+    current: TitleRating,
+    chosen: TitleRating,
+): TitleRating = if (current == chosen) TitleRating.NONE else chosen
+
+/**
+ * The actions of the official app under a title's buttons: trailer, My list, mark as watched,
+ * like, love and share. Each is a tile of the same size, an icon over a one-line name, with no
+ * fill of its own; what is on (in My list, watched, liked, loved) shows in its icon and color.
+ * The first tile starts where the hero's buttons do. A row that does not fit, as on phones,
+ * scrolls sideways out to the screen's edges rather than wrapping.
+ */
 @Composable
 internal fun ActionRow(
     actions: DetailActions,
     modifier: Modifier = Modifier,
 ) {
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+    val edge = SnLayout.gutter
+    Row(
+        modifier =
+            modifier
+                // The scroll clips at its bounds: they reach out to the screen's edges and leave
+                // room for the focus ring above and below, while the tiles stay in place.
+                .bleed(horizontal = edge, vertical = FocusRingSpace)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = edge, vertical = FocusRingSpace),
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
     ) {
-        actions.onTrailer?.let { ActionButton(SnIcons.Film, stringResource(Res.string.action_trailer), onClick = it) }
-        ActionButton(
-            icon = if (actions.inLibrary) SnIcons.Check else SnIcons.Plus,
-            label = stringResource(if (actions.inLibrary) Res.string.action_in_list else Res.string.action_add_to_list),
-            selected = actions.inLibrary,
-            onClick = actions.onToggleLibrary,
-        )
-        ActionButton(
-            icon = if (actions.watched) SnIcons.CheckCircle else SnIcons.Eye,
-            label = stringResource(if (actions.watched) Res.string.action_watched else Res.string.action_mark_watched),
-            selected = actions.watched,
-            onClick = actions.onWatched,
-        )
         val liked = actions.rating == TitleRating.LIKED
         val loved = actions.rating == TitleRating.LOVED
-        ActionButton(
-            icon = if (liked) SnIcons.ThumbsUpFilled else SnIcons.ThumbsUp,
-            label = stringResource(Res.string.action_like),
-            selected = liked,
-            onClick = { actions.onRate(if (liked) TitleRating.NONE else TitleRating.LIKED) },
-        )
-        ActionButton(
-            icon = if (loved) SnIcons.HeartFilled else SnIcons.Heart,
-            label = stringResource(Res.string.action_love),
-            selected = loved,
-            onClick = { actions.onRate(if (loved) TitleRating.NONE else TitleRating.LOVED) },
-        )
-        actions.onShare?.let { ActionButton(SnIcons.Share, stringResource(Res.string.action_share), onClick = it) }
+        for (action in shownActions(actions)) {
+            when (action) {
+                DetailAction.Trailer -> {
+                    ActionTile(
+                        icon = SnIcons.Film,
+                        label = stringResource(Res.string.action_trailer),
+                        description = stringResource(Res.string.action_trailer_description),
+                        onClick = { actions.onTrailer?.invoke() },
+                    )
+                }
+
+                DetailAction.MyList -> {
+                    ActionTile(
+                        icon = if (actions.inLibrary) SnIcons.Check else SnIcons.Plus,
+                        label =
+                            stringResource(
+                                if (actions.inLibrary) Res.string.action_in_list else Res.string.action_add_to_list,
+                            ),
+                        description =
+                            stringResource(
+                                if (actions.inLibrary) {
+                                    Res.string.action_remove_from_list_description
+                                } else {
+                                    Res.string.action_add_to_list_description
+                                },
+                            ),
+                        active = actions.inLibrary,
+                        onClick = actions.onToggleLibrary,
+                    )
+                }
+
+                DetailAction.Watched -> {
+                    val description =
+                        if (actions.watched) Res.string.action_mark_unwatched else Res.string.action_mark_watched
+                    ActionTile(
+                        icon = if (actions.watched) SnIcons.CheckCircleFilled else SnIcons.Eye,
+                        label = stringResource(Res.string.action_watched),
+                        description = stringResource(description),
+                        active = actions.watched,
+                        onClick = actions.onWatched,
+                    )
+                }
+
+                DetailAction.Like -> {
+                    ActionTile(
+                        icon = if (liked) SnIcons.ThumbsUpFilled else SnIcons.ThumbsUp,
+                        label = stringResource(Res.string.action_like),
+                        active = liked,
+                        onClick = { actions.onRate(ratingAfter(actions.rating, TitleRating.LIKED)) },
+                    )
+                }
+
+                DetailAction.Love -> {
+                    ActionTile(
+                        icon = if (loved) SnIcons.HeartFilled else SnIcons.Heart,
+                        label = stringResource(Res.string.action_love),
+                        active = loved,
+                        onClick = { actions.onRate(ratingAfter(actions.rating, TitleRating.LOVED)) },
+                    )
+                }
+
+                DetailAction.Share -> {
+                    ActionTile(
+                        icon = SnIcons.Share,
+                        label = stringResource(Res.string.action_share),
+                        onClick = { actions.onShare?.invoke() },
+                    )
+                }
+            }
+        }
     }
 }
 
-/** An icon in a round tile with its name under it; the whole is one target. */
+/**
+ * One action: an icon over its short name, in a tile of fixed size, so every tile lines up
+ * whatever its name. Transparent at rest; the pointer and a press show the shared highlight,
+ * the keyboard and remote the focus ring. A name too long for the tile ends in an ellipsis;
+ * [description], the full meaning ("Mark as watched"), is what screen readers say.
+ */
 @Composable
-private fun ActionButton(
+private fun ActionTile(
     icon: ImageVector,
     label: String,
-    selected: Boolean = false,
     onClick: () -> Unit,
+    description: String = label,
+    active: Boolean = false,
 ) {
-    val shape = RoundedCornerShape(SnRadius.radiusMd)
     Column(
         modifier =
             Modifier
-                .width(ActionWidth)
-                .semantics { this.selected = selected }
-                .snClickable(shape, role = Role.Button, onClick = onClick)
-                .padding(vertical = SnSpacing.space1),
+                .size(ActionTileWidth, ActionTileHeight)
+                .semantics {
+                    contentDescription = description
+                    selected = active
+                }.snClickable(RoundedCornerShape(SnRadius.radiusMd), role = Role.Button, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space1, Alignment.CenterVertically),
     ) {
-        Box(
-            Modifier
-                .size(SnSize.controlMd)
-                .background(
-                    if (selected) SnColors.fg else SnColors.overlayLight,
-                    RoundedCornerShape(SnRadius.radiusFull),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                colorFilter = ColorFilter.tint(if (selected) SnColors.onInverse else SnColors.fg),
-            )
-        }
+        Image(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(ActionIconSize),
+            colorFilter = ColorFilter.tint(if (active) SnColors.accent else SnColors.fg),
+        )
         BasicText(
             label,
-            style = SnTypography.caption.copy(color = SnColors.fgSecondary, textAlign = TextAlign.Center),
-            maxLines = 2,
+            // The tile's description already says it.
+            modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
+            style =
+                SnTypography.label.copy(
+                    fontSize = SnTypography.overline.fontSize,
+                    lineHeight = SnTypography.overline.lineHeight,
+                    color = if (active) SnColors.fg else SnColors.fgSecondary,
+                    textAlign = TextAlign.Center,
+                ),
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-/** Width of each action, so labels of two lines line up. */
-private val ActionWidth = 84.dp
+/**
+ * Lets an element reach [horizontal] and [vertical] past each side of its place without
+ * moving what is around it, for a scroll that should clip further out than its content.
+ */
+private fun Modifier.bleed(
+    horizontal: Dp,
+    vertical: Dp,
+): Modifier =
+    layout { measurable, constraints ->
+        val x = horizontal.roundToPx()
+        val y = vertical.roundToPx()
+        val placeable = measurable.measure(constraints.offset(horizontal = x * 2, vertical = y * 2))
+        layout(
+            (placeable.width - x * 2).coerceAtLeast(0),
+            (placeable.height - y * 2).coerceAtLeast(0),
+        ) { placeable.place(-x, -y) }
+    }
+
+/** Wide enough for the longest name in one line ("Compartilhar"), six in the hero's text width. */
+private val ActionTileWidth = 92.dp
+private val ActionTileHeight = 64.dp
+private val ActionIconSize = 22.dp
+
+/** Room the focus ring takes outside an element: its gap plus its width. */
+private val FocusRingSpace = 6.dp
 
 /** One choice of the series' "Mark as watched": its label, and whether it marks or unmarks. */
 internal class WatchedChoice(

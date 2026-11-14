@@ -14,7 +14,9 @@
   <string name="action_more_info">Mais informações</string>
   <string name="action_resume_episode">Retomar %1$s</string>
   <string name="action_add_to_list">Minha lista</string>
-  <string name="action_in_list">Na minha lista</string>
+  <string name="action_in_list">Na lista</string>
+  <string name="action_add_to_list_description">Adicionar à Minha lista</string>
+  <string name="action_remove_from_list_description">Tirar da Minha lista</string>
   <string name="action_retry">Tentar de novo</string>
   <string name="action_cancel">Cancelar</string>
   <string name="action_open_addons">Abrir Addons</string>
@@ -89,9 +91,11 @@
   <string name="action_watch_episode">Assistir %1$s</string>
   <string name="action_start_over">Começar do início</string>
   <string name="action_trailer">Trailer</string>
+  <string name="action_trailer_description">Ver o trailer</string>
   <string name="action_mark_watched">Marcar como assistido</string>
+  <string name="action_mark_unwatched">Marcar como não assistido</string>
   <string name="action_watched">Assistido</string>
-  <string name="action_like">Gostei</string>
+  <string name="action_like">Curtir</string>
   <string name="action_love">Amei</string>
   <string name="action_share">Compartilhar</string>
   <string name="watched_title">Marcar como assistido</string>

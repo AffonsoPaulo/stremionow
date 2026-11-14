@@ -21,10 +21,13 @@
   <string name="action_more_info">More info</string>
   <!-- %1$s is the season and episode label, for example "S1 E5". -->
   <string name="action_resume_episode">Resume %1$s</string>
-  <!-- Button that adds a title to My list. -->
+  <!-- Button that adds a title to My list. Short: a tile of the details page's action row, one line. -->
   <string name="action_add_to_list">My list</string>
-  <!-- Same button once the title is in My list. -->
-  <string name="action_in_list">In my list</string>
+  <!-- Same button once the title is in My list. Short, one line. -->
+  <string name="action_in_list">In My list</string>
+  <!-- Read by screen readers for the My list action. -->
+  <string name="action_add_to_list_description">Add to My list</string>
+  <string name="action_remove_from_list_description">Remove from My list</string>
   <string name="action_retry">Try again</string>
   <string name="action_cancel">Cancel</string>
   <string name="action_open_addons">Open Addons</string>
@@ -123,10 +126,16 @@
   <string name="action_watch_episode">Watch %1$s</string>
   <!-- Second button of a series the user has started: plays it again from its first episode. -->
   <string name="action_start_over">Start over</string>
-  <!-- Actions under a title's buttons, each an icon with this label. -->
+  <!-- Actions under a title's buttons, each an icon over this label in a tile of fixed width:
+       keep them short, one line (a longer one is cut with an ellipsis). -->
   <string name="action_trailer">Trailer</string>
+  <!-- Read by screen readers for the Trailer action. -->
+  <string name="action_trailer_description">Play the trailer</string>
+  <!-- Read by screen readers for the Watched action, which marks the title (or, on a series, opens a choice). -->
   <string name="action_mark_watched">Mark as watched</string>
-  <!-- Same action on a movie already watched; choosing it marks the movie as not watched. -->
+  <!-- Read by screen readers for the Watched action once everything is watched. -->
+  <string name="action_mark_unwatched">Mark as not watched</string>
+  <!-- Label of the Watched action, filled in once the title is watched. -->
   <string name="action_watched">Watched</string>
   <string name="action_like">Like</string>
   <string name="action_love">Love</string>

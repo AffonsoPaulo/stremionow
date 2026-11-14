@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,19 +30,37 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
+import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
+import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
+import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
+import kotlin.math.roundToInt
 
 /**
  * Playback position bar: played, buffered and remaining parts with a thumb. Tap or drag to
  * seek (the position follows the finger and is applied on release); on a remote, focus it and
  * press left or right to step by [keyStepSeconds]. Screen readers can set the position too.
+ *
+ * [highlights] mark stretches of the video, such as the intro, in the warning colour. With
+ * [showsHoverTime], for pointers: the hand cursor shows over the bar and the time at the point
+ * under it shows above it.
  */
 @Composable
 fun SnSeekBar(
@@ -51,8 +72,11 @@ fun SnSeekBar(
     modifier: Modifier = Modifier,
     onScrub: (seconds: Double?) -> Unit = {},
     keyStepSeconds: Double = 10.0,
+    highlights: List<ClosedFloatingPointRange<Double>> = emptyList(),
+    showsHoverTime: Boolean = false,
 ) {
     var dragFraction by remember { mutableStateOf<Float?>(null) }
+    var hoverX by remember { mutableStateOf<Float?>(null) }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val duration = durationSeconds.coerceAtLeast(0.0)
@@ -87,7 +111,28 @@ fun SnSeekBar(
         Box(
             Modifier
                 .matchParentSize()
-                .pointerInput(duration) {
+                .then(if (showsHoverTime) Modifier.pointerHoverIcon(PointerIcon.Hand) else Modifier)
+                .pointerInput(showsHoverTime) {
+                    if (!showsHoverTime) return@pointerInput
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            hoverX =
+                                when (event.type) {
+                                    PointerEventType.Exit -> {
+                                        null
+                                    }
+
+                                    else -> {
+                                        event.changes
+                                            .firstOrNull()
+                                            ?.position
+                                            ?.x ?: hoverX
+                                    }
+                                }
+                        }
+                    }
+                }.pointerInput(duration) {
                     detectTapGestures { offset -> if (duration > 0) onSeek(fractionAt(offset.x) * duration) }
                 }.pointerInput(duration) {
                     detectHorizontalDragGestures(
@@ -116,6 +161,21 @@ fun SnSeekBar(
         val thick = if (focused || dragFraction != null) 6.dp else 4.dp
         Box(Modifier.fillMaxWidth().height(thick).background(SnColors.progressTrack, track))
         Box(Modifier.fillMaxWidth(buffered).height(thick).background(SnColors.progressBuffer, track))
+        if (duration > 0) {
+            for (range in highlights) {
+                val start = (range.start / duration).toFloat().coerceIn(0f, 1f)
+                val end = (range.endInclusive / duration).toFloat().coerceIn(0f, 1f)
+                if (end > start) {
+                    Box(
+                        Modifier
+                            .offset(x = maxWidth * start)
+                            .width(maxWidth * (end - start))
+                            .height(thick)
+                            .background(SnColors.warning),
+                    )
+                }
+            }
+        }
         Box(Modifier.fillMaxWidth(played).height(thick).background(SnColors.accent, track))
         val thumb = if (focused || dragFraction != null) 18.dp else 14.dp
         Box(
@@ -124,6 +184,37 @@ fun SnSeekBar(
                 .size(thumb)
                 .background(SnColors.fg, CircleShape),
         )
+        val hovered = hoverX
+        if (hovered != null && duration > 0 && dragFraction == null) {
+            val gap = with(LocalDensity.current) { SnSpacing.space2.roundToPx() }
+            Popup(popupPositionProvider = remember(hovered, gap) { AboveAt(hovered.roundToInt(), gap) }) {
+                BasicText(
+                    formatPlaybackTime(fractionAt(hovered) * duration),
+                    modifier =
+                        Modifier
+                            .background(SnColors.surfaceRaised, RoundedCornerShape(SnRadius.radiusSm))
+                            .padding(horizontal = SnSpacing.space2, vertical = SnSpacing.space1),
+                    style = SnTypography.label.copy(color = SnColors.fg),
+                )
+            }
+        }
+    }
+}
+
+/** Places a popup centred over [x] (from the anchor's left edge), [gap] above the anchor, inside the window. */
+private class AboveAt(
+    private val x: Int,
+    private val gap: Int,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val maxLeft = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val left = (anchorBounds.left + x - popupContentSize.width / 2).coerceIn(0, maxLeft)
+        return IntOffset(left, anchorBounds.top - popupContentSize.height - gap)
     }
 }
 

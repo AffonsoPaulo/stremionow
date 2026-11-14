@@ -322,6 +322,8 @@
   <string name="player_key_full_screen">F</string>
   <!-- The letter printed on the key that plays the next episode (N); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_next">N</string>
+  <!-- The letter printed on the key that opens the episodes (E); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_episodes">E</string>
   <!-- Desktop player: small prompt in the corner when an HDR video starts on a screen that supports HDR but has it off. It fades away after a few seconds. -->
   <string name="player_hdr_title">Turn on HDR?</string>
   <string name="player_hdr_body">The screen may go dark for a moment.</string>

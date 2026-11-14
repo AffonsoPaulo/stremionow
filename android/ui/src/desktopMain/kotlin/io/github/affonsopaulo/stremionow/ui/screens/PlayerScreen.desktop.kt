@@ -134,7 +134,17 @@ actual fun PlayerScreen(
         dispose = ComposeDialog::dispose,
         onPreviewKeyEvent = { event ->
             input.onPreviewKeyEvent(event)
-            handlePlayerShortcut(event, player, pair, state, onBack = leave::back, onNext = currentPlayNext)
+            handlePlayerShortcut(
+                event,
+                player,
+                pair,
+                state,
+                onBack = leave::back,
+                onNext = currentPlayNext,
+                hasEpisodes =
+                    viewModel.selection.details.episodes
+                        .isNotEmpty(),
+            )
         },
     ) {
         DisposableEffect(pair) {

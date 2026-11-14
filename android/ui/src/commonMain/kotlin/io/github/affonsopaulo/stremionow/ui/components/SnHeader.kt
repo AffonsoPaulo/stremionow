@@ -2,9 +2,9 @@
 package io.github.affonsopaulo.stremionow.ui.components
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,7 +65,6 @@ fun SnHeader(
     onBack: (() -> Unit)? = null,
     search: (@Composable () -> Unit)? = null,
 ) {
-    val pill = RoundedCornerShape(SnRadius.radiusFull)
     val spacing = SnSpacing.space4
     val trailingGap = SnSpacing.space3
     Layout(
@@ -99,26 +99,7 @@ fun SnHeader(
                     )
                 }
                 HeaderPills.forEach { destination ->
-                    val selected = destination == current
-                    Box(
-                        modifier =
-                            Modifier
-                                .heightIn(min = SnSize.controlMd)
-                                .semantics { this.selected = selected }
-                                .snClickable(pill, role = Role.Tab) { onNavigate(destination) }
-                                .background(if (selected) SnColors.fg else Color.Transparent, pill)
-                                .padding(horizontal = SnSpacing.space4),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BasicText(
-                            text = stringResource(destination.label()),
-                            style =
-                                SnTypography.label.copy(
-                                    color = if (selected) SnColors.onInverse else SnColors.fgSecondary,
-                                ),
-                            maxLines = 1,
-                        )
-                    }
+                    HeaderPill(destination, selected = destination == current) { onNavigate(destination) }
                 }
             }
             // Before the avatar, so keyboard focus meets them in the order they show.
@@ -164,6 +145,42 @@ fun SnHeader(
                 (height - searchPlaceable.height) / 2,
             )
         }
+    }
+}
+
+/**
+ * A destination pill. The selected one is filled white and keeps that look under the pointer;
+ * the others get a translucent fill.
+ */
+@Composable
+private fun HeaderPill(
+    destination: TopDestination,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val pill = RoundedCornerShape(SnRadius.radiusFull)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    Box(
+        modifier =
+            Modifier
+                .heightIn(min = SnSize.controlMd)
+                .semantics { this.selected = selected }
+                .snClickable(
+                    pill,
+                    role = Role.Tab,
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).snStateBackground(if (selected) SnColors.fg else Color.Transparent, pill, state)
+                .padding(horizontal = SnSpacing.space4),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = stringResource(destination.label()),
+            style = SnTypography.label.copy(color = if (selected) SnColors.onInverse else SnColors.fgSecondary),
+            maxLines = 1,
+        )
     }
 }
 
@@ -240,13 +257,15 @@ fun SnAvatarButton(
 ) {
     val circle = RoundedCornerShape(SnRadius.radiusFull)
     val label = stringResource(Res.string.nav_profile)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Box(
         modifier =
             modifier
                 .size(SnSize.controlMd)
                 .semantics { this.selected = selected }
-                .snClickable(circle, onClick = onClick)
-                .background(if (selected) SnColors.fg else SnColors.surfaceRaised, circle)
+                .snClickable(circle, highlight = false, interactionSource = interaction, onClick = onClick)
+                .snStateBackground(if (selected) SnColors.fg else SnColors.surfaceRaised, circle, state)
                 .border(1.dp, if (selected) SnColors.fg else SnColors.border, circle),
         contentAlignment = Alignment.Center,
     ) {

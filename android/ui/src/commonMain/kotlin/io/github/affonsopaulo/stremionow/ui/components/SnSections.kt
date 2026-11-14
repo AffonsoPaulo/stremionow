@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -81,24 +86,37 @@ fun SnSectionHeader(
 /** A long addon name gives way to the row's title. */
 private val MaxCaptionWidth = 240.dp
 
-/** "See all ›" link for a section header. [label] is the spoken name, e.g. "See all Movies". */
+/**
+ * "See all ›" link for a section header. [label] is the spoken name, e.g. "See all Movies".
+ * Like other links, it brightens and underlines under the pointer.
+ */
 @Composable
 fun SnSeeAll(
     text: String,
     label: String,
     onClick: () -> Unit,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
+    val color by animateColorAsState(snLinkColor(SnColors.fgSecondary, state), tween(FEEDBACK_MS), label = "see-all")
     Row(
         modifier =
             Modifier
-                .snClickable(RoundedCornerShape(SnRadius.radiusFull), onClick = onClick)
-                .semantics(mergeDescendants = true) { contentDescription = label }
+                .snClickable(
+                    RoundedCornerShape(SnRadius.radiusFull),
+                    highlight = false,
+                    interactionSource = interaction,
+                    onClick = onClick,
+                ).semantics(mergeDescendants = true) { contentDescription = label }
                 .padding(start = SnSpacing.space3, top = SnSpacing.space2, bottom = SnSpacing.space2),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
     ) {
-        BasicText(text, style = SnTypography.label.copy(color = SnColors.fgSecondary))
-        Image(SnIcons.ChevronRight, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(SnColors.fgSecondary))
+        BasicText(
+            text,
+            style = SnTypography.label.copy(color = color, textDecoration = snLinkDecoration(null, state)),
+        )
+        Image(SnIcons.ChevronRight, null, Modifier.size(18.dp), colorFilter = ColorFilter.tint(color))
     }
 }
 

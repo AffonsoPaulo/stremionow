@@ -322,19 +322,27 @@ fun SnSwitch(
 ) {
     val pill = RoundedCornerShape(SnRadius.radiusFull)
     val state = if (checked) onText else offText
+    val interaction = remember { MutableInteractionSource() }
+    val feedback = interaction.collectSnInteraction()
     Box(
         modifier
             .height(SnSize.controlMd)
             .semantics {
                 contentDescription = label
                 stateDescription = state
-            }.snClickable(pill, role = Role.Switch, onClick = onToggle),
+            }.snClickable(
+                pill,
+                role = Role.Switch,
+                highlight = false,
+                interactionSource = interaction,
+                onClick = onToggle,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
                 .size(width = 52.dp, height = 30.dp)
-                .background(if (checked) SnColors.accent else SnColors.borderStrong, pill)
+                .snStateBackground(if (checked) SnColors.accent else SnColors.borderStrong, pill, feedback)
                 .padding(3.dp),
             contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
         ) {
@@ -343,7 +351,10 @@ fun SnSwitch(
     }
 }
 
-/** A row that opens a page, as in settings: icon, title, optional current value and a chevron. */
+/**
+ * A row that opens a page, as in settings: icon, title, optional current value and a chevron.
+ * Its background lightens under the pointer and darkens when pressed.
+ */
 @Composable
 fun SnListRow(
     icon: ImageVector,
@@ -353,13 +364,15 @@ fun SnListRow(
     detail: String? = null,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusLg)
+    val interaction = remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction()
     Row(
         modifier =
             modifier
                 .fillMaxWidth()
                 .heightIn(min = 64.dp)
-                .snClickable(shape, onClick = onClick)
-                .background(SnColors.surface, shape)
+                .snClickable(shape, highlight = false, interactionSource = interaction, onClick = onClick)
+                .snStateBackground(SnColors.surface, shape, state)
                 .padding(horizontal = SnSpacing.space4, vertical = SnSpacing.space3),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),

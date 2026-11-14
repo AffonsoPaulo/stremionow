@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -25,6 +25,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -44,35 +45,58 @@ import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import kotlin.math.abs
 
 /**
  * How focus and pointer feedback behave where the interface runs. The defaults are Android's:
- * touch and remotes never move focus by accident, so a focused element always shows its ring,
- * and there is no hover. The desktop shows rings only after keyboard input, like the web's
- * `:focus-visible` (a click focuses what it hits), and highlights what the mouse points at.
+ * touch and remotes never move focus by accident, so a focused element always shows its ring.
+ * The desktop shows rings only after keyboard input, like the web's `:focus-visible` (a click
+ * focuses what it hits). Hover and press feedback never show on TV, whatever these say: the
+ * D-pad focus ring is the feedback there.
  */
 @Immutable
 data class SnFeedback(
     /** Focused elements draw the focus ring (and grow, where they do). */
     val showFocus: Boolean = true,
-    /** Elements under the mouse pointer grow, where they do, and show the hand cursor. */
-    val showHover: Boolean = false,
+    /**
+     * Elements under a mouse pointer are highlighted and show the hand cursor. Touch never
+     * hovers, so on phones and tablets this only shows with a mouse, touchpad or stylus.
+     */
+    val showHover: Boolean = true,
+    /** Pressed elements darken, and cards settle back. */
+    val showPress: Boolean = true,
+    /**
+     * The mouse is the main input, as on the desktop: rows of cards add paging buttons and
+     * mouse dragging.
+     */
+    val mouseFirst: Boolean = false,
 )
 
 /** The [SnFeedback] in effect. */
 val LocalSnFeedback = compositionLocalOf { SnFeedback() }
 
 /**
- * Makes an element clickable with the design system's focus treatment: a 3 dp ring in the
- * focus color drawn just outside the element, and, when [grow] is set, a 5% scale. Keyboard,
- * D-pad, touch and mouse all work; [LocalSnFeedback] decides when the ring and hover show.
+ * Makes an element clickable with the design system's feedback, the same on every screen.
+ * Keyboard, D-pad, touch and mouse all work; [LocalSnFeedback] decides what shows.
  *
- * A disabled element ignores clicks and is announced as disabled, but stays focusable, with
- * its ring. Otherwise a button that disables itself while it works (Install, Move up on the
- * first row) would drop the focus somewhere unseen, and a remote would lose its place.
+ * - Focus: a 3 dp ring in the focus color drawn just outside the element, and, when [grow]
+ *   is set, a 5% scale.
+ * - Hover (mouse) and press (mouse, touch, Enter): with [highlight], a translucent fill behind
+ *   the element's content, lighter on hover and darker when pressed, which is all an element
+ *   without a fill of its own needs (icon-only boxes, text). An element with a fill of its own
+ *   turns [highlight] off, passes an [interactionSource] and tints its fill with
+ *   [snStateBackground] instead. On the desktop, the hand cursor.
+ * - Cards: [lift] (on by default with [grow]) grows the card a little under the pointer and
+ *   gives it a shadow; a press settles it back. Wide cards that do not [grow] on focus grow by
+ *   a few dp at most. With reduced motion only colors change.
+ *
+ * A disabled element ignores clicks, shows no hover or press, and is announced as disabled,
+ * but stays focusable, with its ring. Otherwise a button that disables itself while it works
+ * (Install, Move up on the first row) would drop the focus somewhere unseen, and a remote
+ * would lose its place.
  */
 @Composable
 fun Modifier.snClickable(
@@ -81,25 +105,53 @@ fun Modifier.snClickable(
     role: Role = Role.Button,
     grow: Boolean = false,
     enabled: Boolean = true,
+    lift: Boolean = grow,
+    highlight: Boolean = true,
+    interactionSource: MutableInteractionSource? = null,
     onClick: () -> Unit,
 ): Modifier {
     val feedback = LocalSnFeedback.current
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    val hovered by interaction.collectIsHoveredAsState()
-    val showFocus = focused && feedback.showFocus
-    val scale by animateFloatAsState(
-        targetValue = if (grow && (showFocus || (hovered && feedback.showHover))) 1.05f else 1f,
-        animationSpec = tween(durationMillis = 160),
-        label = "focus-scale",
+    val isTv = LocalIsTv.current
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val state = interaction.collectSnInteraction(enabled)
+    val reducedMotion = if (lift) rememberReducedMotion() else false
+    val motion = snCardMotion(state, growOnFocus = grow, liftOnHover = lift, reducedMotion = reducedMotion)
+    val growth by animateFloatAsState(
+        targetValue = if (motion.grow) 1f else 0f,
+        animationSpec = tween(durationMillis = FEEDBACK_MS),
+        label = "card-grow",
     )
+    val shadow by animateFloatAsState(
+        targetValue = if (motion.lift) 1f else 0f,
+        animationSpec = tween(durationMillis = FEEDBACK_MS),
+        label = "card-shadow",
+    )
+    val fill by animateColorAsState(
+        targetValue = if (highlight) snStateColor(Color.Transparent, state) else Color.Transparent,
+        animationSpec = tween(durationMillis = FEEDBACK_MS),
+        label = "highlight",
+    )
+    val maxGrowth = with(LocalDensity.current) { LiftMaxGrowth.toPx() }
     return this
-        .graphicsLayer {
-            scaleX = scale
-            scaleY = scale
-        }.then(if (showFocus) Modifier.focusRing(shape) else Modifier)
-        .then(if (feedback.showHover && enabled) Modifier.pointerHoverIcon(PointerIcon.Hand) else Modifier)
-        .then(if (enabled) Modifier else Modifier.semantics { disabled() })
+        .then(
+            if (grow || lift) {
+                Modifier.graphicsLayer {
+                    val scale = 1f + snGrowFraction(size.width, maxGrowth, capped = !grow) * growth
+                    scaleX = scale
+                    scaleY = scale
+                    if (shadow > 0f) {
+                        shadowElevation = LiftShadow.toPx() * shadow
+                        this.shape = shape
+                    }
+                }
+            } else {
+                Modifier
+            },
+        ).then(if (state.ring) Modifier.focusRing(shape) else Modifier)
+        .then(if (highlight) Modifier.drawStateFill(shape) { fill } else Modifier)
+        .then(
+            if (snShowsHandCursor(feedback, isTv, enabled)) Modifier.pointerHoverIcon(PointerIcon.Hand) else Modifier,
+        ).then(if (enabled) Modifier else Modifier.semantics { disabled() })
         .clickable(
             interactionSource = interaction,
             indication = null,
@@ -107,6 +159,51 @@ fun Modifier.snClickable(
             role = role,
             onClick = { if (enabled) onClick() },
         )
+}
+
+/** The most a wide card grows across under the pointer. */
+private val LiftMaxGrowth = 12.dp
+
+/** Elevation of a card's shadow under the pointer. */
+private val LiftShadow = 16.dp
+
+/** Draws [color] in [shape] behind the element's content; read when drawing, so it animates cheaply. */
+private fun Modifier.drawStateFill(
+    shape: Shape,
+    color: () -> Color,
+): Modifier =
+    drawWithContent {
+        val fill = color()
+        if (fill.alpha > 0f) drawOutline(shape.createOutline(size, layoutDirection, this), fill)
+        drawContent()
+    }
+
+/**
+ * Makes a card that is not itself clickable, such as an addon's, which holds buttons and a
+ * switch, respond to the mouse as clickable cards do: it grows by a few dp and lifts. It is
+ * not a button, so there is no hand cursor and no press. Tint its border with
+ * [snStateBorder] and the state of the same [interactionSource].
+ */
+@Composable
+fun Modifier.snHoverCard(
+    shape: Shape,
+    interactionSource: MutableInteractionSource,
+): Modifier {
+    val state = interactionSource.collectSnInteraction()
+    val reducedMotion = rememberReducedMotion()
+    val motion = snCardMotion(state, growOnFocus = false, liftOnHover = true, reducedMotion = reducedMotion)
+    val growth by animateFloatAsState(if (motion.lift) 1f else 0f, tween(FEEDBACK_MS), label = "card-lift")
+    val maxGrowth = with(LocalDensity.current) { LiftMaxGrowth.toPx() }
+    return this
+        .graphicsLayer {
+            val scale = 1f + snGrowFraction(size.width, maxGrowth, capped = true) * growth
+            scaleX = scale
+            scaleY = scale
+            if (growth > 0f) {
+                shadowElevation = LiftShadow.toPx() * growth
+                this.shape = shape
+            }
+        }.hoverable(interactionSource)
 }
 
 /**

@@ -3,7 +3,6 @@ package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,9 +47,6 @@ import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnSwitch
-import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
-import io.github.affonsopaulo.stremionow.ui.components.snHoverCard
-import io.github.affonsopaulo.stremionow.ui.components.snStateBorder
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -197,8 +193,6 @@ internal fun InstalledAddonCard(
     val bringIntoView = remember { BringIntoViewRequester() }
     var holdsFocus by remember { mutableStateOf(false) }
     LaunchedEffect(position) { if (holdsFocus) bringIntoView.bringIntoView() }
-    val hover = remember { MutableInteractionSource() }
-    val hoverState = hover.collectSnInteraction()
 
     // Stacked layout: logo, name, details and switch first, then the less frequent actions in
     // their own row, so nothing is squeezed on a phone and the order still reads well on a TV.
@@ -207,9 +201,8 @@ internal fun InstalledAddonCard(
             .bringIntoViewRequester(bringIntoView)
             .onFocusChanged { holdsFocus = it.hasFocus }
             .fillMaxWidth()
-            .snHoverCard(shape, hover)
             .background(SnColors.surface, shape)
-            .snStateBorder(SnColors.border, shape, hoverState)
+            .border(1.dp, SnColors.border, shape)
             .padding(start = SnSpacing.space4, end = SnSpacing.space4, top = SnSpacing.space4),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {
@@ -360,14 +353,11 @@ internal fun DiscoverAddonCard(
 ) {
     val addon = entry.addon
     val shape = RoundedCornerShape(SnRadius.radiusLg)
-    val hover = remember { MutableInteractionSource() }
-    val hoverState = hover.collectSnInteraction()
     Column(
         modifier
             .fillMaxWidth()
-            .snHoverCard(shape, hover)
             .background(SnColors.surface, shape)
-            .snStateBorder(SnColors.border, shape, hoverState)
+            .border(1.dp, SnColors.border, shape)
             .padding(SnSpacing.space4),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
     ) {

@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -99,9 +100,11 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
+import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -565,18 +568,32 @@ private fun HeroControls(
         }
         items.forEachIndexed { index, item ->
             val active = index == pick.position
+            val targetWidth = if (active) DotSize * 3 + SnSpacing.space3 else dotTarget
+            val interaction = remember { MutableInteractionSource() }
+            val state = interaction.collectSnInteraction()
             Box(
-                Modifier.size(if (active) DotSize * 3 + SnSpacing.space3 else dotTarget, SnSize.controlMd),
+                Modifier.size(targetWidth, SnSize.controlMd),
                 contentAlignment = Alignment.Center,
             ) {
                 val label = stringResource(Res.string.home_hero_pick, index + 1, items.size, item.name)
+                // The target stays as tall as a button; the highlight hugs the dot, a circle as
+                // wide as the target (a pill around the longer current dot).
+                Box(
+                    Modifier
+                        .size(targetWidth, dotTarget)
+                        .snStateBackground(Color.Transparent, RoundedCornerShape(SnRadius.radiusFull), state),
+                )
                 Box(
                     Modifier
                         .matchParentSize()
                         .semantics {
                             contentDescription = label
                             selected = active
-                        }.snClickable(RoundedCornerShape(SnRadius.radiusFull)) { pick.select(index) },
+                        }.snClickable(
+                            RoundedCornerShape(SnRadius.radiusFull),
+                            highlight = false,
+                            interactionSource = interaction,
+                        ) { pick.select(index) },
                 )
                 HeroDot(active)
             }

@@ -72,6 +72,16 @@ class SnInteractionTest {
     }
 
     @Test
+    fun `a white button darkens a little on hover, less than when pressed`() {
+        val white = SnColors.inverse
+        val hover = snStateColor(white, SnInteractionState(hover = true), darkenLightOnHover = true)
+        val press = snStateColor(white, SnInteractionState(hover = true, press = true), darkenLightOnHover = true)
+        assertTrue(hover.luminance() < white.luminance())
+        assertTrue(press.luminance() < hover.luminance())
+        assertEquals(1f, hover.alpha)
+    }
+
+    @Test
     fun `a white fill keeps its look on hover`() {
         assertEquals(SnColors.inverse, snStateColor(SnColors.inverse, SnInteractionState(hover = true)))
         assertTrue(

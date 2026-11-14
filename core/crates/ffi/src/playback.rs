@@ -51,6 +51,25 @@ pub struct StreamSource {
     pub binge_group: Option<String>,
     /// Trackers and DHT hints for torrents, as the addon sent them.
     pub trackers: Vec<String>,
+    /// What recognizes this source in a later search, to offer it again: the addon's id with
+    /// the torrent's info hash and file, or with a digest of the address (debrid addresses
+    /// carry the user's key, which is never kept). None for links that open outside the app.
+    pub identity: Option<String>,
+    /// ISO 639-1 codes of the languages the text mentions, audio or subtitles, in order.
+    pub languages: Vec<String>,
+    /// HDR formats, such as `DV` or `HDR10+`; empty when the text names none.
+    pub hdr: Vec<String>,
+    /// Audio formats, such as `Atmos` or `DD+`.
+    pub audio: Vec<String>,
+    /// Video codec, such as `HEVC`.
+    pub codec: Option<String>,
+    /// Kind of release, such as `WEB-DL` or `Remux`.
+    pub release_quality: Option<String>,
+    /// File size in bytes, when known, for sorting; [`StreamSource::size`] is for display.
+    pub size_bytes: Option<u64>,
+    /// Debrid cache state when the addon tells it: true when it plays at once, false when
+    /// the service must download it first.
+    pub cached: Option<bool>,
 }
 
 /// An external subtitle file.
@@ -310,15 +329,28 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
             .into_iter()
             .filter(|tracker| tracker.len() <= 512)
             .collect(),
+        identity: None,
+        languages: Vec::new(),
+        hdr: Vec::new(),
+        audio: Vec::new(),
+        codec: None,
+        release_quality: None,
+        size_bytes: None,
+        cached: None,
     };
+    source.identity = source_identity(&addon.manifest.id, &source);
     let traits = parse(&source_text(&source));
     source.badges = badges(&traits);
     source.quality = traits.resolution.map(|r| r.label().to_owned());
     source.seeders = traits.seeders;
-    source.size = traits
-        .size_bytes
-        .or(stream.behavior_hints.video_size)
-        .map(format_size);
+    source.size_bytes = traits.size_bytes.or(stream.behavior_hints.video_size);
+    source.size = source.size_bytes.map(format_size);
+    source.hdr = labels(&traits.hdr, |hdr| hdr.label());
+    source.audio = labels(&traits.audio, |audio| audio.label());
+    source.codec = traits.codec.map(|codec| codec.label().to_owned());
+    source.release_quality = traits.quality.map(|quality| quality.label().to_owned());
+    source.cached = traits.cached;
+    source.languages = traits.languages;
     source.release_group = traits.release_group.or_else(|| {
         let filename = stream.behavior_hints.filename.as_deref()?;
         parse(&SourceText {
@@ -329,6 +361,38 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
         .release_group
     });
     Some(source)
+}
+
+fn labels<T: Copy>(values: &[T], label: impl Fn(T) -> &'static str) -> Vec<String> {
+    values
+        .iter()
+        .map(|&value| label(value).to_owned())
+        .collect()
+}
+
+/// Longest addon id kept in an identity; manifest ids are short (`com.stremio.torrentio`).
+const MAX_ADDON_ID_LEN: usize = 200;
+
+/// What recognizes a source the app plays in a later search: the addon's id with the info
+/// hash and file of a torrent, or with a SHA-256 digest of a web address. The address itself
+/// is never kept, since debrid addresses carry the user's key. None for links out.
+fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
+    let addon: String = addon_id
+        .chars()
+        .filter(|c| !c.is_control() && *c != '|')
+        .take(MAX_ADDON_ID_LEN)
+        .collect();
+    if let Some(hash) = &source.info_hash {
+        let file = source
+            .file_idx
+            .map(|idx| idx.to_string())
+            .unwrap_or_default();
+        return Some(format!("{addon}|bt|{}|{file}", hash.to_ascii_lowercase()));
+    }
+    let url = source.url.as_deref()?;
+    let digest = ring::digest::digest(&ring::digest::SHA256, url.as_bytes());
+    let hex: String = digest.as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("{addon}|url|{hex}"))
 }
 
 fn subtitle_track(addon_name: &str, subtitle: Subtitle) -> Option<SubtitleTrack> {
@@ -536,6 +600,14 @@ mod tests {
             subtitles: Vec::new(),
             binge_group: None,
             trackers: Vec::new(),
+            identity: None,
+            languages: Vec::new(),
+            hdr: Vec::new(),
+            audio: Vec::new(),
+            codec: None,
+            release_quality: None,
+            size_bytes: None,
+            cached: None,
         }
     }
 
@@ -564,6 +636,14 @@ mod tests {
         assert_eq!(source.size.as_deref(), Some("14.2 GB"));
         assert_eq!(source.release_group.as_deref(), Some("GRP"));
         assert_eq!(source.badges.last(), source.size.as_ref());
+        assert_eq!(source.hdr, ["DV"]);
+        assert_eq!(source.codec.as_deref(), Some("HEVC"));
+        assert_eq!(source.release_quality.as_deref(), Some("WEB-DL"));
+        assert!(source.size_bytes.is_some());
+        assert_eq!(
+            source.identity.as_deref(),
+            Some("a|bt|0123456789abcdef0123456789abcdef01234567|")
+        );
 
         // A web source tells its size and file name in its hints instead.
         let stream: Stream = serde_json::from_value(serde_json::json!({
@@ -575,6 +655,56 @@ mod tests {
         assert_eq!(source.size.as_deref(), Some("1.0 GB"));
         assert_eq!(source.release_group.as_deref(), Some("OTHER"));
         assert_eq!(source.seeders, None);
+        assert_eq!(source.size_bytes, Some(1_073_741_824));
+    }
+
+    fn source_from(value: serde_json::Value) -> StreamSource {
+        stream_source(
+            &addon(),
+            serde_json::from_value(value).expect("valid stream"),
+        )
+        .expect("usable")
+    }
+
+    #[test]
+    fn identities_never_carry_the_address() {
+        let debrid = "https://debrid.example/resolve/SECRETKEY/0123/1/Movie.mkv";
+        let link = source_from(serde_json::json!({ "url": debrid, "name": "[RD+] Addon" }));
+        let identity = link.identity.expect("a link the app plays has one");
+        assert!(identity.starts_with("a|url|"), "{identity}");
+        assert_eq!(identity.len(), "a|url|".len() + 64);
+        assert!(!identity.contains("SECRETKEY") && !identity.contains("debrid.example"));
+        assert_eq!(link.cached, Some(true));
+        // The same address gives the same identity; another one, another.
+        let again = source_from(serde_json::json!({ "url": debrid }));
+        assert_eq!(again.identity.as_deref(), Some(identity.as_str()));
+        let other = source_from(serde_json::json!({ "url": "https://debrid.example/other.mkv" }));
+        assert_ne!(other.identity.as_deref(), Some(identity.as_str()));
+
+        let torrent = source_from(serde_json::json!({
+            "infoHash": "0123456789ABCDEF0123456789ABCDEF01234567", "fileIdx": 3
+        }));
+        assert_eq!(
+            torrent.identity.as_deref(),
+            Some("a|bt|0123456789abcdef0123456789abcdef01234567|3")
+        );
+        let outside =
+            source_from(serde_json::json!({ "externalUrl": "https://service.example/t" }));
+        assert_eq!(outside.identity, None);
+    }
+
+    #[test]
+    fn sources_tell_their_languages_and_formats() {
+        let source = source_from(serde_json::json!({
+            "name": "Addon\n4k",
+            "title": "Hokum.2026.2160p.BDRemux.HDR10.DTS-HD.MA.Eng.Sub.Ita",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(source.languages, ["en", "it"]);
+        assert_eq!(source.hdr, ["HDR10"]);
+        assert_eq!(source.audio, ["DTS-HD MA"]);
+        assert_eq!(source.release_quality.as_deref(), Some("Remux"));
+        assert_eq!(source.cached, None);
     }
 
     #[test]

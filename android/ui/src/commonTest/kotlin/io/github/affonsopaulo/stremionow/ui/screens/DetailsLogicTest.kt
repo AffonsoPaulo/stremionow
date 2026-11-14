@@ -192,6 +192,14 @@ class DetailsLogicTest {
         subtitles = emptyList(),
         bingeGroup = null,
         trackers = emptyList(),
+        identity = null,
+        languages = emptyList(),
+        hdr = emptyList(),
+        audio = emptyList(),
+        codec = null,
+        releaseQuality = null,
+        sizeBytes = null,
+        cached = null,
     )
 
     @Test

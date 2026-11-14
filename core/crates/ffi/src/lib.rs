@@ -18,6 +18,7 @@ mod records;
 mod settings;
 mod sharing;
 mod skips;
+mod source_memory;
 mod streaming;
 
 pub use crate::core::StremioCore;

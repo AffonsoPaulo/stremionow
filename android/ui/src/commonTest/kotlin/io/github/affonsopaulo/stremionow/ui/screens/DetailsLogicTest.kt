@@ -203,15 +203,6 @@ class DetailsLogicTest {
     )
 
     @Test
-    fun `the filter lists each addon with its count, in the sources' order`() {
-        val sources = listOf(source("B"), source("A"), source("B"), source("C"))
-        assertEquals(listOf("B" to 2, "A" to 1, "C" to 1), addonCounts(sources))
-        assertEquals(2, sources.fromAddon("B").size)
-        assertEquals(4, sources.fromAddon(null).size)
-        assertEquals(emptyList<Pair<String, Int>>(), addonCounts(emptyList()))
-    }
-
-    @Test
     fun `4K is available only when a playable 4K source was found`() {
         assertFalse(hasPlayable4k(emptyList()))
         assertFalse(hasPlayable4k(listOf(source("A", "1080p"))))

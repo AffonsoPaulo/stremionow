@@ -130,17 +130,6 @@ internal val StreamSource.playsInApp: Boolean get() = url != null || infoHash !=
 /** Sources the app can use: web addresses and torrents play in the app, links open elsewhere. */
 internal fun StreamSource.isUsable(): Boolean = url != null || infoHash != null || externalUrl != null || ytId != null
 
-/** Each addon that found sources, with how many, in the order their sources are listed. */
-internal fun addonCounts(sources: List<StreamSource>): List<Pair<String, Int>> =
-    sources
-        .groupingBy { it.addonName }
-        .eachCount()
-        .let { counts -> sources.map { it.addonName }.distinct().map { it to (counts[it] ?: 0) } }
-
-/** The sources of [addon], or all of them when it is null. */
-internal fun List<StreamSource>.fromAddon(addon: String?): List<StreamSource> =
-    if (addon == null) this else filter { it.addonName == addon }
-
 /** Whether a source in 4K (or more) that plays in the app was found: only then is it known. */
 internal fun hasPlayable4k(sources: List<StreamSource>): Boolean =
     sources.any { it.playsInApp && (it.quality == "4K" || it.quality == "8K") }

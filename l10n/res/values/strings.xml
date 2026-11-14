@@ -325,10 +325,51 @@
   <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
   <!-- Button at the start of an episode's sources that returns to the list of episodes. -->
   <string name="sources_back_to_episodes">Back to episodes</string>
-  <!-- Filter showing every source. %1$d is how many there are. -->
-  <string name="sources_filter_all">All (%1$d)</string>
-  <!-- Filter showing one addon's sources. %1$s is the addon's name, %2$d how many it found. -->
-  <string name="sources_filter_addon">%1$s (%2$d)</string>
+  <!-- Field over a video's sources that narrows them to those whose name has the words typed. -->
+  <string name="sources_search">Search sources</string>
+  <string name="sources_search_clear">Clear search</string>
+  <!-- Filter chips over the sources; each opens a list of options to tick. -->
+  <string name="sources_facet_resolution">Resolution</string>
+  <string name="sources_facet_addon">Addon</string>
+  <string name="sources_facet_hdr">HDR</string>
+  <string name="sources_facet_language">Language</string>
+  <string name="sources_facet_type">Type</string>
+  <!-- A filter chip with options ticked. %1$s is the filter, such as "Resolution"; %2$d how many options are ticked. -->
+  <string name="sources_facet_chosen">%1$s · %2$d</string>
+  <!-- Screen reader state of a filter chip: how many of its options are ticked. -->
+  <plurals name="sources_facet_chosen_count">
+    <item quantity="one">%1$d selected</item>
+    <item quantity="other">%1$d selected</item>
+  </plurals>
+  <!-- HDR options: sources in Dolby Vision, and sources that name no HDR format. -->
+  <string name="sources_hdr_dolby_vision">Dolby Vision</string>
+  <string name="sources_hdr_sdr">SDR</string>
+  <!-- Type options: sources the app plays from a direct or debrid link, torrents, and links to other apps. -->
+  <string name="sources_type_in_app">In the app</string>
+  <string name="sources_type_torrent">Torrent</string>
+  <string name="sources_type_outside">Opens outside</string>
+  <!-- Removes every filter over the sources. -->
+  <string name="sources_clear_filters">Clear filters</string>
+  <!-- The menu that orders the sources. %1$s is the order chosen, such as "Best". -->
+  <string name="sources_sort">Sort: %1$s</string>
+  <!-- Orders of the sources: the app's ranking, the largest files, the most seeds, the highest resolution. -->
+  <string name="sources_sort_best">Best</string>
+  <string name="sources_sort_size">Size</string>
+  <string name="sources_sort_seeds">Seeds</string>
+  <string name="sources_sort_resolution">Resolution</string>
+  <string name="sources_no_match_title">No sources match</string>
+  <string name="sources_no_match_body">Try another search, or clear the filters.</string>
+  <!-- Over the source the user played last time for this movie or episode, offered first. -->
+  <string name="sources_continue">Continue with this source</string>
+  <!-- On a debrid link the service has ready to play at once. -->
+  <string name="sources_cached">Cached</string>
+  <!-- On a debrid link the service must download before it plays. -->
+  <string name="sources_not_cached">Not cached</string>
+  <!-- Seeds of a torrent, on its card. %1$d is how many. -->
+  <plurals name="sources_seeds">
+    <item quantity="one">%1$d seed</item>
+    <item quantity="other">%1$d seeds</item>
+  </plurals>
   <!-- Under the sources while some addons have not answered yet. -->
   <plurals name="sources_addons_loading">
     <item quantity="one">%1$d addon still loading</item>

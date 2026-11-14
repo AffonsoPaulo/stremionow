@@ -47,3 +47,14 @@ internal expect fun formatShortFileSize(bytes: Long): String
  */
 @Composable
 internal expect fun rememberLocalNetworkAccess(onResult: (granted: Boolean) -> Unit): (url: String) -> Unit
+
+/**
+ * Shows [text] in a small bubble once the pointer rests on [content], for text cut short with
+ * an ellipsis: on the desktop. Elsewhere, where nothing hovers, only [content]. Screen readers
+ * get the text from the content itself.
+ */
+@Composable
+internal expect fun SnPointerTooltip(
+    text: String,
+    content: @Composable () -> Unit,
+)

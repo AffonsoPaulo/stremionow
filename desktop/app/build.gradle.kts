@@ -74,7 +74,10 @@ compose.desktop {
             // Compose copies `common/` and the folder of the current OS into the app's resources
             // directory, for `run` and for installers alike (compose.application.resources.dir).
             appResourcesRootDir.set(layout.buildDirectory.dir(DesktopNativesPlugin.RESOURCES_ROOT))
-            modules("jdk.unsupported")
+            // From `./gradlew suggestRuntimeModules`: jlink leaves out the rest of the JDK, and a module
+            // missing here fails only in installed apps (java.management, through jdk.management,
+            // sizes the video memory from the computer's RAM).
+            modules("java.instrument", "jdk.management", "jdk.unsupported")
 
             // Drawn by AppIcon.kt; `./gradlew :app:writeAppIcons` writes them again after a change.
             windows {

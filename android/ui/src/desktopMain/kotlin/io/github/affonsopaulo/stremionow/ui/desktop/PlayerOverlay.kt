@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.desktop
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -65,7 +66,6 @@ import io.github.affonsopaulo.stremionow.player.VideoFormat
 import io.github.affonsopaulo.stremionow.player.VideoPlayer
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
-import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
 import io.github.affonsopaulo.stremionow.ui.components.SnSeekBar
 import io.github.affonsopaulo.stremionow.ui.components.formatPlaybackTime
@@ -79,6 +79,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.screens.CONTROLS_TIMEOUT_MS
 import io.github.affonsopaulo.stremionow.ui.screens.EpisodesList
 import io.github.affonsopaulo.stremionow.ui.screens.HdrPrompt
+import io.github.affonsopaulo.stremionow.ui.screens.OpeningStage
 import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
@@ -86,6 +87,8 @@ import io.github.affonsopaulo.stremionow.ui.screens.PlayerViewModel
 import io.github.affonsopaulo.stremionow.ui.screens.PromptControlsClearance
 import io.github.affonsopaulo.stremionow.ui.screens.SidePanel
 import io.github.affonsopaulo.stremionow.ui.screens.TracksList
+import io.github.affonsopaulo.stremionow.ui.screens.rememberLasting
+import io.github.affonsopaulo.stremionow.ui.screens.rememberOpeningFill
 import io.github.affonsopaulo.stremionow.ui.screens.torrentStatusText
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
@@ -107,6 +110,12 @@ private val CONTROLS_CLEARANCE = 128.dp
 private const val FADE_IN_MS = 250
 
 private const val NANOS_PER_MILLI = 1_000_000L
+
+/** How long a wait for data lasts before the loading logo shows over the video. */
+private const val WAIT_DELAY_MS = 500L
+
+/** How long the opening logo takes to fade once the video shows. */
+private const val OPENING_FADE_MS = 200
 
 /** Step of the ±10 s buttons and of the arrow keys. */
 private const val SEEK_STEP_SECONDS = 10.0
@@ -310,18 +319,41 @@ internal fun PlayerOverlay(
         VideoArea(player, pair)
 
         if (!failed) {
-            if (preparing || !playback.isLoaded) {
-                // Until the first frame: the title's logo fills while the source gets ready.
+            val opening = preparing || !playback.isLoaded
+            // Waiting for data after the start (a stall, a seek outside what is buffered), long
+            // enough to notice: seeks inside the buffer take up to half a second.
+            val waiting = rememberLasting(!opening && (playback.isBuffering || playback.isSeeking), WAIT_DELAY_MS)
+            // Until the first frame: the title's logo fills from left to right as opening goes
+            // on, and completes as the video appears.
+            AnimatedVisibility(
+                visible = opening,
+                modifier = Modifier.align(Alignment.Center),
+                enter = EnterTransition.None,
+                exit = fadeOut(tween(OPENING_FADE_MS)),
+            ) {
                 SnLogoLoader(
                     logo = selection.details.item.logo,
                     title = selection.details.item.name,
-                    progress = null,
+                    progress = rememberOpeningFill(OpeningStage.of(preparing, playback.isLoaded)),
                     status = torrent?.let { torrentStatusText(it) },
                     label = stringResource(Res.string.player_preparing),
-                    modifier = Modifier.align(Alignment.Center).padding(SnSpacing.space8),
+                    modifier = Modifier.padding(SnSpacing.space8),
                 )
-            } else if (playback.isBuffering) {
-                SnLoading(Modifier.align(Alignment.Center))
+            }
+            // The same logo over the last frame, dimmed: filled by what mpv reports while it
+            // waits for data, or moving on its own during a seek, which reports nothing.
+            AnimatedVisibility(visible = waiting, enter = fadeIn(), exit = fadeOut()) {
+                Box(Modifier.fillMaxSize().background(SnColors.scrim), contentAlignment = Alignment.Center) {
+                    val moving = rememberOpeningFill(OpeningStage.OPENING)
+                    SnLogoLoader(
+                        logo = selection.details.item.logo,
+                        title = selection.details.item.name,
+                        progress = playback.bufferingProgress?.takeIf { playback.isBuffering } ?: moving,
+                        status = null,
+                        label = stringResource(Res.string.player_waiting),
+                        modifier = Modifier.padding(SnSpacing.space8),
+                    )
+                }
             }
         }
 

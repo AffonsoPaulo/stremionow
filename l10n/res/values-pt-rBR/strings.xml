@@ -263,6 +263,7 @@
   <string name="settings_refresh_body">Deixa filmes em 24 fps mais fluidos em telas de 60 Hz. A tela pode ficar preta por um segundo na troca.</string>
 
   <string name="player_preparing">Preparando a fonte</string>
+  <string name="player_waiting">Carregando o vídeo</string>
   <string name="torrent_finding_peers">Procurando pares…</string>
   <string name="torrent_checking">Verificando dados baixados…</string>
   <plurals name="torrent_peers">

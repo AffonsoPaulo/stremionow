@@ -366,6 +366,7 @@
 
   <!-- Torrent playback. -->
   <string name="player_preparing">Getting the source ready</string>
+  <string name="player_waiting">Loading the video</string>
   <string name="torrent_finding_peers">Looking for peers…</string>
   <string name="torrent_checking">Checking downloaded data…</string>
   <!-- Torrent status while starting. %1$d is the number of peers, %2$s the download speed, for example "2.4 MB". -->

@@ -11,6 +11,13 @@ data class PlaybackState(
     val isPaused: Boolean = false,
     /** Playback is waiting for data. */
     val isBuffering: Boolean = false,
+    /**
+     * How far the wait in [isBuffering] has got, from 0 to 1 (how much of the data mpv waits
+     * for has arrived), or null where the player does not report it.
+     */
+    val bufferingProgress: Float? = null,
+    /** A seek is in progress: until it completes, no new frame shows. */
+    val isSeeking: Boolean = false,
     /** Seconds already downloaded ahead of the current position. */
     val bufferedAheadSeconds: Double = 0.0,
     val isEnded: Boolean = false,

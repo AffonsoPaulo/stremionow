@@ -59,6 +59,17 @@ class MpvPlayer private constructor(
         }
         mpv.observeFlag("pause") { value -> mutableState.update { it.copy(isPaused = value == true) } }
         mpv.observeFlag("paused-for-cache") { value -> mutableState.update { it.copy(isBuffering = value == true) } }
+        mpv.observeLong("cache-buffering-state") { value ->
+            mutableState.update {
+                it.copy(
+                    bufferingProgress =
+                        value?.let { percent ->
+                            percent.coerceIn(0, 100) / 100f
+                        },
+                )
+            }
+        }
+        mpv.observeFlag("seeking") { value -> mutableState.update { it.copy(isSeeking = value == true) } }
         mpv.observeFlag("eof-reached") { value -> mutableState.update { it.copy(isEnded = value == true) } }
         mpv.observeString("hwdec-current") { value ->
             val decoder = value?.takeUnless { it.isEmpty() || it == "no" }

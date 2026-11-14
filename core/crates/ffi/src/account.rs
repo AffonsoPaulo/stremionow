@@ -14,7 +14,7 @@ use std::future::Future;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use stremionow_library::{LibraryEntry, ProgressEntry, Store};
+use stremionow_library::{LibraryEntry, ProgressEntry, Store, WatchStats};
 use stremionow_protocol::AddonUrl;
 use stremionow_sync::{LikesApi, RemoteLibraryItem, Session, StremioApi, SyncError, merge_library};
 use tokio::sync::watch;
@@ -525,12 +525,20 @@ impl StremioCore {
             .into_iter()
             .map(|entry| (entry.id.clone(), entry))
             .collect();
+        let stats: HashMap<String, WatchStats> = store
+            .all_watch_stats()?
+            .into_iter()
+            .map(|stats| (stats.id.clone(), stats))
+            .collect();
+        let stats_changed = |id: &str| stats.get(id).map_or(i64::MIN, |s| s.updated_at);
 
         let mut items = Vec::new();
         let mut mtimes = HashMap::new();
         for entry in &library {
             let saved_progress = progress.get(&entry.id);
-            let mtime = saved_progress.map_or(entry.added_at, |p| p.updated_at.max(entry.added_at));
+            let mtime = saved_progress
+                .map_or(entry.added_at, |p| p.updated_at.max(entry.added_at))
+                .max(stats_changed(&entry.id));
             let mut item = base_item(
                 &by_id,
                 &entry.id,
@@ -544,6 +552,9 @@ impl StremioCore {
             if let Some(p) = saved_progress {
                 set_progress(&mut item, p);
             }
+            if let Some(s) = stats.get(&entry.id) {
+                set_stats(&mut item, s);
+            }
             item.touch(mtime);
             mtimes.insert(entry.id.clone(), mtime);
             items.push(item);
@@ -556,9 +567,30 @@ impl StremioCore {
             let mut item = base_item(&by_id, id, &p.kind, &p.name, &p.poster, p.updated_at);
             item.temp = true;
             set_progress(&mut item, p);
-            item.touch(p.updated_at);
-            mtimes.insert(id.clone(), p.updated_at);
+            if let Some(s) = stats.get(id) {
+                set_stats(&mut item, s);
+            }
+            let mtime = p.updated_at.max(stats_changed(id));
+            item.touch(mtime);
+            mtimes.insert(id.clone(), mtime);
             items.push(item);
+        }
+        for (id, s) in &stats {
+            if saved.contains(id.as_str()) || progress.contains_key(id) {
+                continue;
+            }
+            // Watched here, neither saved nor in progress: the account's copy gets the new
+            // numbers, so a title finished here counts on the other devices too.
+            if let Some(remote_item) = by_id.get(id.as_str()) {
+                if remote_item.mtime_ms().unwrap_or(i64::MIN) >= s.updated_at {
+                    continue;
+                }
+                let mut item = (*remote_item).clone();
+                set_stats(&mut item, s);
+                item.touch(s.updated_at);
+                mtimes.insert(id.clone(), s.updated_at);
+                items.push(item);
+            }
         }
         for (id, removed_at) in pending_removals(&store)? {
             if saved.contains(id.as_str()) {
@@ -598,9 +630,49 @@ fn set_progress(item: &mut RemoteLibraryItem, progress: &ProgressEntry) {
     item.state.last_watched = Some(stremionow_sync::format_timestamp(progress.updated_at));
 }
 
-/// Brings a title's account state into the local list and progress.
+/// Writes how much a title was watched here into its account item (still carrying the
+/// account's `_mtime`): the later of the two `lastWatched`, and the higher `timesWatched`,
+/// unless the title was marked unwatched here after the account's copy changed, so a count
+/// never goes down just because this device has not heard of some watches.
+fn set_stats(item: &mut RemoteLibraryItem, stats: &WatchStats) {
+    let reset_since = stats
+        .reset_at
+        .is_some_and(|reset| Some(reset) > item.mtime_ms());
+    item.state.times_watched = if reset_since {
+        stats.times_watched
+    } else {
+        stats.times_watched.max(item.state.times_watched)
+    };
+    let account_last = item
+        .state
+        .last_watched
+        .as_deref()
+        .and_then(stremionow_sync::parse_timestamp);
+    if let Some(last) = stats.last_watched.filter(|&last| Some(last) > account_last) {
+        item.state.last_watched = Some(stremionow_sync::format_timestamp(last));
+    }
+}
+
+/// Brings a title's account state into the local list, progress and watch statistics.
 fn apply_remote(store: &Store, item: &RemoteLibraryItem) -> Result<(), CoreError> {
     let mtime = item.mtime_ms().unwrap_or(0);
+    let last_watched = item
+        .state
+        .last_watched
+        .as_deref()
+        .and_then(stremionow_sync::parse_timestamp);
+    if item.state.times_watched > 0
+        || last_watched.is_some()
+        || store.watch_stats(&item.id)?.is_some()
+    {
+        store.set_watch_stats(&WatchStats {
+            id: item.id.clone(),
+            times_watched: item.state.times_watched,
+            last_watched,
+            updated_at: mtime,
+            reset_at: None,
+        })?;
+    }
     if item.in_library() {
         let added_at = item
             .ctime
@@ -768,6 +840,134 @@ mod tests {
         core.remove_from_library("tt1".into()).expect("removes");
         core.sync().await.expect("syncs");
         assert!(!core.is_in_library("tt1".into()).expect("reads"));
+    }
+
+    /// The `changes` of every library upload the server received, in order.
+    async fn uploads(server: &MockServer) -> Vec<Vec<serde_json::Value>> {
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| request.url.path() == "/datastorePut")
+            .map(|request| {
+                let body: serde_json::Value =
+                    serde_json::from_slice(&request.body).expect("json body");
+                body["changes"].as_array().cloned().unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn uploaded<'a>(changes: &'a [serde_json::Value], id: &str) -> &'a serde_json::Value {
+        changes
+            .iter()
+            .find(|item| item["_id"] == id)
+            .unwrap_or_else(|| panic!("{id} was uploaded"))
+    }
+
+    #[tokio::test]
+    async fn watch_counts_sync_both_ways_without_going_down() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/addonCollectionGet"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"result": {"addons": []}})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/datastoreGet"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "result": [
+                    {
+                        "_id": "tt1", "name": "Movie", "type": "movie",
+                        "_ctime": "2026-01-01T00:00:00.000Z", "_mtime": "2026-01-02T00:00:00.000Z",
+                        "state": {"timesWatched": 5, "lastWatched": "2026-01-02T00:00:00.000Z"}
+                    },
+                    {
+                        "_id": "tt2", "name": "Series", "type": "series",
+                        "_ctime": "2026-01-01T00:00:00.000Z", "_mtime": "2026-01-03T00:00:00.000Z",
+                        "state": {
+                            "timesWatched": 2, "overallTimeWatched": 7200000,
+                            "lastWatched": "2026-01-03T00:00:00.000Z"
+                        }
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/datastorePut"))
+            .respond_with(ok())
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        let movie = crate::records::MetaItem {
+            id: "tt1".into(),
+            kind: "movie".into(),
+            name: "Movie".into(),
+            poster: None,
+            background: None,
+            logo: None,
+            description: None,
+            release_info: None,
+            imdb_rating: None,
+            genres: vec![],
+        };
+        let playing = |video_id: &str, position_ms: u64| crate::playback::WatchProgress {
+            id: video_id.split(':').next().unwrap_or_default().into(),
+            kind: "movie".into(),
+            name: "Title".into(),
+            poster: None,
+            background: None,
+            video_id: video_id.into(),
+            season: None,
+            episode: None,
+            position_ms,
+            duration_ms: 1_000_000,
+            updated_at: 0,
+        };
+
+        // Played here before signing in, without ever finishing: newer than the account's
+        // copy, but it has not heard of the five watches, so it must not erase them.
+        core.add_to_library(movie).expect("adds");
+        core.save_progress(playing("tt1", 300_000)).expect("plays");
+        core.restore_session("secret-key".into());
+        core.sync().await.expect("syncs");
+
+        let first = uploads(&server).await;
+        let tt1 = uploaded(&first[0], "tt1");
+        assert_eq!(tt1["state"]["timesWatched"], 5);
+        assert_ne!(tt1["state"]["lastWatched"], "2026-01-02T00:00:00.000Z");
+        let items = core.library().expect("lists");
+        let series = items.iter().find(|i| i.id == "tt2").expect("downloaded");
+        assert_eq!(series.times_watched, 2);
+        assert!(series.watched);
+        assert_eq!(
+            series.last_watched_at,
+            stremionow_sync::parse_timestamp("2026-01-03T00:00:00.000Z")
+        );
+
+        // Finishing an episode here counts on top of the account's watches.
+        core.save_progress(playing("tt2:1:1", 960_000))
+            .expect("finishes");
+        core.sync().await.expect("syncs");
+        let second = uploads(&server).await;
+        let tt2 = uploaded(&second[1], "tt2");
+        assert_eq!(tt2["state"]["timesWatched"], 3);
+        assert_eq!(
+            tt2["state"]["overallTimeWatched"], 7_200_000,
+            "fields not counted here stay"
+        );
+
+        // Marking the movie unwatched here takes the account's count down.
+        core.set_watched("tt1".into(), vec!["tt1".into()], false)
+            .expect("unmarks");
+        core.sync().await.expect("syncs");
+        let third = uploads(&server).await;
+        assert_eq!(uploaded(&third[2], "tt1")["state"]["timesWatched"], 0);
     }
 
     #[tokio::test]

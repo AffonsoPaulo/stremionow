@@ -168,6 +168,22 @@
   <!-- My list. -->
   <string name="library_empty_title">Your list is empty</string>
   <string name="library_empty_body">Use “My list” on any movie or series to keep it here.</string>
+  <!-- Menu at the start of the filters that picks the kind of titles shown; it reads the choice, such as "All". -->
+  <string name="library_type_menu">Type</string>
+  <!-- The type menu's choice that shows every title. -->
+  <string name="library_type_all">All</string>
+  <!-- Pills that sort or filter My list, as on Stremio's library. -->
+  <string name="library_sort_last_watched">Last watched</string>
+  <string name="library_sort_a_to_z">A–Z</string>
+  <string name="library_sort_z_to_a">Z–A</string>
+  <string name="library_sort_most_watched">Most watched</string>
+  <string name="library_sort_watched">Watched</string>
+  <string name="library_sort_not_watched">Not watched</string>
+  <!-- Line under a poster in My list for a title the user has watched. -->
+  <string name="library_status_watched">Watched</string>
+  <!-- Shown when the list has titles but none of them fit the chosen type and pill. -->
+  <string name="library_filtered_empty_title">Nothing here</string>
+  <string name="library_filtered_empty_body">No title in your list fits this choice.</string>
 
   <!-- Addons screen. -->
   <string name="addons_intro">Addons provide catalogs, information, sources and subtitles. Their order sets the priority.</string>

@@ -118,6 +118,17 @@
 
   <string name="library_empty_title">Sua lista está vazia</string>
   <string name="library_empty_body">Use “Minha lista” em qualquer filme ou série para guardar aqui.</string>
+  <string name="library_type_menu">Tipo</string>
+  <string name="library_type_all">Todos</string>
+  <string name="library_sort_last_watched">Assistidos recentemente</string>
+  <string name="library_sort_a_to_z">A–Z</string>
+  <string name="library_sort_z_to_a">Z–A</string>
+  <string name="library_sort_most_watched">Mais assistidos</string>
+  <string name="library_sort_watched">Assistidos</string>
+  <string name="library_sort_not_watched">Não assistidos</string>
+  <string name="library_status_watched">Assistido</string>
+  <string name="library_filtered_empty_title">Nada por aqui</string>
+  <string name="library_filtered_empty_body">Nenhum título da sua lista combina com essa escolha.</string>
 
   <string name="addons_intro">Addons trazem catálogos, informações, fontes e legendas. A ordem define a prioridade.</string>
   <string name="addons_install_label">Link do addon</string>

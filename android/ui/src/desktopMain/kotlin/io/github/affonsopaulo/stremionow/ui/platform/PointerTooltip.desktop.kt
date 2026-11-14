@@ -9,12 +9,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import io.github.affonsopaulo.stremionow.ui.components.SnFlagText
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
@@ -35,7 +35,7 @@ internal actual fun SnPointerTooltip(
     val shape = RoundedCornerShape(SnRadius.radiusSm)
     TooltipArea(
         tooltip = {
-            BasicText(
+            SnFlagText(
                 text,
                 modifier =
                     Modifier

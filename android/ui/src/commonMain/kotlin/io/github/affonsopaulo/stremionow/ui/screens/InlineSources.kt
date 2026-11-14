@@ -44,6 +44,7 @@ import coil3.compose.AsyncImage
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.ui.components.SnFlagText
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMessage
@@ -502,7 +503,7 @@ private fun SourceName(
 ) {
     Box(modifier) {
         SnPointerTooltip(title) {
-            BasicText(
+            SnFlagText(
                 title,
                 modifier = Modifier.fillMaxWidth(),
                 style = SnTypography.body.copy(color = SnColors.fg),

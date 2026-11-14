@@ -73,6 +73,18 @@ interface VideoPlayer {
     /** Mutes or unmutes the sound, keeping the volume. Players that cannot ignore it. */
     fun setMuted(muted: Boolean) = Unit
 
+    /** Shifts subtitles in time; positive values show them later. Players that cannot ignore it. */
+    fun setSubtitleDelay(seconds: Double) = Unit
+
+    /** Scales subtitles, 1 being their normal size. Players that cannot ignore it. */
+    fun setSubtitleScale(scale: Double) = Unit
+
+    /**
+     * Places subtitles vertically, as a percentage of the picture's height from its top: 100 is
+     * the bottom, where they normally are; lower values raise them. Players that cannot ignore it.
+     */
+    fun setSubtitlePosition(percent: Int) = Unit
+
     /** Stops playback and frees native resources. The player cannot be used afterwards. */
     fun release()
 }

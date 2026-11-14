@@ -108,6 +108,9 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 
+/** Where the subtitles and audio panel sits: just above the row of buttons. */
+private val TRACKS_PANEL_BOTTOM = 100.dp
+
 /** Height kept clear of the bottom controls (timeline and buttons) for prompts above them. */
 private val CONTROLS_CLEARANCE = 190.dp
 
@@ -410,7 +413,8 @@ internal fun PlayerOverlay(
                 onSeekBy = player::seekBy,
                 onSeekTo = player::seekTo,
                 onScrub = { state.scrubSeconds = it },
-                onTracks = { state.panel = Panel.Tracks },
+                tracksOpen = state.panel == Panel.Tracks,
+                onTracks = { state.panel = if (state.panel == Panel.Tracks) null else Panel.Tracks },
                 onEpisodes = { state.panel = Panel.Episodes },
                 onChangeSource = onChangeSource,
                 onNext = { next?.let(onOpenEpisode) },
@@ -455,13 +459,20 @@ internal fun PlayerOverlay(
 
         when (state.panel) {
             Panel.Tracks -> {
-                SidePanel(stringResource(Res.string.player_tracks), onClose = { state.panel = null }) {
-                    TracksList(
-                        tracks = playback.tracks,
-                        onSelectAudio = player::selectAudio,
-                        onSelectSubtitle = player::selectSubtitle,
-                    )
-                }
+                // A click anywhere else closes the panel, rather than pausing the video.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { state.panel = null } },
+                )
+                TracksPanel(
+                    player = player,
+                    playback = playback,
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM),
+                )
             }
 
             Panel.Episodes -> {
@@ -600,6 +611,7 @@ private fun Controls(
     onSeekBy: (Double) -> Unit,
     onSeekTo: (Double) -> Unit,
     onScrub: (Double?) -> Unit,
+    tracksOpen: Boolean,
     onTracks: () -> Unit,
     onEpisodes: () -> Unit,
     onChangeSource: () -> Unit,
@@ -772,7 +784,14 @@ private fun Controls(
                     WithTooltip(sourceLabel) { SnIconButton(SnIcons.Layers, sourceLabel, onChangeSource) }
                     VolumeButton(player, playback)
                     val tracksLabel = stringResource(Res.string.player_tracks)
-                    WithTooltip(tracksLabel) { SnIconButton(SnIcons.Subtitles, tracksLabel, onTracks) }
+                    WithTooltip(tracksLabel) {
+                        SnIconButton(
+                            SnIcons.Subtitles,
+                            tracksLabel,
+                            onTracks,
+                            background = if (tracksOpen) SnColors.overlayLight else Color.Transparent,
+                        )
+                    }
                     val fullScreenLabel =
                         stringResource(
                             if (isFullScreen) Res.string.player_exit_full_screen else Res.string.player_full_screen,

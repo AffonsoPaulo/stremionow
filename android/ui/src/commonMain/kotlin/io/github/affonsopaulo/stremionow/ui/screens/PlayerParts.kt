@@ -275,8 +275,9 @@ internal fun TracksList(
     }
 }
 
+/** A track's language in the device's language, and its title when it adds something. */
 @Composable
-private fun trackLabel(track: Track): String {
+internal fun trackLabel(track: Track): String {
     val language =
         track.language?.let { code ->
             Locale.forLanguageTag(code).getDisplayLanguage(Locale.getDefault()).takeIf { it.isNotBlank() && it != code }

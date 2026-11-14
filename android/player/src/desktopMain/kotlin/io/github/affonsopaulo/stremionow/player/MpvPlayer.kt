@@ -74,6 +74,11 @@ class MpvPlayer private constructor(
             mutableState.update { it.copy(volume = (value ?: 100.0).roundToInt().coerceIn(0, MAX_VOLUME)) }
         }
         mpv.observeFlag("mute") { value -> mutableState.update { it.copy(isMuted = value == true) } }
+        mpv.observeDouble("sub-delay") { value -> mutableState.update { it.copy(subtitleDelaySeconds = value ?: 0.0) } }
+        mpv.observeDouble("sub-scale") { value -> mutableState.update { it.copy(subtitleScale = value ?: 1.0) } }
+        mpv.observeDouble("sub-pos") { value ->
+            mutableState.update { it.copy(subtitlePosition = (value ?: 100.0).roundToInt()) }
+        }
         mpv.observeFlag("eof-reached") { value -> mutableState.update { it.copy(isEnded = value == true) } }
         mpv.observeString("hwdec-current") { value ->
             val decoder = value?.takeUnless { it.isEmpty() || it == "no" }
@@ -156,6 +161,18 @@ class MpvPlayer private constructor(
 
     override fun setMuted(muted: Boolean) {
         if (!released) mpv.setProperty("mute", if (muted) "yes" else "no")
+    }
+
+    override fun setSubtitleDelay(seconds: Double) {
+        if (!released) mpv.setProperty("sub-delay", formatSeconds(seconds))
+    }
+
+    override fun setSubtitleScale(scale: Double) {
+        if (!released) mpv.setProperty("sub-scale", formatSeconds(scale.coerceIn(MIN_SUB_SCALE, MAX_SUB_SCALE)))
+    }
+
+    override fun setSubtitlePosition(percent: Int) {
+        if (!released) mpv.setProperty("sub-pos", percent.coerceIn(MIN_SUB_POS, MAX_SUB_POS).toString())
     }
 
     override fun release() = release {}
@@ -242,6 +259,14 @@ class MpvPlayer private constructor(
 
     companion object {
         private val log = System.getLogger("StremioNow.player")
+
+        /** Subtitle sizes the app allows. */
+        private const val MIN_SUB_SCALE = 0.5
+        private const val MAX_SUB_SCALE = 2.0
+
+        /** Subtitle places the app allows: from a third of the way down to the bottom. */
+        private const val MIN_SUB_POS = 30
+        private const val MAX_SUB_POS = 100
 
         /** mpv's own scale goes up to 130 %, which distorts; the app offers up to 100 %. */
         private const val MAX_VOLUME = 100

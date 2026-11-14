@@ -98,8 +98,7 @@ class MpvPlayer private constructor(
     /** Selects a subtitle track, or turns subtitles off with null. */
     override fun selectSubtitle(trackId: Int?) = selectTrack("sid", trackId)
 
-    /** Shifts subtitles in time; positive values show them later. */
-    fun setSubtitleDelay(seconds: Double) {
+    override fun setSubtitleDelay(seconds: Double) {
         if (!released) mpv.setPropertyDouble("sub-delay", seconds)
     }
 

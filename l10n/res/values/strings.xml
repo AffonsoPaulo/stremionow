@@ -375,6 +375,21 @@
   <!-- The letter printed on the key that opens the episodes (E); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_episodes">E</string>
   <string name="player_volume">Volume</string>
+  <string name="player_sub_sync">Subtitle sync</string>
+  <string name="player_sub_earlier">Show subtitles 0.1 s earlier</string>
+  <string name="player_sub_later">Show subtitles 0.1 s later</string>
+  <string name="player_sub_size">Size</string>
+  <string name="player_sub_size_small">Small subtitles</string>
+  <string name="player_sub_size_medium">Medium subtitles</string>
+  <string name="player_sub_size_large">Large subtitles</string>
+  <string name="player_sub_size_small_short">S</string>
+  <string name="player_sub_size_medium_short">M</string>
+  <string name="player_sub_size_large_short">L</string>
+  <string name="player_sub_position">Position</string>
+  <string name="player_sub_up">Raise subtitles</string>
+  <string name="player_sub_down">Lower subtitles</string>
+  <string name="player_track_embedded">In the file</string>
+  <string name="player_track_external">Added</string>
   <!-- The letter printed on the key that mutes the sound (M); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_mute">M</string>
   <string name="player_mute">Mute</string>

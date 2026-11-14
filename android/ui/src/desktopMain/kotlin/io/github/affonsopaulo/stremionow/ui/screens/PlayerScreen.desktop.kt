@@ -22,6 +22,7 @@ import io.github.affonsopaulo.stremionow.ui.desktop.MediaKeys
 import io.github.affonsopaulo.stremionow.ui.desktop.OverlayState
 import io.github.affonsopaulo.stremionow.ui.desktop.PlayerOverlay
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.SessionVolume
 import io.github.affonsopaulo.stremionow.ui.desktop.VideoWindow
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowPair
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowedPlayer
@@ -89,6 +90,8 @@ actual fun PlayerScreen(
             }
         }
     val player = viewModel.player
+    // The next video starts at the volume of the previous one.
+    LaunchedEffect(player) { SessionVolume.applyTo(player) }
     // HDR and refresh rate changes for this player, put back when it goes (Windows only).
     val display = remember(player) { DesktopDisplays.session(AppGraph.core(context), selection.details.item.id) }
     // One instance per player: the overlay restarts its display check when this changes.

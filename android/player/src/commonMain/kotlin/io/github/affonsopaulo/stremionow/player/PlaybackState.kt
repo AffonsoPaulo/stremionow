@@ -18,6 +18,9 @@ data class PlaybackState(
     val bufferingProgress: Float? = null,
     /** A seek is in progress: until it completes, no new frame shows. */
     val isSeeking: Boolean = false,
+    /** Volume, from 0 to 100. */
+    val volume: Int = 100,
+    val isMuted: Boolean = false,
     /** Seconds already downloaded ahead of the current position. */
     val bufferedAheadSeconds: Double = 0.0,
     val isEnded: Boolean = false,

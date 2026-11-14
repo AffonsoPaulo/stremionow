@@ -159,7 +159,8 @@ internal class OverlayState {
 }
 
 /**
- * Space, K, Left, Right, J, L, F, N, E and Esc, wherever the focus is in the overlay. Esc (and the
+ * Space, K, Left, Right, J, L, Up, Down, M, F, N, E and Esc, wherever the focus is in the overlay.
+ * Up and Down change the volume and M mutes it. Esc (and the
  * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
  * [onNext], when there is one; E opens and closes the episodes, when the title has them.
  */
@@ -192,6 +193,18 @@ internal fun handlePlayerShortcut(
 
         Key.N -> {
             onNext?.invoke() ?: return false
+        }
+
+        Key.DirectionUp -> {
+            SessionVolume.set(player, player.state.value.volume + VOLUME_STEP)
+        }
+
+        Key.DirectionDown -> {
+            SessionVolume.set(player, player.state.value.volume - VOLUME_STEP)
+        }
+
+        Key.M -> {
+            SessionVolume.setMuted(player, !player.state.value.isMuted)
         }
 
         Key.E -> {
@@ -379,6 +392,7 @@ internal fun PlayerOverlay(
 
         AnimatedVisibility(state.areControlsVisible && !failed, enter = fadeIn(), exit = fadeOut()) {
             Controls(
+                player = player,
                 selection = selection,
                 playback = playback,
                 scrubSeconds = state.scrubSeconds,
@@ -563,10 +577,11 @@ private fun VideoArea(
  * The controls, laid out as in the design canvas: Back at the top; at the bottom the title and
  * episode, the timeline between the current time and the length, then a row with the episodes
  * and next episode on the left, −10 s, play/pause and +10 s in the centre, and change source,
- * subtitles and audio and full screen on the right.
+ * volume, subtitles and audio and full screen on the right.
  */
 @Composable
 private fun Controls(
+    player: VideoPlayer,
     selection: PlaybackSession.Selection,
     playback: PlaybackState,
     scrubSeconds: Double?,
@@ -739,6 +754,7 @@ private fun Controls(
                 ) {
                     val sourceLabel = stringResource(Res.string.player_change_source)
                     WithTooltip(sourceLabel) { SnIconButton(SnIcons.Layers, sourceLabel, onChangeSource) }
+                    VolumeButton(player, playback)
                     val tracksLabel = stringResource(Res.string.player_tracks)
                     WithTooltip(tracksLabel) { SnIconButton(SnIcons.Subtitles, tracksLabel, onTracks) }
                     val fullScreenLabel =

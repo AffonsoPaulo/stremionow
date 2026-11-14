@@ -34,6 +34,14 @@ object SnIcons {
             "M7 4h12a2 2 0 0 1 2 2v10",
         )
     val Next = fill("next", "M5 5v14l11 -7z", "M18 5h2v14h-2z")
+    val Volume =
+        stroke(
+            "volume",
+            "M11 5l-5 4h-4v6h4l5 4z",
+            "M15.5 8.5a5 5 0 0 1 0 7",
+            "M19 5a10 10 0 0 1 0 14",
+        )
+    val VolumeMuted = stroke("volume-muted", "M11 5l-5 4h-4v6h4l5 4z", "M22 9l-6 6", "M16 9l6 6")
     val Back10 = stroke("back-10", "M3 12a9 9 0 1 0 3 -6.7L3 8", "M3 3v5h5")
     val Forward10 = stroke("forward-10", "M21 12a9 9 0 1 1 -3 -6.7L21 8", "M21 3v5h-5")
     val Subtitles =

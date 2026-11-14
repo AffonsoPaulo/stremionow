@@ -65,6 +65,12 @@ interface VideoPlayer {
     /** Selects a subtitle track, or turns subtitles off with null. */
     fun selectSubtitle(trackId: Int?)
 
+    /** Sets the volume, from 0 to 100. Players that cannot ignore it. */
+    fun setVolume(percent: Int) = Unit
+
+    /** Mutes or unmutes the sound, keeping the volume. Players that cannot ignore it. */
+    fun setMuted(muted: Boolean) = Unit
+
     /** Stops playback and frees native resources. The player cannot be used afterwards. */
     fun release()
 }

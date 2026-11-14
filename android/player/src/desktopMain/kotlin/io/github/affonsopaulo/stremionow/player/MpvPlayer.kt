@@ -15,6 +15,7 @@ import java.lang.management.ManagementFactory
 import java.util.Locale
 import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
+import kotlin.math.roundToInt
 
 /**
  * A video player backed by libmpv that renders into a native window owned by the app.
@@ -70,6 +71,10 @@ class MpvPlayer private constructor(
             }
         }
         mpv.observeFlag("seeking") { value -> mutableState.update { it.copy(isSeeking = value == true) } }
+        mpv.observeDouble("volume") { value ->
+            mutableState.update { it.copy(volume = (value ?: 100.0).roundToInt().coerceIn(0, MAX_VOLUME)) }
+        }
+        mpv.observeFlag("mute") { value -> mutableState.update { it.copy(isMuted = value == true) } }
         mpv.observeFlag("eof-reached") { value -> mutableState.update { it.copy(isEnded = value == true) } }
         mpv.observeString("hwdec-current") { value ->
             val decoder = value?.takeUnless { it.isEmpty() || it == "no" }
@@ -145,6 +150,14 @@ class MpvPlayer private constructor(
     override fun selectAudio(trackId: Int?) = selectTrack("aid", trackId)
 
     override fun selectSubtitle(trackId: Int?) = selectTrack("sid", trackId)
+
+    override fun setVolume(percent: Int) {
+        if (!released) mpv.setProperty("volume", percent.coerceIn(0, MAX_VOLUME).toString())
+    }
+
+    override fun setMuted(muted: Boolean) {
+        if (!released) mpv.setProperty("mute", if (muted) "yes" else "no")
+    }
 
     override fun release() = release {}
 
@@ -230,6 +243,9 @@ class MpvPlayer private constructor(
 
     companion object {
         private val log = System.getLogger("StremioNow.player")
+
+        /** mpv's own scale goes up to 130 %, which distorts; the app offers up to 100 %. */
+        private const val MAX_VOLUME = 100
 
         /** The computer's physical memory, or 0 (the lightest level) when the JVM cannot tell. */
         private fun totalMemoryBytes(): Long =

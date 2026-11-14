@@ -414,6 +414,8 @@ internal fun PlayerOverlay(
                 onSeekTo = player::seekTo,
                 onScrub = { state.scrubSeconds = it },
                 tracksOpen = state.panel == Panel.Tracks,
+                playbackOpen = state.panel == Panel.Playback,
+                onPlayback = { state.panel = if (state.panel == Panel.Playback) null else Panel.Playback },
                 onTracks = { state.panel = if (state.panel == Panel.Tracks) null else Panel.Tracks },
                 onEpisodes = { state.panel = Panel.Episodes },
                 onChangeSource = onChangeSource,
@@ -466,6 +468,23 @@ internal fun PlayerOverlay(
                         .pointerInput(Unit) { detectTapGestures { state.panel = null } },
                 )
                 TracksPanel(
+                    player = player,
+                    playback = playback,
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM),
+                )
+            }
+
+            Panel.Playback -> {
+                // A click anywhere else closes the panel, rather than pausing the video.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { state.panel = null } },
+                )
+                PlaybackPanel(
                     player = player,
                     playback = playback,
                     modifier =
@@ -592,7 +611,7 @@ private fun VideoArea(
  * The controls, laid out as in the design canvas: Back at the top; at the bottom the title and
  * episode, the timeline between the current time and the length, then a row with the episodes
  * and next episode on the left, −10 s, play/pause and +10 s in the centre, and change source,
- * volume, subtitles and audio and full screen on the right.
+ * volume, subtitles and audio, playback (speed and picture) and full screen on the right.
  */
 @Composable
 private fun Controls(
@@ -613,6 +632,8 @@ private fun Controls(
     onScrub: (Double?) -> Unit,
     tracksOpen: Boolean,
     onTracks: () -> Unit,
+    playbackOpen: Boolean,
+    onPlayback: () -> Unit,
     onEpisodes: () -> Unit,
     onChangeSource: () -> Unit,
     onNext: () -> Unit,
@@ -790,6 +811,15 @@ private fun Controls(
                             tracksLabel,
                             onTracks,
                             background = if (tracksOpen) SnColors.overlayLight else Color.Transparent,
+                        )
+                    }
+                    val playbackLabel = stringResource(Res.string.player_playback)
+                    WithTooltip(playbackLabel) {
+                        SnIconButton(
+                            SnIcons.Gear,
+                            playbackLabel,
+                            onPlayback,
+                            background = if (playbackOpen) SnColors.overlayLight else Color.Transparent,
                         )
                     }
                     val fullScreenLabel =

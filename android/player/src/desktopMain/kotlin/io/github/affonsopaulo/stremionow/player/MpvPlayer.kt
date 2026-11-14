@@ -79,6 +79,7 @@ class MpvPlayer private constructor(
         mpv.observeDouble("sub-pos") { value ->
             mutableState.update { it.copy(subtitlePosition = (value ?: 100.0).roundToInt()) }
         }
+        mpv.observeDouble("speed") { value -> mutableState.update { it.copy(speed = value ?: 1.0) } }
         mpv.observeFlag("eof-reached") { value -> mutableState.update { it.copy(isEnded = value == true) } }
         mpv.observeString("hwdec-current") { value ->
             val decoder = value?.takeUnless { it.isEmpty() || it == "no" }
@@ -171,6 +172,19 @@ class MpvPlayer private constructor(
         if (!released) mpv.setProperty("sub-scale", formatSeconds(scale.coerceIn(MIN_SUB_SCALE, MAX_SUB_SCALE)))
     }
 
+    override fun setSpeed(speed: Double) {
+        if (!released) mpv.setProperty("speed", formatSeconds(speed.coerceIn(MIN_SPEED, MAX_SPEED)))
+    }
+
+    override fun setVideoScale(scale: VideoScale) {
+        if (released) return
+        // Fit keeps the shape with bars; Fill zooms until the bars are gone (panscan); Stretch
+        // drops the shape.
+        mpv.setProperty("keepaspect", if (scale == VideoScale.Stretch) "no" else "yes")
+        mpv.setProperty("panscan", if (scale == VideoScale.Fill) "1.0" else "0.0")
+        mutableState.update { it.copy(videoScale = scale) }
+    }
+
     override fun setSubtitlePosition(percent: Int) {
         if (!released) mpv.setProperty("sub-pos", percent.coerceIn(MIN_SUB_POS, MAX_SUB_POS).toString())
     }
@@ -259,6 +273,10 @@ class MpvPlayer private constructor(
 
     companion object {
         private val log = System.getLogger("StremioNow.player")
+
+        /** Playback rates the app allows. */
+        private const val MIN_SPEED = 0.25
+        private const val MAX_SPEED = 4.0
 
         /** Subtitle sizes the app allows. */
         private const val MIN_SUB_SCALE = 0.5

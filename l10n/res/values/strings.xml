@@ -441,16 +441,21 @@
   <!-- The letter printed on the key that opens the episodes (E); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_episodes">E</string>
   <string name="player_volume">Volume</string>
+  <string name="player_playback">Playback</string>
+  <string name="player_speed">Speed</string>
+  <string name="player_picture">Picture</string>
+  <string name="player_picture_fit">Fit</string>
+  <string name="player_picture_fit_body">The whole picture, with bars where it doesn\'t fill the screen</string>
+  <string name="player_picture_fill">Fill</string>
+  <string name="player_picture_fill_body">No bars: the edges of the picture are cut off</string>
+  <string name="player_picture_stretch">Stretch</string>
+  <string name="player_picture_stretch_body">No bars: the picture is stretched to the screen</string>
   <string name="player_sub_sync">Subtitle sync</string>
   <string name="player_sub_earlier">Show subtitles 0.1 s earlier</string>
   <string name="player_sub_later">Show subtitles 0.1 s later</string>
+  <string name="player_sub_smaller">Smaller subtitles</string>
+  <string name="player_sub_larger">Larger subtitles</string>
   <string name="player_sub_size">Size</string>
-  <string name="player_sub_size_small">Small subtitles</string>
-  <string name="player_sub_size_medium">Medium subtitles</string>
-  <string name="player_sub_size_large">Large subtitles</string>
-  <string name="player_sub_size_small_short">S</string>
-  <string name="player_sub_size_medium_short">M</string>
-  <string name="player_sub_size_large_short">L</string>
   <string name="player_sub_position">Position</string>
   <string name="player_sub_up">Raise subtitles</string>
   <string name="player_sub_down">Lower subtitles</string>

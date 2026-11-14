@@ -22,6 +22,18 @@ data class PlayerOptions(
     val verboseLogs: Boolean = false,
 )
 
+/** How the picture fills a screen of another shape. */
+enum class VideoScale {
+    /** The whole picture, with bars where the shapes differ (the default). */
+    Fit,
+
+    /** Fills the screen, cropping the picture's edges. */
+    Fill,
+
+    /** Fills the screen, distorting the picture. */
+    Stretch,
+}
+
 /**
  * What the shared player screen needs from a video player. Each platform implements it with
  * libmpv: `MpvPlayer` draws into an Android surface on Android and into a native window on the
@@ -84,6 +96,12 @@ interface VideoPlayer {
      * the bottom, where they normally are; lower values raise them. Players that cannot ignore it.
      */
     fun setSubtitlePosition(percent: Int) = Unit
+
+    /** Plays at [speed] times the normal rate. Players that cannot ignore it. */
+    fun setSpeed(speed: Double) = Unit
+
+    /** How the picture fills the screen. Players that cannot ignore it. */
+    fun setVideoScale(scale: VideoScale) = Unit
 
     /** Stops playback and frees native resources. The player cannot be used afterwards. */
     fun release()

@@ -64,6 +64,35 @@ object SnIcons {
         )
     val Settings =
         stroke("settings", "M4 6h10", "M18 6h2", "M4 12h4", "M12 12h8", "M4 18h12", "M16 4v4", "M10 10v4", "M18 16v4")
+
+    /** A screen with bars above and below the picture. */
+    val PictureFit = stroke("picture-fit", "M3 5h18v14h-18z", "M3 8.5h18", "M3 15.5h18")
+
+    /** Corners pushed out to the edges. */
+    val PictureFill =
+        stroke(
+            "picture-fill",
+            "M8 3h-3a2 2 0 0 0 -2 2v3",
+            "M21 8v-3a2 2 0 0 0 -2 -2h-3",
+            "M3 16v3a2 2 0 0 0 2 2h3",
+            "M16 21h3a2 2 0 0 0 2 -2v-3",
+        )
+
+    /** Arrows pulling sideways. */
+    val PictureStretch = stroke("picture-stretch", "M18 8l4 4l-4 4", "M6 8l-4 4l4 4", "M2 12h20")
+    val Gear =
+        stroke(
+            "gear",
+            "M12.22 2h-0.44a2 2 0 0 0 -2 2v0.18a2 2 0 0 1 -1 1.73l-0.43 0.25a2 2 0 0 1 -2 0l-0.15 -0.08" +
+                "a2 2 0 0 0 -2.73 0.73l-0.22 0.38a2 2 0 0 0 0.73 2.73l0.15 0.1a2 2 0 0 1 1 1.72v0.51" +
+                "a2 2 0 0 1 -1 1.74l-0.15 0.09a2 2 0 0 0 -0.73 2.73l0.22 0.38a2 2 0 0 0 2.73 0.73l0.15 -0.08" +
+                "a2 2 0 0 1 2 0l0.43 0.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h0.44a2 2 0 0 0 2 -2v-0.18" +
+                "a2 2 0 0 1 1 -1.73l0.43 -0.25a2 2 0 0 1 2 0l0.15 0.08a2 2 0 0 0 2.73 -0.73l0.22 -0.39" +
+                "a2 2 0 0 0 -0.73 -2.73l-0.15 -0.08a2 2 0 0 1 -1 -1.74v-0.5a2 2 0 0 1 1 -1.74l0.15 -0.09" +
+                "a2 2 0 0 0 0.73 -2.73l-0.22 -0.38a2 2 0 0 0 -2.73 -0.73l-0.15 0.08a2 2 0 0 1 -2 0l-0.43 -0.25" +
+                "a2 2 0 0 1 -1 -1.73V4a2 2 0 0 0 -2 -2z",
+            "M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0 -6z",
+        )
     val Skip = fill("skip", "M5 5v14l9 -7z", "M14 5v14l7 -7z")
     val Home =
         stroke(

@@ -9,10 +9,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +25,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.semantics.Role
@@ -31,6 +36,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.player.PlaybackState
@@ -58,27 +64,24 @@ private const val SYNC_STEP_SECONDS = 0.1
 /** Step of the subtitle position buttons, in percent of the picture's height. */
 private const val POSITION_STEP = 5
 
-/** Subtitle sizes offered: small, medium (normal) and large. */
-internal enum class SubtitleSize(
-    val scale: Double,
-) {
-    Small(0.8),
-    Medium(1.0),
-    Large(1.25),
-    ;
+/** Step of the subtitle size buttons, and the sizes allowed, in percent of the normal size. */
+private const val SCALE_STEP_PERCENT = 10
+private const val MIN_SCALE_PERCENT = 50
+private const val MAX_SCALE_PERCENT = 200
 
-    companion object {
-        /** The offered size nearest to [scale]. */
-        fun nearest(scale: Double): SubtitleSize = entries.minBy { abs(it.scale - scale) }
-    }
-}
+/** A subtitle scale as a whole percentage, on the buttons' 10 % steps. */
+internal fun subtitleScalePercent(scale: Double): Int =
+    ((scale * 100 / SCALE_STEP_PERCENT).roundToInt() * SCALE_STEP_PERCENT).coerceIn(
+        MIN_SCALE_PERCENT,
+        MAX_SCALE_PERCENT,
+    )
 
 /**
  * Subtitle size and position chosen in this run of the app, so the next video starts with
  * them. Their delay belongs to each file and is not carried over.
  */
 internal object SessionSubtitles {
-    var scale = SubtitleSize.Medium.scale
+    var scale = 1.0
         private set
     var position = 100
         private set
@@ -142,7 +145,10 @@ internal fun TracksPanel(
             .background(SnColors.surfaceRaised, shape)
             .border(1.dp, SnColors.border, shape),
     ) {
-        Row(Modifier.fillMaxWidth().padding(SnSpacing.space4)) {
+        Row(
+            Modifier.fillMaxWidth().padding(SnSpacing.space4),
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        ) {
             TrackColumn(
                 heading = stringResource(Res.string.player_audio),
                 modifier = Modifier.weight(1f),
@@ -155,9 +161,17 @@ internal fun TracksPanel(
                     ) { player.selectAudio(track.id) }
                 }
             }
+            // A line between the columns, drawn along the Subtitles column's start: measuring
+            // the row's height for a divider would ask lazy lists for intrinsic sizes.
+            val line = SnColors.border
             TrackColumn(
                 heading = stringResource(Res.string.player_subtitles),
-                modifier = Modifier.weight(1f),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .drawBehind {
+                            drawLine(line, Offset.Zero, Offset(0f, size.height), strokeWidth = 1.dp.toPx())
+                        }.padding(start = SnSpacing.space4),
             ) {
                 item(key = "off") {
                     TrackChoice(
@@ -183,7 +197,7 @@ internal fun TracksPanel(
                 ).background(SnColors.border)
                 .heightIn(min = 1.dp, max = 1.dp),
         )
-        SubtitleOptions(player, playback, Modifier.padding(SnSpacing.space4))
+        SubtitleOptions(player, playback, Modifier.padding(horizontal = SnSpacing.space6, vertical = SnSpacing.space4))
     }
 }
 
@@ -294,64 +308,77 @@ private fun SubtitleOptions(
 ) {
     Row(
         modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space8),
     ) {
         OptionGroup(stringResource(Res.string.player_sub_sync)) {
             val delay = playback.subtitleDelaySeconds
-            SnIconButton(
-                SnIcons.Minus,
-                stringResource(Res.string.player_sub_earlier),
-                { player.setSubtitleDelay(delay - SYNC_STEP_SECONDS) },
-                background = SnColors.surfaceMuted,
-            )
-            BasicText(
-                formatSubtitleDelay(delay),
-                modifier = Modifier.widthIn(min = 56.dp),
-                style =
-                    SnTypography.label.copy(
-                        color = SnColors.fg,
-                        fontFeatureSettings = "tnum",
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    ),
-            )
-            SnIconButton(
-                SnIcons.Plus,
-                stringResource(Res.string.player_sub_later),
-                { player.setSubtitleDelay(delay + SYNC_STEP_SECONDS) },
-                background = SnColors.surfaceMuted,
+            Stepper(
+                value = formatSubtitleDelay(delay),
+                lessLabel = stringResource(Res.string.player_sub_earlier),
+                moreLabel = stringResource(Res.string.player_sub_later),
+                onLess = { player.setSubtitleDelay(delay - SYNC_STEP_SECONDS) },
+                onMore = { player.setSubtitleDelay(delay + SYNC_STEP_SECONDS) },
             )
         }
         OptionGroup(stringResource(Res.string.player_sub_size)) {
-            val current = SubtitleSize.nearest(playback.subtitleScale)
-            Row(
-                Modifier
-                    .background(SnColors.surfaceMuted, RoundedCornerShape(SnRadius.radiusMd))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(SnSpacing.space1),
-            ) {
-                for (size in SubtitleSize.entries) {
-                    SizeChoice(size, selected = size == current) { SessionSubtitles.setScale(player, size.scale) }
-                }
-            }
+            val percent = subtitleScalePercent(playback.subtitleScale)
+            Stepper(
+                value = "$percent%",
+                lessLabel = stringResource(Res.string.player_sub_smaller),
+                moreLabel = stringResource(Res.string.player_sub_larger),
+                onLess = { SessionSubtitles.setScale(player, (percent - SCALE_STEP_PERCENT) / 100.0) },
+                onMore = { SessionSubtitles.setScale(player, (percent + SCALE_STEP_PERCENT) / 100.0) },
+                lessEnabled = percent > MIN_SCALE_PERCENT,
+                moreEnabled = percent < MAX_SCALE_PERCENT,
+            )
         }
         OptionGroup(stringResource(Res.string.player_sub_position)) {
             val position = playback.subtitlePosition
-            SnIconButton(
-                SnIcons.ChevronUp,
-                stringResource(Res.string.player_sub_up),
-                { SessionSubtitles.setPosition(player, position - POSITION_STEP) },
-                background = SnColors.surfaceMuted,
-                enabled = position > SessionSubtitles.MIN_POSITION,
-            )
-            SnIconButton(
-                SnIcons.ChevronDown,
-                stringResource(Res.string.player_sub_down),
-                { SessionSubtitles.setPosition(player, position + POSITION_STEP) },
-                background = SnColors.surfaceMuted,
-                enabled = position < 100,
+            // Shown as the height above the bottom, as Stremio does: 0% where subtitles normally
+            // are, more as they go up.
+            Stepper(
+                value = "${100 - position}%",
+                lessLabel = stringResource(Res.string.player_sub_down),
+                moreLabel = stringResource(Res.string.player_sub_up),
+                onLess = { SessionSubtitles.setPosition(player, position + POSITION_STEP) },
+                onMore = { SessionSubtitles.setPosition(player, position - POSITION_STEP) },
+                lessEnabled = position < 100,
+                moreEnabled = position > SessionSubtitles.MIN_POSITION,
             )
         }
+    }
+}
+
+/** A value between a minus and a plus button, in one pill. */
+@Composable
+private fun Stepper(
+    value: String,
+    lessLabel: String,
+    moreLabel: String,
+    onLess: () -> Unit,
+    onMore: () -> Unit,
+    lessEnabled: Boolean = true,
+    moreEnabled: Boolean = true,
+) {
+    Row(
+        Modifier
+            .background(SnColors.surfaceMuted, RoundedCornerShape(SnRadius.radiusFull))
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SnIconButton(SnIcons.Minus, lessLabel, onLess, enabled = lessEnabled)
+        BasicText(
+            value,
+            modifier = Modifier.widthIn(min = 64.dp),
+            style =
+                SnTypography.label.copy(
+                    color = SnColors.fg,
+                    fontFeatureSettings = "tnum",
+                    textAlign = TextAlign.Center,
+                ),
+        )
+        SnIconButton(SnIcons.Plus, moreLabel, onMore, enabled = moreEnabled)
     }
 }
 
@@ -360,65 +387,18 @@ private fun OptionGroup(
     label: String,
     content: @Composable () -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
-    ) {
-        BasicText(label, style = SnTypography.label.copy(color = SnColors.fgSecondary))
-        content()
-    }
-}
-
-@Composable
-private fun SizeChoice(
-    size: SubtitleSize,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(SnRadius.radiusSm)
-    val interaction = remember { MutableInteractionSource() }
-    val state = interaction.collectSnInteraction()
-    val (letter, name) =
-        when (size) {
-            SubtitleSize.Small -> {
-                stringResource(Res.string.player_sub_size_small_short) to
-                    stringResource(Res.string.player_sub_size_small)
-            }
-
-            SubtitleSize.Medium -> {
-                stringResource(Res.string.player_sub_size_medium_short) to
-                    stringResource(Res.string.player_sub_size_medium)
-            }
-
-            SubtitleSize.Large -> {
-                stringResource(Res.string.player_sub_size_large_short) to
-                    stringResource(Res.string.player_sub_size_large)
-            }
-        }
-    Box(
-        Modifier
-            .heightIn(min = 36.dp)
-            .widthIn(min = 36.dp)
-            .semantics {
-                contentDescription = name
-                this.selected = selected
-            }.snClickable(
-                shape,
-                role = Role.RadioButton,
-                highlight = false,
-                interactionSource = interaction,
-                onClick = onClick,
-            ).snStateBackground(if (selected) SnColors.fg else Color.Transparent, shape, state)
-            .padding(horizontal = SnSpacing.space3),
-        contentAlignment = Alignment.Center,
-    ) {
+    // The label above its controls, so each group reads as one and the groups stay apart.
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
         BasicText(
-            letter,
-            style =
-                SnTypography.label.copy(
-                    color = if (selected) SnColors.bg else SnColors.fgSecondary,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                ),
+            label.uppercase(),
+            modifier = Modifier.semantics { heading() },
+            style = SnTypography.overline.copy(color = SnColors.fgMuted),
         )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2),
+        ) {
+            content()
+        }
     }
 }

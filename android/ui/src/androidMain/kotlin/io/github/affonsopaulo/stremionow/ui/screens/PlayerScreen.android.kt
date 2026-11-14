@@ -307,7 +307,8 @@ actual fun PlayerScreen(
                 }
             }
 
-            null -> {}
+            // Speed and picture are the desktop's for now.
+            Panel.Playback, null -> {}
         }
     }
 }

@@ -93,7 +93,7 @@ internal const val CONTROLS_TIMEOUT_MS = 4_000L
 internal val PromptControlsClearance = SnSpacing.space16 + SnSpacing.space4
 
 /** Side panels of the player. */
-internal enum class Panel { Tracks, Episodes }
+internal enum class Panel { Tracks, Playback, Episodes }
 
 /**
  * The prompt in the bottom corner once a file plays: "Skip intro", "Skip recap" or "Skip

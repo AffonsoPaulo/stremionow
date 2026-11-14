@@ -27,6 +27,10 @@ data class PlaybackState(
     val subtitleScale: Double = 1.0,
     /** Subtitles' vertical place, from the top, in percent of the picture; 100 is the bottom. */
     val subtitlePosition: Int = 100,
+    /** Playback rate, 1 being normal. */
+    val speed: Double = 1.0,
+    /** How the picture fills the screen. */
+    val videoScale: VideoScale = VideoScale.Fit,
     /** Seconds already downloaded ahead of the current position. */
     val bufferedAheadSeconds: Double = 0.0,
     val isEnded: Boolean = false,

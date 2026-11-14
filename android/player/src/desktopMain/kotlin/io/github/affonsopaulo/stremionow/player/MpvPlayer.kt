@@ -219,6 +219,12 @@ class MpvPlayer private constructor(
     companion object {
         private val log = System.getLogger("StremioNow.player")
 
+        /** Demuxer data read ahead of the playback position, at least, in memory. */
+        private const val DESKTOP_AHEAD_BUFFER_MIB = 128
+
+        /** Demuxer data kept behind the playback position, for seeking back without reopening the source. */
+        private const val DESKTOP_BACK_BUFFER_MIB = 256
+
         /** Logged once per file, to report what mpv chose. */
         private val VIDEO_INFO_PROPERTIES =
             listOf(
@@ -299,8 +305,13 @@ class MpvPlayer private constructor(
                     if (caFile != null) put("tls-ca-file", caFile.absolutePath)
 
                     put("cache", "yes")
-                    put("demuxer-max-bytes", "${options.bufferAheadMiB}MiB")
-                    put("demuxer-max-back-bytes", "${(options.bufferAheadMiB / 4).coerceAtLeast(8)}MiB")
+                    // At least 128 MiB ahead: a 25 Mbit/s 4K file fills 64 MiB in 20 s, little
+                    // room for skipping forward without opening the source again.
+                    put("demuxer-max-bytes", "${maxOf(options.bufferAheadMiB, DESKTOP_AHEAD_BUFFER_MIB)}MiB")
+                    // What was just watched stays for seeking back: at 16 MiB, a 4K remux kept
+                    // about 2 s, so going back 10 s opened the source again and showed black
+                    // until it answered. Computers have the memory; only what was played fills it.
+                    put("demuxer-max-back-bytes", "${DESKTOP_BACK_BUFFER_MIB}MiB")
 
                     if (options.audioLanguages.isNotEmpty()) put("alang", options.audioLanguages.joinToString(","))
                     if (options.subtitleLanguages.isNotEmpty()) {

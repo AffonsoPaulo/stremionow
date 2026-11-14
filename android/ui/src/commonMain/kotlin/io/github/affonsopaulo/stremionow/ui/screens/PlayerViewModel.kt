@@ -3,6 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.affonsopaulo.stremionow.core.NextVideo
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.SubtitleTrack
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.util.Locale
 
 /** How often the torrent state is read for the loading screen. */
@@ -237,6 +239,15 @@ class PlayerViewModel<out P : VideoPlayer>(
         }
     }
 
+    /**
+     * The released episode after this one, for "Continue watching" to move on to once this
+     * one is finished; specials stay apart, as in [PlaybackSession.Selection.nextEpisode].
+     */
+    private fun nextVideo(): NextVideo? =
+        selection.nextEpisode
+            ?.takeIf { it.isReleased(Instant.now()) }
+            ?.let { NextVideo(videoId = it.id, season = it.season, episode = it.episode) }
+
     fun saveProgress() {
         val state = player.state.value
         val duration = state.durationSeconds ?: return
@@ -256,7 +267,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                 durationMs = (duration * 1000).toLong().toULong(),
                 updatedAt = 0,
             )
-        viewModelScope.launch { runCatching { io { core.saveProgress(progress) } } }
+        viewModelScope.launch { runCatching { io { core.saveProgressWithNext(progress, nextVideo()) } } }
     }
 
     override fun onCleared() {
@@ -266,7 +277,7 @@ class PlayerViewModel<out P : VideoPlayer>(
             val item = selection.details.item
             // The scope is already cancelled here, so write synchronously; it is one SQLite row.
             runCatching {
-                core.saveProgress(
+                core.saveProgressWithNext(
                     WatchProgress(
                         id = item.id,
                         kind = item.kind,
@@ -280,6 +291,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                         durationMs = (duration * 1000).toLong().toULong(),
                         updatedAt = 0,
                     ),
+                    nextVideo(),
                 )
             }
         }

@@ -102,6 +102,14 @@ pub struct WatchProgress {
     pub updated_at: i64,
 }
 
+/// The episode after the one playing, for "Continue watching" to move on to it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NextVideo {
+    pub video_id: String,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl StremioCore {
     /// Enabled addons that can offer sources for this video, in priority order. Ask each one
@@ -179,6 +187,18 @@ impl StremioCore {
     /// (Stremio's `timesWatched`): finishing a video that was in progress, or one not watched
     /// before. Reports that keep coming after the end do not count again.
     pub fn save_progress(&self, progress: WatchProgress) -> Result<(), CoreError> {
+        self.save_progress_with_next(progress, None)
+    }
+
+    /// As [`StremioCore::save_progress`], and when the video is finished with a `next` one
+    /// released, the title stays in "Continue watching" on the next video, at its start, as
+    /// stremio-core's `advance_to_video` does: a time offset of 1 ms and the finished
+    /// video's length, so the official apps list it there too.
+    pub fn save_progress_with_next(
+        &self,
+        progress: WatchProgress,
+        next: Option<NextVideo>,
+    ) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
         let same_video = store
@@ -194,7 +214,22 @@ impl StremioCore {
                 store.note_watching(&progress.id, now)?;
             }
             store.mark_watched(&progress.id, &progress.video_id, now)?;
-            store.remove_progress(&progress.id)?;
+            match next {
+                Some(next) => store.save_progress(&ProgressEntry {
+                    id: progress.id,
+                    kind: progress.kind,
+                    name: progress.name,
+                    poster: progress.poster,
+                    background: progress.background,
+                    video_id: next.video_id,
+                    season: next.season,
+                    episode: next.episode,
+                    position_ms: 1,
+                    duration_ms: i64::try_from(progress.duration_ms).unwrap_or(i64::MAX),
+                    updated_at: now,
+                })?,
+                None => store.remove_progress(&progress.id)?,
+            }
             return Ok(());
         }
         if progress.position_ms < MIN_PROGRESS_MS && !same_video {
@@ -493,6 +528,41 @@ fn source_text(source: &StreamSource) -> SourceText<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finished_episode_moves_continue_watching_to_the_next() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("opens");
+        let next = NextVideo {
+            video_id: "tt1:1:2".into(),
+            season: Some(1),
+            episode: Some(2),
+        };
+        core.save_progress_with_next(progress("tt1:1:1", 300_000), Some(next.clone()))
+            .expect("saves");
+        core.save_progress_with_next(progress("tt1:1:1", 960_000), Some(next.clone()))
+            .expect("saves");
+        let listed = core.continue_watching().expect("lists");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].video_id, "tt1:1:2");
+        assert_eq!(listed[0].episode, Some(2));
+        assert_eq!(listed[0].position_ms, 1);
+        assert_eq!(
+            core.watched_videos("tt1".into()).expect("reads"),
+            vec!["tt1:1:1".to_string()]
+        );
+        // Reports that keep coming from the end of the finished episode change nothing.
+        core.save_progress_with_next(progress("tt1:1:1", 990_000), Some(next))
+            .expect("saves");
+        assert_eq!(
+            core.continue_watching().expect("lists")[0].video_id,
+            "tt1:1:2"
+        );
+        // The last episode leaves the row.
+        core.save_progress(progress("tt1:1:2", 960_000))
+            .expect("saves");
+        assert!(core.continue_watching().expect("lists").is_empty());
+    }
 
     #[test]
     fn only_web_addresses_reach_the_player() {

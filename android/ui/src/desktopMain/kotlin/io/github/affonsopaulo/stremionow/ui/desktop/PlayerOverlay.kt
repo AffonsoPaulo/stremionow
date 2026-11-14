@@ -54,11 +54,15 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.Chapters
@@ -678,7 +682,15 @@ private fun Controls(
                 horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
             ) {
                 val timeStyle = SnTypography.label.copy(color = SnColors.fg, fontFeatureSettings = "tnum")
-                BasicText(formatPlaybackTime(scrubSeconds ?: playback.positionSeconds), style = timeStyle)
+                // Both times take the width of the longest time this video can show, so the
+                // timeline between them never moves or resizes as the digits change: a click
+                // would otherwise land a few pixels away from where the thumb ends up.
+                val timeWidth = rememberWidestTimeWidth(duration, timeStyle)
+                BasicText(
+                    formatPlaybackTime(scrubSeconds ?: playback.positionSeconds),
+                    modifier = Modifier.width(timeWidth),
+                    style = timeStyle.copy(textAlign = TextAlign.Center),
+                )
                 SnSeekBar(
                     positionSeconds = playback.positionSeconds,
                     durationSeconds = duration,
@@ -690,7 +702,11 @@ private fun Controls(
                     showsHoverTime = true,
                     modifier = Modifier.weight(1f),
                 )
-                BasicText(formatPlaybackTime(duration), style = timeStyle)
+                BasicText(
+                    formatPlaybackTime(duration),
+                    modifier = Modifier.width(timeWidth),
+                    style = timeStyle.copy(textAlign = TextAlign.Center),
+                )
             }
 
             Box(Modifier.fillMaxWidth()) {
@@ -771,6 +787,27 @@ private fun Controls(
                 }
             }
         }
+    }
+}
+
+/**
+ * The width of the widest time [formatPlaybackTime] gives for a video of [durationSeconds], in
+ * [style]: its pattern with every digit set to the font's widest digit.
+ */
+@Composable
+private fun rememberWidestTimeWidth(
+    durationSeconds: Double,
+    style: TextStyle,
+): Dp {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    return remember(durationSeconds, style, density) {
+        val pattern = formatPlaybackTime(durationSeconds)
+        val widest =
+            (0..9).maxOf { digit ->
+                measurer.measure(pattern.replace(Regex("[0-9]"), digit.toString()), style).size.width
+            }
+        with(density) { widest.toDp() }
     }
 }
 

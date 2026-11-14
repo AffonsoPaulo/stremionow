@@ -63,6 +63,16 @@ pub struct WatchedTitle {
     pub videos: u32,
 }
 
+/// What a title's watched videos were on the account when it last synced, to tell which side
+/// changed since (ADR 0012). Empty for a title that never synced.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchedSync {
+    /// The account's `state.watched` string as last read or written; `None` when it had none.
+    pub remote: Option<String>,
+    /// The title's watched videos both sides agreed on, sorted.
+    pub videos: Vec<String>,
+}
+
 const MIGRATIONS: &[&str] = &[
     // 1: settings, addons, my list and response cache.
     r"
@@ -112,6 +122,18 @@ const MIGRATIONS: &[&str] = &[
         watched_at INTEGER NOT NULL
     );
     CREATE INDEX watched_id ON watched (id);
+    ",
+    // 3: what the account had of each title's watched videos at the last sync (ADR 0012).
+    r"
+    CREATE TABLE watched_sync (
+        id TEXT PRIMARY KEY,
+        remote TEXT
+    );
+    CREATE TABLE watched_sync_videos (
+        id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        PRIMARY KEY (id, video_id)
+    );
     ",
 ];
 
@@ -438,6 +460,57 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    // Watched videos on the account
+
+    /// What title `id`'s watched videos were at the last sync; empty if it never synced.
+    pub fn watched_sync(&self, id: &str) -> Result<WatchedSync, StoreError> {
+        let remote = self
+            .connection
+            .query_row(
+                "SELECT remote FROM watched_sync WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let mut statement = self
+            .connection
+            .prepare("SELECT video_id FROM watched_sync_videos WHERE id = ?1 ORDER BY video_id")?;
+        let videos = statement
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(WatchedSync { remote, videos })
+    }
+
+    /// Records what title `id`'s watched videos are on the account after a sync. An empty
+    /// record forgets the title.
+    pub fn save_watched_sync(&mut self, id: &str, sync: &WatchedSync) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM watched_sync WHERE id = ?1", [id])?;
+        transaction.execute("DELETE FROM watched_sync_videos WHERE id = ?1", [id])?;
+        if *sync != WatchedSync::default() {
+            transaction.execute(
+                "INSERT INTO watched_sync (id, remote) VALUES (?1, ?2)",
+                params![id, sync.remote],
+            )?;
+            for video_id in &sync.videos {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO watched_sync_videos (id, video_id) VALUES (?1, ?2)",
+                    params![id, video_id],
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Forgets what every title had on the account, as when signing out.
+    pub fn clear_watched_sync(&self) -> Result<(), StoreError> {
+        self.connection
+            .execute_batch("DELETE FROM watched_sync; DELETE FROM watched_sync_videos;")?;
+        Ok(())
+    }
+
     // Response cache
 
     /// A cached body and the time it was fetched (Unix milliseconds).
@@ -706,5 +779,77 @@ mod tests {
             .unmark_watched("a", "a:9:9")
             .expect("unwatched is fine");
         assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:2"]);
+    }
+
+    #[test]
+    fn keeps_what_the_account_had_per_title() {
+        let mut store = Store::open_in_memory().expect("store");
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
+        let synced = WatchedSync {
+            remote: Some("a:1:2:2:eJxjAgAAAwAC".into()),
+            videos: vec!["a:1:1".into(), "a:1:2".into()],
+        };
+        store.save_watched_sync("a", &synced).expect("saves");
+        store
+            .save_watched_sync(
+                "b",
+                &WatchedSync {
+                    remote: None,
+                    videos: vec!["b".into()],
+                },
+            )
+            .expect("saves");
+        assert_eq!(store.watched_sync("a").expect("reads"), synced);
+
+        let fewer = WatchedSync {
+            remote: Some("a:1:1:1:eJxjBAAAAgAC".into()),
+            videos: vec!["a:1:1".into()],
+        };
+        store.save_watched_sync("a", &fewer).expect("replaces");
+        assert_eq!(store.watched_sync("a").expect("reads"), fewer);
+        store
+            .save_watched_sync("a", &WatchedSync::default())
+            .expect("forgets");
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
+        assert_eq!(store.watched_sync("b").expect("reads").videos, ["b"]);
+
+        store.clear_watched_sync().expect("clears");
+        assert_eq!(
+            store.watched_sync("b").expect("reads"),
+            WatchedSync::default()
+        );
+    }
+
+    #[test]
+    fn migrates_a_version_2_database_and_keeps_its_marks() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("store.db");
+        {
+            let connection = Connection::open(&path).expect("opens");
+            for migration in &MIGRATIONS[..2] {
+                connection.execute_batch(migration).expect("migrates");
+            }
+            connection
+                .pragma_update(None, "user_version", 2)
+                .expect("versions");
+            connection
+                .execute(
+                    "INSERT INTO watched (video_id, id, watched_at) VALUES ('a:1:1', 'a', 1)",
+                    [],
+                )
+                .expect("marks");
+        }
+        let store = Store::open(&path).expect("migrates to the latest");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
+        assert_eq!(
+            store.watched_sync("a").expect("reads"),
+            WatchedSync::default()
+        );
     }
 }

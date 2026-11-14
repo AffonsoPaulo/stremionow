@@ -19,6 +19,7 @@ mod settings;
 mod sharing;
 mod skips;
 mod streaming;
+mod watched_sync;
 
 pub use crate::core::StremioCore;
 pub use crate::home::{HomeEntry, HomeFeed, HomeListener, HomeReason, HomeSection};

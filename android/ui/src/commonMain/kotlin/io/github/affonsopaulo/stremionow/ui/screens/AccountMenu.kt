@@ -60,7 +60,10 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import io.github.affonsopaulo.stremionow.core.coreVersion
+import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnDialog
+import io.github.affonsopaulo.stremionow.ui.components.SnDialogActions
+import io.github.affonsopaulo.stremionow.ui.components.SnDialogFrame
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -96,6 +99,29 @@ object AccountEvents {
     fun changed() = mutableChanges.update { it + 1 }
 }
 
+/** Something about the saved session the user should know. */
+enum class AccountNotice {
+    /** Signed in, but the secret store refused the key: the next launch starts signed out. */
+    SessionNotRemembered,
+
+    /** Signed out, but the saved key could not be removed and may sign in again at launch. */
+    SessionNotCleared,
+}
+
+/** The notice shown over the app, from wherever it was raised (often a background thread). */
+object AccountNotices {
+    private val mutableCurrent = MutableStateFlow<AccountNotice?>(null)
+    val current: StateFlow<AccountNotice?> = mutableCurrent.asStateFlow()
+
+    fun show(notice: AccountNotice) {
+        mutableCurrent.value = notice
+    }
+
+    fun dismiss() {
+        mutableCurrent.value = null
+    }
+}
+
 /** The signed-in account's email and last sync, or nulls on a device used without one. */
 data class AccountSummary(
     val email: String?,
@@ -123,8 +149,11 @@ internal fun rememberAccountSummary(): AccountSummary? {
  * can be reached. Local addons, list and progress stay.
  */
 internal fun signOutOfStremio(context: PlatformContext) {
-    SecureStore.clear(context, SecureStore.STREMIO_AUTH_KEY)
+    // The secret store can block (a keyring prompt), so even the clear runs off the main thread.
     AppGraph.scope.launch {
+        if (!SecureStore.clear(context, SecureStore.STREMIO_AUTH_KEY)) {
+            AccountNotices.show(AccountNotice.SessionNotCleared)
+        }
         runCatching { AppGraph.core(context).signOut() }
         AccountEvents.changed()
     }
@@ -232,6 +261,33 @@ fun AccountOverlays(
             },
             onDismiss = { ui.confirmSignOut = false },
         )
+    }
+    val notice by AccountNotices.current.collectAsState()
+    notice?.let { AccountNoticeDialog(it, onDismiss = AccountNotices::dismiss) }
+}
+
+@Composable
+private fun AccountNoticeDialog(
+    notice: AccountNotice,
+    onDismiss: () -> Unit,
+) {
+    val (title, body) =
+        when (notice) {
+            AccountNotice.SessionNotRemembered -> {
+                Res.string.account_session_not_remembered_title to Res.string.account_session_not_remembered_body
+            }
+
+            AccountNotice.SessionNotCleared -> {
+                Res.string.account_session_not_cleared_title to Res.string.account_session_not_cleared_body
+            }
+        }
+    SnDialogFrame(title = stringResource(title), onDismiss = onDismiss) {
+        val closeFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { closeFocus.requestFocus() } }
+        BasicText(stringResource(body), style = SnTypography.body.copy(color = SnColors.fgSecondary))
+        SnDialogActions {
+            SnButton(stringResource(Res.string.action_close), onDismiss, modifier = Modifier.focusRequester(closeFocus))
+        }
     }
 }
 

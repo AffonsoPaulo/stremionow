@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.data
 import io.github.affonsopaulo.stremionow.ui.data.secrets.SessionFallback
 import io.github.affonsopaulo.stremionow.ui.data.secrets.systemSecretBackend
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
+import java.io.File
 
 /**
  * Secrets on the desktop, in the operating system's own store (see `data/secrets`):
@@ -19,13 +20,13 @@ import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 internal actual object PlatformSecretStore {
     private val NAME = Regex("[a-z0-9_]{1,64}")
 
-    private val store by lazy { SessionFallback(systemSecretBackend()) }
+    private val store by lazy { SessionFallback(systemSecretBackend(), File(DesktopPaths.appData, "secrets")) }
 
     actual fun save(
         context: PlatformContext,
         name: String,
         value: String,
-    ) = store.save(checkName(name), value)
+    ): Boolean = store.save(checkName(name), value)
 
     actual fun load(
         context: PlatformContext,
@@ -35,7 +36,7 @@ internal actual object PlatformSecretStore {
     actual fun clear(
         context: PlatformContext,
         name: String,
-    ) = store.clear(checkName(name))
+    ): Boolean = store.clear(checkName(name))
 
     private fun checkName(name: String): String = name.also { require(NAME.matches(it)) { "Invalid secret name" } }
 }

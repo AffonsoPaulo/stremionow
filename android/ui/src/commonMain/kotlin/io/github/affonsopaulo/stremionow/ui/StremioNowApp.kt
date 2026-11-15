@@ -25,6 +25,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -66,6 +67,7 @@ import io.github.affonsopaulo.stremionow.ui.crash.crashReportPrompt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
+import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
@@ -151,6 +153,13 @@ fun StremioNowApp(
     CompositionLocalProvider(LocalIsTv provides isTv) {
         // Asks about the last crash report; in a crash loop, before the app starts.
         if (crashReportPrompt()) return@CompositionLocalProvider
+        // Opening the core reads the secret store, which can block (a keyring prompt), so it
+        // opens off the main thread with a plain page meanwhile.
+        val startRoute = rememberStartRoute()
+        if (startRoute == null) {
+            Box(Modifier.fillMaxSize().background(SnColors.bg))
+            return@CompositionLocalProvider
+        }
         val navController = rememberNavController()
         val entry by navController.currentBackStackEntryAsState()
         val current =
@@ -176,13 +185,6 @@ fun StremioNowApp(
         val phone = SnLayout.formFactor == FormFactor.Phone
         // The player owns the whole screen: no header, no tab bar, no insets.
         val immersive = entry?.destination?.route == Routes.PLAYER
-        // First run shows the setup instead of the app's navigation.
-        val context = LocalPlatformContext.current
-        val startRoute =
-            remember {
-                val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
-                if (onboarded) Routes.HOME else Routes.ONBOARDING
-            }
         val setup = entry?.destination?.route == Routes.ONBOARDING
         // What the avatar opens: a menu, a sheet on phones, Settings on TV.
         val accountUi = remember { AccountUi() }
@@ -299,6 +301,23 @@ fun StremioNowApp(
             )
         }
     }
+}
+
+/**
+ * The first page, once the core is open: first run shows the setup instead of the app's
+ * navigation. Null while the core opens, off the main thread.
+ */
+@Composable
+private fun rememberStartRoute(): String? {
+    val context = LocalPlatformContext.current
+    val route = {
+        val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
+        if (onboarded) Routes.HOME else Routes.ONBOARDING
+    }
+    // Already open (a new window or activity in the same process): no blank frame.
+    return produceState(if (AppGraph.isCoreOpen) route() else null) {
+        if (value == null) value = io(route)
+    }.value
 }
 
 /**

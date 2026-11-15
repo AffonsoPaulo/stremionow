@@ -3,7 +3,9 @@ package io.github.affonsopaulo.stremionow.ui.data.secrets
 
 import com.sun.jna.Platform
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeNoException
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -66,18 +68,66 @@ class SecretBackendTest {
 
                 override fun clear(name: String): Unit = throw IllegalStateException("denied")
             }
-        val store = SessionFallback(broken)
-        store.save("key", "value")
+        val store = SessionFallback(broken, markers = null)
+        assertFalse(store.save("key", "value"))
         assertNull(store.load("key"))
-        store.clear("key")
+        assertFalse(store.clear("key"))
     }
 
     @Test
     fun noStoreKeepsNothing() {
-        val store = SessionFallback(null)
-        store.save("key", "value")
+        val store = SessionFallback(null, markers = null)
+        assertFalse(store.save("key", "value"))
         assertNull(store.load("key"))
-        store.clear("key")
+        assertTrue(store.clear("key"))
+    }
+
+    @Test
+    fun aRefusedDeleteIsNeverHandedBackUntilSavedAgain() {
+        val kept = mutableMapOf<String, String>()
+        var refuseDelete = true
+        val stubborn =
+            object : SecretBackend {
+                override val description = "Stubborn"
+
+                override fun save(
+                    name: String,
+                    value: String,
+                ) {
+                    kept[name] = value
+                }
+
+                override fun load(name: String): String? = kept[name]
+
+                override fun clear(name: String) {
+                    if (refuseDelete) throw SecretStoreUnavailableException("denied")
+                    kept.remove(name)
+                }
+            }
+        val markers = temporary.newFolder("markers")
+        val store = SessionFallback(stubborn, markers)
+        assertTrue(store.save("key", "session"))
+        assertTrue(store.clear("key"))
+        assertEquals("session", kept["key"])
+        // A new run of the app reads the same marker.
+        assertNull(SessionFallback(stubborn, markers).load("key"))
+        assertTrue(store.save("key", "new session"))
+        assertEquals("new session", store.load("key"))
+
+        assertTrue(store.clear("key"))
+        refuseDelete = false
+        assertNull(store.load("key"))
+        assertNull(kept["key"])
+        assertTrue(markers.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun onlyDpapiErrorsThatLastForgetTheSecret() {
+        assertTrue(DpapiSecrets.unreadableForever(13))
+        assertTrue(DpapiSecrets.unreadableForever(0x8009000B.toInt()))
+        // ERROR_NOT_ENOUGH_MEMORY, ERROR_ACCESS_DENIED: may pass, so the secret stays.
+        assertFalse(DpapiSecrets.unreadableForever(8))
+        assertFalse(DpapiSecrets.unreadableForever(5))
     }
 
     /**

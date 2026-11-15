@@ -4,6 +4,8 @@ package io.github.affonsopaulo.stremionow.ui.data
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.logWarning
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,8 +16,18 @@ import java.io.File
 object AppGraph {
     @Volatile private var core: StremioCore? = null
 
-    /** For work that must finish after a screen is gone, such as stopping a torrent. */
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * For work that must finish after a screen is gone, such as stopping a torrent. A failure
+     * nobody caught is logged rather than taking the whole app down.
+     */
+    val scope =
+        CoroutineScope(
+            SupervisorJob() + Dispatchers.IO +
+                CoroutineExceptionHandler { _, failure -> logWarning("Background work failed", failure) },
+        )
+
+    /** Whether the core is open already, so the first screen need not wait for it. */
+    val isCoreOpen: Boolean get() = core != null
 
     /** The core, opened on first use with its database in private, non-backed-up storage. */
     fun core(context: PlatformContext): StremioCore =

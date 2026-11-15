@@ -19,11 +19,16 @@ object SecureStore {
     /** The pairing with the device used for torrents, token included. */
     const val OTHER_DEVICE = "other_device"
 
+    /**
+     * Keeps [value]; false when the store refused it (the reason is logged), so the caller can
+     * tell the user it will not be remembered. Never throws. May block: call it off the main
+     * thread.
+     */
     fun save(
         context: PlatformContext,
         name: String,
         value: String,
-    ) = PlatformSecretStore.save(context, name, value)
+    ): Boolean = PlatformSecretStore.save(context, name, value)
 
     /** The stored value, or null if there is none or it can no longer be decrypted. */
     fun load(
@@ -31,10 +36,14 @@ object SecureStore {
         name: String,
     ): String? = PlatformSecretStore.load(context, name)
 
+    /**
+     * Forgets the value; false when it may still be loaded at the next launch. Never throws.
+     * May block: call it off the main thread.
+     */
     fun clear(
         context: PlatformContext,
         name: String,
-    ) = PlatformSecretStore.clear(context, name)
+    ): Boolean = PlatformSecretStore.clear(context, name)
 }
 
 /** The platform's encrypted storage behind [SecureStore]. */
@@ -43,7 +52,7 @@ internal expect object PlatformSecretStore {
         context: PlatformContext,
         name: String,
         value: String,
-    )
+    ): Boolean
 
     fun load(
         context: PlatformContext,
@@ -53,5 +62,5 @@ internal expect object PlatformSecretStore {
     fun clear(
         context: PlatformContext,
         name: String,
-    )
+    ): Boolean
 }

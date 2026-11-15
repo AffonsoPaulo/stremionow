@@ -213,7 +213,10 @@ internal class SignInFlow(
         result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
         val key = result.getOrNull()
         if (key != null) {
-            SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, key)
+            // Signed in either way; a store that refuses only means signing in again next time.
+            if (!SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, key)) {
+                AccountNotices.show(AccountNotice.SessionNotRemembered)
+            }
             AccountEvents.changed()
             onMain(mine) { onSignedIn() }
             return

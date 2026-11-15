@@ -86,6 +86,7 @@ import io.github.affonsopaulo.stremionow.core.HomeFeed
 import io.github.affonsopaulo.stremionow.core.HomeListener
 import io.github.affonsopaulo.stremionow.core.HomeReason
 import io.github.affonsopaulo.stremionow.core.HomeSection
+import io.github.affonsopaulo.stremionow.core.LastSource
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
@@ -112,6 +113,7 @@ import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
+import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -152,9 +154,17 @@ class HomeViewModel(
     private var feedJob: Job? = null
     private var started = false
 
+    private val mutableLastSources = MutableStateFlow<Map<String, LastSource?>>(emptyMap())
+
+    /** The source last played for each title in progress, by title id, for its card to resume. */
+    val lastSources = mutableLastSources.asStateFlow()
+
     fun refreshContinueWatching() {
         viewModelScope.launch {
-            mutableContinueWatching.value = runCatching { io { core.continueWatching() } }.getOrDefault(emptyList())
+            val entries = runCatching { io { core.continueWatching() } }.getOrDefault(emptyList())
+            mutableContinueWatching.value = entries
+            mutableLastSources.value =
+                io { entries.associate { it.id to runCatching { core.lastSource(it.id) }.getOrNull() } }
         }
     }
 
@@ -212,6 +222,7 @@ class HomeViewModel(
 fun HomeScreen(
     onOpenTitle: (MetaItem) -> Unit,
     onOpenProgress: (WatchProgress) -> Unit,
+    onResume: (WatchProgress) -> Unit,
     onOpenAddons: () -> Unit,
 ) {
     val context = LocalPlatformContext.current
@@ -227,6 +238,18 @@ fun HomeScreen(
     LaunchedEffect(accountChanges) { if (accountChanges != accountAtStart) viewModel.load() }
     val state by viewModel.feed.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
+    val lastSources by viewModel.lastSources.collectAsStateWithLifecycle()
+    // A card goes straight to the player with the source chosen before, looked up again
+    // (ResumePlayback.kt); without one that could be found, it opens the title's page.
+    val openProgress = { progress: WatchProgress ->
+        val request = resumeRequest(progress, lastSources[progress.id])
+        if (request != null) {
+            PlaybackSession.resume(request)
+            onResume(progress)
+        } else {
+            onOpenProgress(progress)
+        }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshContinueWatching()
         viewModel.refresh()
@@ -234,7 +257,7 @@ fun HomeScreen(
 
     val feed = (state as? Loadable.Ready)?.value
     if (feed != null && (feed.sections.isNotEmpty() || continueWatching.isNotEmpty())) {
-        HomeContent(feed, continueWatching, onOpenTitle, onOpenProgress)
+        HomeContent(feed, continueWatching, onOpenTitle, openProgress)
         return
     }
     // Without the hero the page starts below the header, like any other.

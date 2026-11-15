@@ -516,6 +516,7 @@
 
   <!-- Torrent playback. -->
   <string name="player_preparing">Getting the source ready</string>
+  <string name="player_resuming">Finding the source you chose before</string>
   <string name="player_waiting">Loading the video</string>
   <string name="torrent_finding_peers">Looking for peers…</string>
   <string name="torrent_checking">Checking downloaded data…</string>

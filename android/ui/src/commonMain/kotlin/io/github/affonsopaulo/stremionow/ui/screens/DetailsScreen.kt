@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.Episode
+import io.github.affonsopaulo.stremionow.core.LastSource
 import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.NextVideo
@@ -134,6 +135,10 @@ class DetailsViewModel(
 
     /** Videos of this title the user has watched: episode ids, or the movie's own id. */
     val watched = mutableWatched.asStateFlow()
+    private val mutableLastSource = MutableStateFlow<LastSource?>(null)
+
+    /** The source last played for this title, for Resume to play it again. */
+    val lastSource = mutableLastSource.asStateFlow()
     private val mutableRating = MutableStateFlow(TitleRating.NONE)
     val rating = mutableRating.asStateFlow()
     private val mutableWifiOnly = MutableStateFlow(false)
@@ -164,6 +169,7 @@ class DetailsViewModel(
         viewModelScope.launch {
             mutableProgress.value = runCatching { io { core.progress(id) } }.getOrNull()
             mutableWatched.value = runCatching { io { core.watchedVideos(id) } }.getOrDefault(emptyList()).toSet()
+            mutableLastSource.value = runCatching { io { core.lastSource(id) } }.getOrNull()
         }
     }
 
@@ -348,6 +354,7 @@ private fun DetailsContent(
     val related by viewModel.related.collectAsStateWithLifecycle()
     val progress by viewModel.progress.collectAsStateWithLifecycle()
     val watched by viewModel.watched.collectAsStateWithLifecycle()
+    val lastSource by viewModel.lastSource.collectAsStateWithLifecycle()
     val rating by viewModel.rating.collectAsStateWithLifecycle()
     val wifiOnly by viewModel.wifiOnly.collectAsStateWithLifecycle()
     val sourcesFor by viewModel.sourcesFor.collectAsStateWithLifecycle()
@@ -447,6 +454,17 @@ private fun DetailsContent(
             else -> {
                 play(source)
             }
+        }
+    }
+    // "Resume" goes straight to the player with the source chosen before, looked up again
+    // (ResumePlayback.kt); without one that could be found, the sources show as before.
+    val resume = {
+        val request = if (next.started) resumeRequest(details, next.episode, lastSource) else null
+        if (request != null) {
+            PlaybackSession.resume(request)
+            onPlay()
+        } else {
+            showSources(next.episode)
         }
     }
     LaunchedEffect(reveal) {
@@ -572,7 +590,7 @@ private fun DetailsContent(
                                 isSeries = isSeries,
                                 next = next,
                                 hasTrailer = trailer != null,
-                                onPrimary = { showSources(next.episode) },
+                                onPrimary = resume,
                                 onStartOver = {
                                     showSources(
                                         details.episodes.firstOrNull { (it.season ?: 0u) > 0u }

@@ -28,6 +28,7 @@ class SourceFiltersTest {
         description: String = name,
     ) = StreamSource(
         addonName = addon,
+        addonId = addon.lowercase(),
         name = "$addon\n${quality.orEmpty()}",
         description = description,
         url = url,

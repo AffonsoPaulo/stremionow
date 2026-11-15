@@ -10,8 +10,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 
 /*
- * How one page of the app replaces another (docs/plans/interaction-and-details.md, "Screen
- * transitions"). Set once on the NavHost, so every page gets them; the title art that flies
+ * How one page of the app replaces another. Set once on the NavHost, so every page gets them; the title art that flies
  * from a card into a title's page is in components/SnTransitions.kt.
  */
 

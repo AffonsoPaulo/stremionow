@@ -39,7 +39,7 @@ import kotlinx.coroutines.flow.first
 
 /*
  * What pages and cards need to take part in the page transitions, which the app sets once on
- * its NavHost (docs/plans/interaction-and-details.md, "Screen transitions"). Each page learns
+ * its NavHost (see PageTransitions.kt). Each page learns
  * when it has finished arriving, so the remote's focus moves only then: to the card the user
  * opened, when they come back to it, or to the page's first element.
  *

@@ -24,8 +24,8 @@ internal enum class MediaCommand { PlayPause, Play, Pause, Stop, Next, Previous 
  *
  * AWT has no key codes for them. On Windows they arrive as `WM_APPCOMMAND`, which the system
  * sends to the active window when the focused control leaves the key unhandled, so the player's
- * overlay window is subclassed to read it. Elsewhere this does nothing yet; see
- * docs/poc/phase-5.md for the system media controls still to do (SMTC, MPRIS, Now Playing).
+ * overlay window is subclassed to read it. Elsewhere this does nothing yet; the system media
+ * controls (SMTC on Windows, MPRIS on Linux, Now Playing on macOS) are still to do.
  */
 internal object MediaKeys {
     /**

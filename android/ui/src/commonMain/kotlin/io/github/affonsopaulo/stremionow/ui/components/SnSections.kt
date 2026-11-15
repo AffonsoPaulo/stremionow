@@ -36,7 +36,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.MetaItem
-import io.github.affonsopaulo.stremionow.ui.platform.screenHeightDp
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -163,54 +162,49 @@ data class PosterRowSizing(
 
 /**
  * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, they follow the
- * window: two rows and a half fit in its height, and as many cards as fit in its width, the last
- * cut in half so it tells there is more to the side (see [posterRowSizing]). Elsewhere they keep
- * [PosterCardWidth].
+ * window's width: eight whole cards and half of a ninth, the cut card telling there is more to
+ * the side (see [posterRowSizing]). Elsewhere they keep [PosterCardWidth].
  */
 @Composable
 fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
     val mouseFirst = LocalSnFeedback.current.mouseFirst
     val gutter = SnLayout.gutter
-    val windowHeight = screenHeightDp().dp
-    return remember(rowWidth, windowHeight, mouseFirst, gutter) {
+    return remember(rowWidth, mouseFirst, gutter) {
         if (mouseFirst) {
-            posterRowSizing(rowWidth, windowHeight, gutter)
+            posterRowSizing(rowWidth, gutter)
         } else {
             PosterRowSizing(PosterCardWidth, SnSpacing.space4)
         }
     }
 }
 
-/** Rows of posters the window's height shows, the last in half. */
-internal const val POSTER_ROWS_SHOWN = 2.5f
+/** Whole cards a row shows where a pointer drives the screen; half of the next one shows too. */
+internal const val POSTER_ROW_WHOLE_CARDS = 8
 
-/** What a poster row takes besides its cards' pictures: its heading, the cards' text, the gaps. */
-internal val POSTER_ROW_EXTRA = 150.dp
-
-/** The header above the pages. */
-internal val PAGE_HEADER_ALLOWANCE = 96.dp
+/** Room between poster cards where a pointer drives the screen. */
+internal val POSTER_SPACING = 48.dp
 
 /** Narrowest and widest a poster card gets. */
 internal val MIN_POSTER_CARD_WIDTH = 132.dp
-internal val MAX_POSTER_CARD_WIDTH = 220.dp
+internal val MAX_POSTER_CARD_WIDTH = 240.dp
 
-/** Least room between poster cards where a pointer drives the screen. */
+/** Least room between poster cards, in windows too narrow or too wide for the usual layout. */
 internal val MIN_POSTER_SPACING = 28.dp
 
 /**
- * The cards of a row [rowWidth] wide in a window [windowHeight] tall: as wide as two rows and a
- * half of them fit under the header, then as many as fit after the page [gutter] with half of
- * the next one showing, the room left spread between them, never less than
- * [MIN_POSTER_SPACING].
+ * The cards of a row [rowWidth] wide: [POSTER_ROW_WHOLE_CARDS] whole cards and half of the next
+ * after the page [gutter], [POSTER_SPACING] apart. Where that would make them narrower or wider
+ * than their bounds, they keep the bound, and as many fit as can with half of the next showing,
+ * the room left spread between them, never less than [MIN_POSTER_SPACING].
  */
 internal fun posterRowSizing(
     rowWidth: Dp,
-    windowHeight: Dp,
     gutter: Dp,
 ): PosterRowSizing {
-    val rowHeight = (windowHeight - PAGE_HEADER_ALLOWANCE) / POSTER_ROWS_SHOWN
-    val card = ((rowHeight - POSTER_ROW_EXTRA) / 1.5f).coerceIn(MIN_POSTER_CARD_WIDTH, MAX_POSTER_CARD_WIDTH)
     val room = rowWidth - gutter
+    val wanted = (room - POSTER_SPACING * POSTER_ROW_WHOLE_CARDS) / (POSTER_ROW_WHOLE_CARDS + 0.5f)
+    if (wanted in MIN_POSTER_CARD_WIDTH..MAX_POSTER_CARD_WIDTH) return PosterRowSizing(wanted, POSTER_SPACING)
+    val card = wanted.coerceIn(MIN_POSTER_CARD_WIDTH, MAX_POSTER_CARD_WIDTH)
     // The most whole cards, besides the half one, that leave the least room between them.
     var whole = ((room - card / 2 + MIN_POSTER_SPACING) / (card + MIN_POSTER_SPACING)).toInt().coerceAtLeast(1)
     var spacing = (room - card * (whole + 0.5f)) / whole

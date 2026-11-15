@@ -153,10 +153,7 @@ class PlayerViewModel<out P : VideoPlayer>(
         }
         if (settings?.aniskip != false) viewModelScope.launch { findSkips() }
         viewModelScope.launch { findNextSource() }
-        // Offered first among this video's sources next time, however it was picked.
-        source.identity?.let { identity ->
-            viewModelScope.launch { runCatching { io { core.rememberPlayedSource(selection.videoId, identity) } } }
-        }
+        viewModelScope.launch { rememberSource() }
         viewModelScope.launch {
             while (isActive) {
                 delay(PROGRESS_INTERVAL_MS)
@@ -174,18 +171,23 @@ class PlayerViewModel<out P : VideoPlayer>(
     private suspend fun findNextSource() {
         val next = selection.nextEpisode ?: return
         val group = source.bingeGroup ?: return
-        val addon =
-            runCatching { io { core.streamAddons(selection.kind, next.id) } }
-                .getOrDefault(emptyList())
-                .firstOrNull { it.name == source.addonName } ?: return
-        val match =
-            runCatching { core.streamsFrom(addon.manifestUrl, selection.kind, next.id) }
-                .getOrDefault(emptyList())
-                .firstOrNull { it.bingeGroup == group && it.playsInApp } ?: return
+        val match = core.sourceFinder().find(selection.kind, next.id, SourceWanted(source.addonId, bingeGroup = group))
         // Only while this episode is still the one chosen: the session may have moved on.
-        if (PlaybackSession.selection?.videoId == selection.videoId) {
+        if (match != null && PlaybackSession.selection?.videoId == selection.videoId) {
             PlaybackSession.nextUp = PlaybackSession.NextUp(next.id, match)
         }
+    }
+
+    /**
+     * Once the video starts, remembers the source however it was picked: it is offered first
+     * among this video's sources next time, and "Resume" and Continue watching play it again
+     * (ResumePlayback.kt). A source that never started is not worth resuming with. Only its
+     * identity, binge group and addon are kept, never its address.
+     */
+    private suspend fun rememberSource() {
+        if (source.identity == null) return
+        player.state.first { it.isLoaded }
+        runCatching { io { core.rememberLastSource(selection.details.item.id, selection.videoId, source) } }
     }
 
     /**

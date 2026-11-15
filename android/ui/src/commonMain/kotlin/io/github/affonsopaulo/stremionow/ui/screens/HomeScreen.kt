@@ -86,6 +86,7 @@ import io.github.affonsopaulo.stremionow.core.HomeFeed
 import io.github.affonsopaulo.stremionow.core.HomeListener
 import io.github.affonsopaulo.stremionow.core.HomeReason
 import io.github.affonsopaulo.stremionow.core.HomeSection
+import io.github.affonsopaulo.stremionow.core.LastSource
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.WatchProgress
@@ -104,14 +105,18 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
+import io.github.affonsopaulo.stremionow.ui.components.TitleCard
+import io.github.affonsopaulo.stremionow.ui.components.TitleOrigin
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
+import io.github.affonsopaulo.stremionow.ui.components.titleCard
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
+import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -152,9 +157,17 @@ class HomeViewModel(
     private var feedJob: Job? = null
     private var started = false
 
+    private val mutableLastSources = MutableStateFlow<Map<String, LastSource?>>(emptyMap())
+
+    /** The source last played for each title in progress, by title id, for its card to resume. */
+    val lastSources = mutableLastSources.asStateFlow()
+
     fun refreshContinueWatching() {
         viewModelScope.launch {
-            mutableContinueWatching.value = runCatching { io { core.continueWatching() } }.getOrDefault(emptyList())
+            val entries = runCatching { io { core.continueWatching() } }.getOrDefault(emptyList())
+            mutableContinueWatching.value = entries
+            mutableLastSources.value =
+                io { entries.associate { it.id to runCatching { core.lastSource(it.id) }.getOrNull() } }
         }
     }
 
@@ -212,6 +225,7 @@ class HomeViewModel(
 fun HomeScreen(
     onOpenTitle: (MetaItem) -> Unit,
     onOpenProgress: (WatchProgress) -> Unit,
+    onResume: (WatchProgress) -> Unit,
     onOpenAddons: () -> Unit,
 ) {
     val context = LocalPlatformContext.current
@@ -227,6 +241,18 @@ fun HomeScreen(
     LaunchedEffect(accountChanges) { if (accountChanges != accountAtStart) viewModel.load() }
     val state by viewModel.feed.collectAsStateWithLifecycle()
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
+    val lastSources by viewModel.lastSources.collectAsStateWithLifecycle()
+    // A card goes straight to the player with the source chosen before, looked up again
+    // (ResumePlayback.kt); without one that could be found, it opens the title's page.
+    val openProgress = { progress: WatchProgress ->
+        val request = resumeRequest(progress, lastSources[progress.id])
+        if (request != null) {
+            PlaybackSession.resume(request)
+            onResume(progress)
+        } else {
+            onOpenProgress(progress)
+        }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshContinueWatching()
         viewModel.refresh()
@@ -234,7 +260,7 @@ fun HomeScreen(
 
     val feed = (state as? Loadable.Ready)?.value
     if (feed != null && (feed.sections.isNotEmpty() || continueWatching.isNotEmpty())) {
-        HomeContent(feed, continueWatching, onOpenTitle, onOpenProgress)
+        HomeContent(feed, continueWatching, onOpenTitle, openProgress)
         return
     }
     // Without the hero the page starts below the header, like any other.
@@ -285,6 +311,13 @@ private fun HomeContent(
     val heroHover = remember { MutableInteractionSource() }
     var heroFocused by remember { mutableStateOf(false) }
     val pick = if (hero.isEmpty()) null else rememberHeroPick(hero, listState, heroHover, heroFocused)
+    // "More info" flies the hero's art into the title's page. It stays behind the rows as it
+    // flies, as it lies behind them on screen; its crop eases from this hero's to that one's.
+    val heroCard =
+        titleCard(
+            pick?.current?.let { TitleOrigin("hero/${it.kind}/${it.id}", it.kind, it.id, it.background) },
+            overlay = false,
+        )
     // Rows arrive in stages, and the hero can appear after the first ones. A lazy list keeps
     // showing the item it showed, which would leave the new hero above the screen; so while
     // the list is at its top, it stays there. Before the layout that applies the change, so
@@ -313,7 +346,8 @@ private fun HomeContent(
                     Modifier
                         .fillMaxWidth()
                         .height(heroHeight + HeroArtOverlap)
-                        .offset { IntOffset(0, -listState.heroScroll()) },
+                        .offset { IntOffset(0, -listState.heroScroll()) }
+                        .then(heroCard.art),
             )
         }
         SnScrollArea(listState, topInset = headerInset, minimalScroll = true) {
@@ -330,6 +364,7 @@ private fun HomeContent(
                             pick = pick,
                             items = hero,
                             height = heroHeight,
+                            card = heroCard,
                             onOpenTitle = onOpenTitle,
                             modifier =
                                 Modifier
@@ -387,9 +422,22 @@ private fun HomeRow(
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(name.title, caption = name.caption)
         when {
-            section.loading -> PlaceholderRow()
-            section.reason is HomeReason.NewEpisodes -> NewEpisodesRow(section.entries, onOpenTitle)
-            else -> SnPosterRow(section.entries.map { it.item }, onOpenTitle, subtitle = { it.cardSubtitle() })
+            section.loading -> {
+                PlaceholderRow()
+            }
+
+            section.reason is HomeReason.NewEpisodes -> {
+                NewEpisodesRow(section.entries, onOpenTitle)
+            }
+
+            else -> {
+                SnPosterRow(
+                    section.entries.map { it.item },
+                    onOpenTitle,
+                    subtitle = { it.cardSubtitle() },
+                    slot = section.key,
+                )
+            }
         }
     }
 }
@@ -657,12 +705,16 @@ private fun HeroStep(
     }
 }
 
-/** The hero's title, facts, synopsis and button, over the art drawn behind the list. */
+/**
+ * The hero's title, facts, synopsis and button, over the art drawn behind the list. The
+ * button of the title on show is [card], whose art flies and which takes the focus back on TV.
+ */
 @Composable
 private fun Hero(
     pick: HeroPick,
     items: List<MetaItem>,
     height: Dp,
+    card: TitleCard,
     onOpenTitle: (MetaItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -726,11 +778,18 @@ private fun Hero(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                val onShow = item.id == pick.current.id
                 SnButton(
                     text = stringResource(Res.string.action_more_info),
-                    onClick = { onOpenTitle(item) },
+                    onClick = {
+                        // The title fading out as the next one comes in has no art left to fly.
+                        if (onShow) card.onOpen()
+                        onOpenTitle(item)
+                    },
                     icon = SnIcons.Info,
-                    modifier = if (pick.takesFocus && item.id == pick.current.id) Modifier.initialFocus() else Modifier,
+                    modifier =
+                        (if (onShow) card.focus else Modifier)
+                            .then(if (pick.takesFocus && onShow) Modifier.initialFocus() else Modifier),
                 )
             }
         }

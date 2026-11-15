@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -37,6 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -53,15 +59,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.Episode
+import io.github.affonsopaulo.stremionow.core.LastSource
 import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.MetaItem
+import io.github.affonsopaulo.stremionow.core.NextVideo
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.TitleRating
 import io.github.affonsopaulo.stremionow.core.WatchProgress
+import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverArt
 import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
 import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
+import io.github.affonsopaulo.stremionow.ui.components.LocalPageMotion
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnChip
@@ -70,17 +80,19 @@ import io.github.affonsopaulo.stremionow.ui.components.SnDialog
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnHeroBackdrop
 import io.github.affonsopaulo.stremionow.ui.components.SnLoadError
-import io.github.affonsopaulo.stremionow.ui.components.SnLoading
 import io.github.affonsopaulo.stremionow.ui.components.SnMinimalScroll
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.SnTextLink
+import io.github.affonsopaulo.stremionow.ui.components.TitleArrival
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.components.rememberTitleArrival
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.titleHeroArt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Connectivity
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
@@ -99,6 +111,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
+import io.github.affonsopaulo.stremionow.ui.theme.SnSize
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.Job
@@ -133,6 +146,10 @@ class DetailsViewModel(
 
     /** Videos of this title the user has watched: episode ids, or the movie's own id. */
     val watched = mutableWatched.asStateFlow()
+    private val mutableLastSource = MutableStateFlow<LastSource?>(null)
+
+    /** The source last played for this title, for Resume to play it again. */
+    val lastSource = mutableLastSource.asStateFlow()
     private val mutableRating = MutableStateFlow(TitleRating.NONE)
     val rating = mutableRating.asStateFlow()
     private val mutableWifiOnly = MutableStateFlow(false)
@@ -167,6 +184,7 @@ class DetailsViewModel(
         viewModelScope.launch {
             mutableProgress.value = runCatching { io { core.progress(id) } }.getOrNull()
             mutableWatched.value = runCatching { io { core.watchedVideos(id) } }.getOrDefault(emptyList()).toSet()
+            mutableLastSource.value = runCatching { io { core.lastSource(id) } }.getOrNull()
         }
     }
 
@@ -246,8 +264,18 @@ class DetailsViewModel(
         watched: Boolean,
     ) {
         if (videoIds.isEmpty()) return
+        // Continue watching moves on when the episode it is on gets marked (resumeAfterMarking).
+        val details = (mutableDetails.value as? Loadable.Ready)?.value
+        val current = mutableProgress.value?.videoId?.takeIf { watched && it in videoIds }
+        val next =
+            if (details != null && current != null) {
+                resumeAfterMarking(details, current, mutableWatched.value + videoIds, Instant.now())
+                    ?.let { NextVideo(videoId = it.id, season = it.season, episode = it.episode) }
+            } else {
+                null
+            }
         viewModelScope.launch {
-            runCatching { io { core.setWatched(id, videoIds, watched) } }
+            runCatching { io { core.setWatchedWithNext(id, videoIds, watched, next) } }
                 .onFailure { logWarning("Could not mark videos as watched", it) }
             refresh()
         }
@@ -298,6 +326,8 @@ fun DetailsScreen(
     val context = LocalPlatformContext.current
     val viewModel = viewModel(key = "details-$kind-$id") { DetailsViewModel(AppGraph.core(context), kind, id) }
     val state by viewModel.details.collectAsStateWithLifecycle()
+    // Opened from a poster, whose art flies into the hero.
+    val arrival = rememberTitleArrival(kind, id)
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refresh()
         // Back from the player to choose a source: "Change source", or the next episode.
@@ -308,22 +338,125 @@ fun DetailsScreen(
         }
     }
 
-    when (val details = state) {
-        Loadable.Loading -> {
-            Box(Modifier.fillMaxSize().belowHeader()) { SnLoading() }
+    // A skeleton holds the page's place while it loads, and the page fades in over it, so it
+    // never pops in after the transition. While a poster flies in, the skeleton stays until it
+    // lands: the art must not lose its place in the middle of the flight.
+    val page = LocalPageMotion.current
+    val readyAtStart = remember { state is Loadable.Ready }
+    val landed = readyAtStart || !arrival.flies || page?.settled != false
+    val shown =
+        when {
+            state is Loadable.Failed -> DetailsShows.Error
+            state is Loadable.Ready && landed -> DetailsShows.Content
+            else -> DetailsShows.Skeleton
         }
+    Crossfade(shown, animationSpec = tween(DETAILS_FADE_MS), label = "details") { showing ->
+        when (showing) {
+            DetailsShows.Skeleton -> {
+                DetailsSkeleton(arrival)
+            }
 
-        is Loadable.Failed -> {
-            Box(Modifier.fillMaxSize().belowHeader()) { SnLoadError(onRetry = viewModel::load) }
-        }
+            DetailsShows.Error -> {
+                Box(Modifier.fillMaxSize().belowHeader()) { SnLoadError(onRetry = viewModel::load) }
+            }
 
-        is Loadable.Ready -> {
-            DetailsContent(details.value, viewModel, onOpenTitle, {
-                onOpenGenre(details.value.item.kind, it)
-            }, onSearchPerson, onPlay)
+            DetailsShows.Content -> {
+                (state as? Loadable.Ready)?.value?.let { details ->
+                    DetailsContent(details, arrival, viewModel, onOpenTitle, {
+                        onOpenGenre(details.item.kind, it)
+                    }, onSearchPerson, onPlay)
+                }
+            }
         }
     }
 }
+
+/** What the title's page shows: see [DetailsScreen]. */
+private enum class DetailsShows { Skeleton, Error, Content }
+
+/** How long the page takes to fade in over its skeleton. */
+private const val DETAILS_FADE_MS = 250
+
+/**
+ * The title's page while it loads: its hero, with the art the poster brought when it flew in,
+ * and grey blocks where the title, the facts and the buttons will be, in their places, so the
+ * page fades in without anything moving much. Screen readers hear that it is loading.
+ */
+@Composable
+private fun DetailsSkeleton(arrival: TitleArrival) {
+    // The skeleton runs under the header like a title with art, which most titles have.
+    ClearHeaderOverArt()
+    val headerInset = LocalHeaderInset.current
+    val loading = stringResource(Res.string.state_loading)
+    BoxWithConstraints(Modifier.fillMaxSize().clearAndSetSemantics { contentDescription = loading }) {
+        val height = detailsHeroHeight(DpSize(maxWidth, maxHeight), headerInset)
+        Box(Modifier.fillMaxWidth().height(height)) {
+            SnHeroBackdrop(
+                url = arrival.art,
+                textWidth = DetailsTextWidth,
+                modifier = Modifier.matchParentSize().titleHeroArt(arrival),
+            )
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .widthIn(max = DetailsTextWidth + SnLayout.gutter * 2)
+                    .padding(top = headerInset)
+                    .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space6),
+                verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+            ) {
+                SkeletonBlock(Modifier.width(320.dp).height(64.dp))
+                SkeletonBlock(Modifier.width(240.dp).height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+                    SkeletonBlock(
+                        Modifier.width(180.dp).height(SnSize.controlLg),
+                        RoundedCornerShape(SnRadius.radiusFull),
+                    )
+                    SkeletonBlock(
+                        Modifier.width(132.dp).height(SnSize.controlLg),
+                        RoundedCornerShape(SnRadius.radiusFull),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkeletonBlock(
+    modifier: Modifier,
+    shape: Shape = RoundedCornerShape(SnRadius.radiusSm),
+) {
+    Box(modifier.background(SnColors.surfaceMuted, shape))
+}
+
+/**
+ * Height of the hero, the header's area included when the art runs under it ([heroInset]),
+ * for a page of [page]'s size. The skeleton's hero has the same, so the page does not move.
+ */
+@Composable
+private fun detailsHeroHeight(
+    page: DpSize,
+    heroInset: Dp,
+): Dp =
+    when (SnLayout.formFactor) {
+        FormFactor.Phone -> {
+            420.dp + heroInset
+        }
+
+        FormFactor.Tv -> {
+            (screenHeightDp() * 0.8f).dp + heroInset
+        }
+
+        // The picture's own shape as the window grows, up to most of its height.
+        FormFactor.Large -> {
+            heroHeight(
+                page.width,
+                page.height,
+                min = 560.dp + heroInset,
+                maxFraction = 0.8f,
+            )
+        }
+    }
 
 /** The parts of the page below the hero. */
 private enum class DetailsTab { Episodes, Sources, Related, Info }
@@ -331,6 +464,7 @@ private enum class DetailsTab { Episodes, Sources, Related, Info }
 @Composable
 private fun DetailsContent(
     details: MetaDetails,
+    arrival: TitleArrival,
     viewModel: DetailsViewModel,
     onOpenTitle: (MetaItem) -> Unit,
     onOpenGenre: (String) -> Unit,
@@ -343,6 +477,7 @@ private fun DetailsContent(
     val related by viewModel.related.collectAsStateWithLifecycle()
     val progress by viewModel.progress.collectAsStateWithLifecycle()
     val watched by viewModel.watched.collectAsStateWithLifecycle()
+    val lastSource by viewModel.lastSource.collectAsStateWithLifecycle()
     val rating by viewModel.rating.collectAsStateWithLifecycle()
     val wifiOnly by viewModel.wifiOnly.collectAsStateWithLifecycle()
     val playsInOtherApp by viewModel.playsInOtherApp.collectAsStateWithLifecycle()
@@ -450,6 +585,17 @@ private fun DetailsContent(
             }
         }
     }
+    // "Resume" goes straight to the player with the source chosen before, looked up again
+    // (ResumePlayback.kt); without one that could be found, the sources show as before.
+    val resume = {
+        val request = if (next.started) resumeRequest(details, next.episode, lastSource) else null
+        if (request != null) {
+            PlaybackSession.resume(request)
+            onPlay()
+        } else {
+            showSources(next.episode)
+        }
+    }
     LaunchedEffect(reveal) {
         if (reveal) {
             viewModel.revealed()
@@ -539,29 +685,14 @@ private fun DetailsContent(
                 contentPadding = PaddingValues(top = headerInset - heroInset, bottom = SnSpacing.space16),
             ) {
                 item(key = "hero") {
-                    val height =
-                        when (SnLayout.formFactor) {
-                            FormFactor.Phone -> {
-                                420.dp + heroInset
-                            }
-
-                            FormFactor.Tv -> {
-                                (screenHeightDp() * 0.8f).dp + heroInset
-                            }
-
-                            // The picture's own shape as the window grows, up to most of its height.
-                            FormFactor.Large -> {
-                                heroHeight(
-                                    page.width,
-                                    page.height,
-                                    min = 560.dp + heroInset,
-                                    maxFraction = 0.8f,
-                                )
-                            }
-                        }
+                    val height = detailsHeroHeight(page, heroInset)
                     // Grows by the header's height, so its content stays where it was.
                     Box(Modifier.fillMaxWidth().heightIn(min = height)) {
-                        SnHeroBackdrop(url = art, textWidth = DetailsTextWidth, modifier = Modifier.matchParentSize())
+                        SnHeroBackdrop(
+                            url = art,
+                            textWidth = DetailsTextWidth,
+                            modifier = Modifier.matchParentSize().titleHeroArt(arrival),
+                        )
                         Column(
                             Modifier
                                 .align(Alignment.BottomStart)
@@ -576,7 +707,7 @@ private fun DetailsContent(
                                 isSeries = isSeries,
                                 next = next,
                                 hasTrailer = trailer != null,
-                                onPrimary = { showSources(next.episode) },
+                                onPrimary = resume,
                                 onStartOver = {
                                     showSources(
                                         details.episodes.firstOrNull { (it.season ?: 0u) > 0u }
@@ -622,7 +753,12 @@ private fun DetailsContent(
                         SnMinimalScroll {
                             when (tab) {
                                 DetailsTab.Related -> {
-                                    SnPosterRow(related, onOpenTitle, subtitle = { it.cardSubtitle() })
+                                    SnPosterRow(
+                                        related,
+                                        onOpenTitle,
+                                        subtitle = { it.cardSubtitle() },
+                                        slot = "related",
+                                    )
                                 }
 
                                 DetailsTab.Info -> {

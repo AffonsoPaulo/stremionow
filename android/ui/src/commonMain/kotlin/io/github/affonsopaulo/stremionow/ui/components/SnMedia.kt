@@ -87,6 +87,9 @@ val EpisodeCardWidth = 280.dp
  * 2:3 poster card with the title and a short line underneath, and a progress bar along the
  * bottom of the picture when [progress] is given. Under the pointer it grows, lifts and zooms
  * its picture a little; with reduced motion it stays still.
+ *
+ * A card that opens a title gives its [origin]: its picture then flies into the title's page
+ * and back, and on TV the focus returns to it (see [titleCard]).
  */
 @Composable
 fun SnPosterCard(
@@ -97,11 +100,13 @@ fun SnPosterCard(
     modifier: Modifier = Modifier,
     width: Dp? = PosterCardWidth,
     progress: Float? = null,
+    origin: TitleOrigin? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
     val motion = snCardMotion(state, growOnFocus = true, liftOnHover = true, reducedMotion = rememberReducedMotion())
     val zoom by animateFloatAsState(if (motion.lift) POSTER_ZOOM else 1f, tween(FEEDBACK_MS), label = "poster-zoom")
+    val card = titleCard(origin)
     Column(
         modifier = (if (width != null) modifier.width(width) else modifier),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
@@ -111,19 +116,23 @@ fun SnPosterCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .semantics { contentDescription = title }
+                .then(card.focus)
                 .snClickable(
                     CardShape,
                     grow = true,
                     highlight = false,
                     interactionSource = interaction,
-                    onClick = onClick,
+                    onClick = {
+                        card.onOpen()
+                        onClick()
+                    },
                 ).clip(CardShape),
         ) {
             SnArtwork(
                 url = poster,
                 fallbackTitle = title,
                 modifier =
-                    Modifier.fillMaxSize().graphicsLayer {
+                    Modifier.fillMaxSize().then(card.art).graphicsLayer {
                         scaleX = zoom
                         scaleY = zoom
                     },

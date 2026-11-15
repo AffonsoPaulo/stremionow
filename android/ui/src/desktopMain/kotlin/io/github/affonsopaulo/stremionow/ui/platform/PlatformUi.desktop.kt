@@ -98,3 +98,6 @@ internal actual fun rememberLocalNetworkAccess(onResult: (granted: Boolean) -> U
     val currentOnResult by rememberUpdatedState(onResult)
     return { _ -> currentOnResult(true) }
 }
+
+/** The player is a pair of windows of its own (docs/adr/0005-desktop-ui.md). */
+internal actual val playerHasOwnWindow: Boolean = true

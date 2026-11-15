@@ -120,6 +120,27 @@ internal fun nextUp(
     return NextUp(regular.firstOrNull(), null, started = false)
 }
 
+/**
+ * Where "Continue watching" moves on to when the episode it is on, [current], gets marked
+ * watched, as stremio-core does: the first released episode after it that is not in
+ * [watched] (which counts the ones just marked), specials staying apart from the seasons;
+ * null when none is left, and the title leaves the row.
+ */
+internal fun resumeAfterMarking(
+    details: MetaDetails,
+    current: String,
+    watched: Set<String>,
+    now: Instant,
+): Episode? {
+    val episode = details.episodes.firstOrNull { it.id == current } ?: return null
+    val special = (episode.season ?: 0u) == 0u
+    return details.episodes
+        .filter { ((it.season ?: 0u) == 0u) == special }
+        .dropWhile { it.id != current }
+        .drop(1)
+        .firstOrNull { it.id !in watched && it.isReleased(now) }
+}
+
 /** How far into its video a saved position is, from 0 to 1; null without a duration. */
 internal fun WatchProgress.fraction(): Float? =
     durationMs.takeIf { it > 0u }?.let { (positionMs.toDouble() / it.toDouble()).toFloat().coerceIn(0f, 1f) }

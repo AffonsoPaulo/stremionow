@@ -58,3 +58,11 @@ internal expect fun SnPointerTooltip(
     text: String,
     content: @Composable () -> Unit,
 )
+
+/**
+ * Whether the player shows in windows of its own (the desktop, docs/adr/0005-desktop-ui.md)
+ * rather than as a page of the app's window (Android). Going in and out of it then swaps
+ * windows, so the pages must not animate: the leaving title page would linger in a window that
+ * is stepping aside, and the player's controls over the app's window as it comes back.
+ */
+internal expect val playerHasOwnWindow: Boolean

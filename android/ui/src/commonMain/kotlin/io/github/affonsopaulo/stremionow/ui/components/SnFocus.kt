@@ -223,12 +223,23 @@ private fun Modifier.focusRing(shape: Shape): Modifier =
 /**
  * On TV, gives this element focus when it first appears, so a remote can act right away.
  * Use it on the main action of a screen. Touch screens are unaffected.
+ *
+ * On a page still arriving, it waits for the page's transition to end, so the focus does not
+ * land while the page moves; and coming back to a page, the card the user had opened from it
+ * takes the focus instead (see [PageMotion]).
  */
 @Composable
 fun Modifier.initialFocus(): Modifier {
     if (!LocalIsTv.current) return this
     val requester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
+    val page = LocalPageMotion.current
+    LaunchedEffect(page) {
+        if (page != null && !page.settled) {
+            page.awaitSettled()
+            if (page.focusReturned) return@LaunchedEffect
+        }
+        runCatching { requester.requestFocus() }
+    }
     return focusRequester(requester)
 }
 

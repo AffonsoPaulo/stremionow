@@ -25,6 +25,9 @@ const CONTINUE_WATCHING_LIMIT: usize = 20;
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StreamSource {
     pub addon_name: String,
+    /// The manifest id of the addon that offered it, which survives reinstalling and
+    /// reconfiguring the addon, to ask the same addon again (see `source_memory.rs`).
+    pub addon_id: String,
     /// Short label from the addon, often its name and the quality (`Torrentio\n4k`).
     pub name: String,
     /// Longer description: release name, size, seeders, languages.
@@ -291,6 +294,20 @@ impl StremioCore {
         video_ids: Vec<String>,
         watched: bool,
     ) -> Result<(), CoreError> {
+        self.set_watched_with_next(id, video_ids, watched, None)
+    }
+
+    /// As [`StremioCore::set_watched`], and when the video in "Continue watching" is among
+    /// those marked watched, the title moves on to `next` there, at its start, instead of
+    /// leaving, as stremio-core's `reconcile_series_resume_after_watched_change` does: `next` is
+    /// the first released episode after it that is not watched, or none when nothing is left.
+    pub fn set_watched_with_next(
+        &self,
+        id: String,
+        video_ids: Vec<String>,
+        watched: bool,
+        next: Option<NextVideo>,
+    ) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
         let video_ids: Vec<String> = video_ids.into_iter().take(MAX_MARKED_VIDEOS).collect();
@@ -307,12 +324,22 @@ impl StremioCore {
                 store.unmark_watched(&id, video_id)?;
             }
         }
-        if watched
-            && store
-                .progress(&id)?
-                .is_some_and(|saved| video_ids.contains(&saved.video_id))
+        if let Some(saved) = store
+            .progress(&id)?
+            .filter(|saved| watched && video_ids.contains(&saved.video_id))
         {
-            store.remove_progress(&id)?;
+            // A next video that was just marked too is not one to continue with.
+            match next.filter(|next| !video_ids.contains(&next.video_id)) {
+                Some(next) => store.save_progress(&ProgressEntry {
+                    video_id: next.video_id,
+                    season: next.season,
+                    episode: next.episode,
+                    position_ms: 1,
+                    updated_at: now,
+                    ..saved
+                })?,
+                None => store.remove_progress(&id)?,
+            }
         }
         if unmarked_movie || (unmarked_any && store.watched_videos(&id)?.is_empty()) {
             store.reset_times_watched(&id, now)?;
@@ -370,6 +397,7 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
         .unwrap_or_default();
     let mut source = StreamSource {
         addon_name: addon.manifest.name.clone(),
+        addon_id: addon.manifest.id.clone(),
         name: stream.name.unwrap_or_else(|| addon.manifest.name.clone()),
         description,
         url,
@@ -435,7 +463,7 @@ fn labels<T: Copy>(values: &[T], label: impl Fn(T) -> &'static str) -> Vec<Strin
 }
 
 /// Longest addon id kept in an identity; manifest ids are short (`com.stremio.torrentio`).
-const MAX_ADDON_ID_LEN: usize = 200;
+pub(crate) const MAX_ADDON_ID_LEN: usize = 200;
 
 /// What recognizes a source the app plays in a later search: the addon's id with the info
 /// hash and file of a torrent, or with a SHA-256 digest of a web address. The address itself
@@ -528,6 +556,51 @@ fn source_text(source: &StreamSource) -> SourceText<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marking_the_episode_in_progress_moves_continue_watching_on() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("opens");
+        let next = |video: &str, episode| NextVideo {
+            video_id: video.into(),
+            season: Some(1),
+            episode: Some(episode),
+        };
+        core.save_progress(progress("tt1:1:1", 300_000))
+            .expect("saves");
+        core.set_watched_with_next(
+            "tt1".into(),
+            vec!["tt1:1:1".into()],
+            true,
+            Some(next("tt1:1:2", 2)),
+        )
+        .expect("marks");
+        let saved = core.progress("tt1".into()).expect("reads").expect("kept");
+        assert_eq!(saved.video_id, "tt1:1:2");
+        assert_eq!(saved.position_ms, 1);
+        assert_eq!(saved.duration_ms, 1_000_000);
+
+        // Marking another episode leaves it where it is.
+        core.set_watched_with_next("tt1".into(), vec!["tt1:1:5".into()], true, None)
+            .expect("marks");
+        assert_eq!(
+            core.progress("tt1".into())
+                .expect("reads")
+                .expect("kept")
+                .video_id,
+            "tt1:1:2"
+        );
+
+        // A next video marked in the same go, or none left, takes the title out.
+        core.set_watched_with_next(
+            "tt1".into(),
+            vec!["tt1:1:2".into(), "tt1:1:3".into()],
+            true,
+            Some(next("tt1:1:3", 3)),
+        )
+        .expect("marks");
+        assert!(core.progress("tt1".into()).expect("reads").is_none());
+    }
 
     #[test]
     fn a_finished_episode_moves_continue_watching_to_the_next() {
@@ -759,6 +832,7 @@ mod tests {
     fn source(name: &str, url: Option<&str>, external: Option<&str>) -> StreamSource {
         StreamSource {
             addon_name: "A".into(),
+            addon_id: "a".into(),
             name: name.into(),
             description: String::new(),
             url: url.map(Into::into),

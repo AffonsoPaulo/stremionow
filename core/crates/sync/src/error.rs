@@ -19,6 +19,14 @@ pub enum SyncError {
     /// The server answered with HTTP `status` and no API error envelope.
     #[error("the Stremio API answered with HTTP {0}")]
     Status(u16),
+    /// A sign-in was refused for a reason other than the email or password, such as a second
+    /// step this app cannot complete. Only the server's error code is kept: its message may
+    /// repeat the email.
+    #[error("the Stremio account refused the sign-in (error {code})")]
+    SignInRefused { code: u64 },
+    /// A link code is no longer valid (expired or unknown); a new one is needed.
+    #[error("the link code expired")]
+    LinkCodeExpired,
     /// The server reported an error not covered by the variants above.
     #[error("the Stremio API reported error {code}: {message}")]
     Server { code: u64, message: String },

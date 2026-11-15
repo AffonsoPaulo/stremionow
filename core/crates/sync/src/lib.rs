@@ -27,7 +27,7 @@ mod time;
 mod types;
 mod watched;
 
-pub use api::{DEFAULT_BASE_URL, DEFAULT_LINK_URL, DEFAULT_WEB_URL, StremioApi};
+pub use api::{AccountLibrary, DEFAULT_BASE_URL, DEFAULT_LINK_URL, DEFAULT_WEB_URL, StremioApi};
 pub use error::SyncError;
 pub use library::{BehaviorHints, LibraryItemState, PosterShape, RemoteLibraryItem};
 pub use likes::{DEFAULT_LIKES_URL, LikesApi, Rating};

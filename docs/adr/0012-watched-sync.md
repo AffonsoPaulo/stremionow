@@ -41,3 +41,7 @@ The user approved writing marks in this format so the official apps read ours an
 - The first sync of an account with many watched series reads each one's metadata once (served from the cache afterwards); a heavy library may take a few syncs to bring every title.
 - Matching the format depends on our metadata matching theirs: the same addon (Cinemeta by default) and the same video ids. Video lists that differ (another metadata addon, an addon that numbers episodes with `number` or sends them as text) can shift marks within a title; the anchor keeps the latest mark right.
 - Series do not raise `timesWatched` when an episode is marked or played here, unlike the official player; only the bitfield and the movie flag are written.
+
+## Amendments
+
+- 2026-11-15: Signing out no longer forgets what the account had (nor the removals and ratings not sent yet): the app also signs out when a session expires, and signing in again to the same account must still send them. They are forgotten when a different account signs in (the account id is kept for that). A string that cannot be read is no longer recorded as synced, and before one is replaced because marks changed here, the title's metadata is read again without the cache. The `watched` table is now keyed by title and video (migration 5), so a video id shared by two titles counts for both.

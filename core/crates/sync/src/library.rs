@@ -103,6 +103,40 @@ impl RemoteLibraryItem {
     pub fn touch(&mut self, now_ms: i64) {
         self.mtime = format_timestamp(now_ms);
     }
+
+    /// Keeps the fields of `raw`, the account's copy of this item as JSON, that this item does
+    /// not set, at the top level, in `state` and in `behaviorHints`. For an upload that replaces
+    /// an account item this crate could not read: what it had is not lost.
+    pub fn keep_fields_of(&mut self, raw: &Value) {
+        let Some(raw) = raw.as_object() else { return };
+        let Ok(Value::Object(current)) = serde_json::to_value(&*self) else {
+            return;
+        };
+        for (key, value) in raw {
+            match key.as_str() {
+                "state" => keep_missing(&mut self.state.extra, value, current.get(key)),
+                "behaviorHints" => {
+                    keep_missing(&mut self.behavior_hints.extra, value, current.get(key));
+                }
+                _ if !current.contains_key(key) => {
+                    self.extra.insert(key.clone(), value.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Copies into `extra` the fields of `raw` that `current` lacks.
+fn keep_missing(extra: &mut Map<String, Value>, raw: &Value, current: Option<&Value>) {
+    let (Some(raw), Some(Value::Object(current))) = (raw.as_object(), current) else {
+        return;
+    };
+    for (key, value) in raw {
+        if !current.contains_key(key) {
+            extra.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 /// How a poster is drawn (stremio-core `PosterShape`). Unknown values read as `Poster`.
@@ -309,6 +343,27 @@ mod tests {
         assert_eq!(item.progress(), Some(("tt1", 5_000, 60_000)));
         item.state.video_id = Some("tt1:2".to_owned());
         assert_eq!(item.progress(), Some(("tt1:2", 5_000, 60_000)));
+    }
+
+    #[test]
+    fn keeps_the_fields_of_an_unreadable_account_copy() {
+        let raw = json!({
+            "_id": "tt1", "name": "Old name", "removed": false,
+            "state": {"timeOffset": 5, "season": 2, "customState": [1]},
+            "behaviorHints": {"privacy": "public"},
+            "year": "2011"
+        });
+        let mut item = RemoteLibraryItem::new("tt1", "movie", "New name", None, 0);
+        item.keep_fields_of(&raw);
+        let value = serde_json::to_value(&item).expect("serializable");
+        assert_eq!(value["name"], "New name", "the item's own fields win");
+        assert_eq!(value["type"], "movie");
+        assert_eq!(value["state"]["timeOffset"], 0);
+        assert_eq!(value["state"]["season"], 2);
+        assert_eq!(value["state"]["customState"], json!([1]));
+        assert_eq!(value["behaviorHints"]["privacy"], "public");
+        assert_eq!(value["year"], "2011");
+        item.keep_fields_of(&json!("not an object"));
     }
 
     #[test]

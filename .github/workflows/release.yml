@@ -73,6 +73,7 @@ jobs:
             "$build_tools/apksigner" sign \
               --ks "$keystore" --ks-pass env:KEYSTORE_PASSWORD \
               --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASSWORD \
+              --v4-signing-enabled false \
               --out "$2" "$1"
             "$build_tools/apksigner" verify "$2"
           }

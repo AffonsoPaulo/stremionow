@@ -15,11 +15,11 @@ use stremionow_addons::{
 use stremionow_library::{LibraryEntry, ProgressEntry, Store, WatchStats, WatchedTitle};
 use stremionow_markers::AniSkip;
 use stremionow_protocol::{
-    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaDetail, MetaResponse,
+    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaDetail,
 };
 
 use crate::account::Account;
-use crate::home::RecentHome;
+use crate::home::{Fetch, RecentHome};
 use crate::playback::WatchProgress;
 use crate::records::{
     AddonInfo, AddonPreview, CatalogAddon, CatalogInfo, CatalogRow, CoreError, LibraryItem,
@@ -578,17 +578,12 @@ impl StremioCore {
             .collect())
     }
 
-    /// A title's details as the first addon that provides metadata for it sends them, through
-    /// the cache.
+    /// A title's details from the first addon, in addon order, that has them, through the
+    /// cache (see [`StremioCore::first_meta`]).
     pub(crate) async fn meta_detail(&self, kind: &str, id: &str) -> Result<MetaDetail, CoreError> {
-        let addon = self
-            .enabled()?
-            .into_iter()
-            .find(|addon| addon.manifest.supports("meta", kind, id))
-            .ok_or(CoreError::NotFound)?;
-        let url = addon.url.resource("meta", kind, id, &Extra::new());
-        let response: MetaResponse = self.cached_json(&url, META_FRESHNESS).await?;
-        Ok(response.meta)
+        self.first_meta(&self.enabled()?, kind, id, Fetch::Network)
+            .await?
+            .ok_or(CoreError::NotFound)
     }
 
     pub(crate) fn find_addon(&self, manifest_url: &str) -> Result<InstalledAddon, CoreError> {

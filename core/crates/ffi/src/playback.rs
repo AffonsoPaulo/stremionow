@@ -109,12 +109,17 @@ pub struct WatchProgress {
     pub updated_at: i64,
 }
 
-/// What [`StremioCore::source_ready`] found: whether the source is ready, and the size of the
-/// file its address leads to, when the server tells (for the debug log).
+/// What [`StremioCore::source_ready`] found: whether the source is ready, whether it failed for
+/// good, and the size of the file its address leads to, when the server tells (for the debug
+/// log).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SourceCheck {
     pub ready: bool,
     pub size_bytes: Option<u64>,
+    /// Waiting will not help: the address answers that there is no such file (an HTTP client
+    /// error other than a timeout or too many requests), or it leads into the home network
+    /// from an addon that is not there. Stop asking and show the source as failed.
+    pub failed: bool,
 }
 
 /// The episode after the one playing, for "Continue watching" to move on to it.
@@ -159,20 +164,20 @@ impl StremioCore {
 
     /// Whether a source that was not in its debrid service's cache is ready to play: its
     /// address now leads to the file rather than to the addon's short "being downloaded" clip,
-    /// told by size. Asking also has the service start the download, as playing would. A source
-    /// without an address, or whose size the server does not tell, counts as ready.
+    /// told by size (see [`READY_MIN_BYTES`]). Asking also has the service start the download,
+    /// as playing would. A source without an address, or whose size the server does not tell,
+    /// counts as ready. Errors are worth asking again; a definite failure is in
+    /// [`SourceCheck::failed`].
     pub async fn source_ready(&self, source: StreamSource) -> Result<SourceCheck, CoreError> {
         let Some(url) = source.url else {
             return Ok(SourceCheck {
                 ready: true,
                 size_bytes: None,
+                failed: false,
             });
         };
-        let size = self.client.file_size(&url).await?;
-        Ok(SourceCheck {
-            ready: size.is_none_or(|size| size >= READY_MIN_BYTES),
-            size_bytes: size,
-        })
+        let private_allowed = self.private_addon(&source.addon_key);
+        check_source(&self.client, &url, source.size_bytes, private_allowed).await
     }
 
     /// Orders sources best first for the user's preferences.
@@ -518,10 +523,56 @@ pub(crate) fn addon_key(manifest_url: &str) -> String {
 /// Bytes of the digest in [`addon_key`]: 128 bits, far more than addons anyone installs.
 const ADDON_KEY_BYTES: usize = 16;
 
-/// Smallest file a source that was not in its debrid service's cache leads to once ready.
-/// Until then, debrid addons send a short clip saying the file is being downloaded, a few
-/// MB; an episode or a film is hundreds of MB.
+/// Size from which a source that was not in its debrid service's cache counts as ready. Until
+/// then, debrid addons send a short clip saying the file is being downloaded, a few MB; an
+/// episode or a film is hundreds of MB. A smaller file counts as ready too when it is at least
+/// half the size the addon announced, which a clip never is.
 const READY_MIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What [`StremioCore::source_ready`] answers for `url`; `expected` is the size the addon
+/// announced, if any.
+async fn check_source(
+    client: &stremionow_addons::AddonClient,
+    url: &str,
+    expected: Option<u64>,
+    private_allowed: bool,
+) -> Result<SourceCheck, CoreError> {
+    let failed = SourceCheck {
+        ready: false,
+        size_bytes: None,
+        failed: true,
+    };
+    // The request below is made by the addon client, which does not vet addresses as the
+    // relay does: an addon on the internet must not make the device probe its own network.
+    if !private_allowed {
+        let private = stremionow_torrent::reaches_private_network(url)
+            .await
+            .map_err(|error| CoreError::Playback {
+                reason: format!("cannot resolve the source: {error}"),
+            })?;
+        if private {
+            return Ok(failed);
+        }
+    }
+    let size = match client.file_size(url).await {
+        Ok(size) => size,
+        // 408 and 429 ask to try again later; other client errors will not change.
+        Err(stremionow_addons::AddonError::Status(status))
+            if (400..500).contains(&status) && status != 408 && status != 429 =>
+        {
+            return Ok(failed);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let ready = size.is_none_or(|size| {
+        size >= READY_MIN_BYTES || expected.is_some_and(|expected| size >= expected.div_ceil(2))
+    });
+    Ok(SourceCheck {
+        ready,
+        size_bytes: size,
+        failed: false,
+    })
+}
 
 fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
     let addon: String = addon_id
@@ -1008,18 +1059,74 @@ mod tests {
             )
             .mount(&server)
             .await;
+        Mock::given(method("GET"))
+            .and(path("/short"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/30000000"),
+            )
+            .mount(&server)
+            .await;
+        for (route, status) in [("/gone", 404), ("/busy", 429), ("/broken", 503)] {
+            Mock::given(method("GET"))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+        }
+        let client =
+            stremionow_addons::AddonClient::new(std::time::Duration::from_secs(5)).expect("client");
+        // The mock server is on loopback, as an addon on the home network would be.
+        let check = |route: &str, expected: Option<u64>| {
+            let url = format!("{}{route}", server.uri());
+            let client = client.clone();
+            async move { check_source(&client, &url, expected, true).await }
+        };
+        let clip = check("/clip", None).await.expect("asks");
+        assert!(!clip.ready && !clip.failed);
+        assert_eq!(clip.size_bytes, Some(4_200_000));
+        // A clip stays one even when the addon announced a film.
+        assert!(!check("/clip", Some(734_003_200)).await.expect("asks").ready);
+        assert!(check("/episode", None).await.expect("asks").ready);
+        // A real file under the size of a typical episode is ready once it is about as large
+        // as announced; without an announced size it cannot be told from a clip.
+        assert!(check("/short", Some(31_000_000)).await.expect("asks").ready);
+        assert!(
+            !check("/short", Some(200_000_000))
+                .await
+                .expect("asks")
+                .ready
+        );
+        assert!(!check("/short", None).await.expect("asks").ready);
+        // A missing file fails for good; being busy or broken may pass.
+        let gone = check("/gone", None).await.expect("asks");
+        assert!(gone.failed && !gone.ready);
+        assert!(check("/busy", None).await.is_err());
+        assert!(check("/broken", None).await.is_err());
+
         let dir = tempfile::tempdir().expect("temp dir");
         let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
-        let at = |route: &str| StreamSource {
-            url: Some(format!("{}{route}", server.uri())),
+        let no_address = core.source_ready(source("A", None, None)).await;
+        let no_address = no_address.expect("no address");
+        assert!(no_address.ready && !no_address.failed);
+        // The source's addon is not installed on the home network, so the address there is
+        // refused without asking it.
+        let into_network = StreamSource {
+            url: Some(format!("{}/episode", server.uri())),
             ..source("A", None, None)
         };
-        let clip = core.source_ready(at("/clip")).await.expect("asks");
-        assert!(!clip.ready);
-        assert_eq!(clip.size_bytes, Some(4_200_000));
-        assert!(core.source_ready(at("/episode")).await.expect("asks").ready);
-        let no_address = core.source_ready(source("A", None, None)).await;
-        assert!(no_address.expect("no address").ready);
+        let refused = core.source_ready(into_network).await.expect("asks");
+        assert!(refused.failed && !refused.ready);
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("recorded")
+                .iter()
+                .filter(|request| request.url.path() == "/episode")
+                .count(),
+            1,
+            "only the check with permission reached the server"
+        );
     }
 
     #[test]

@@ -199,8 +199,12 @@ pub struct Traits {
     /// Debrid cache state: `Some(true)` when cached, `Some(false)` when it must be downloaded
     /// first, `None` when the text does not say (for example, plain P2P or HTTP sources).
     pub cached: Option<bool>,
-    /// ISO 639-1 audio language codes, deduplicated, in order of discovery.
+    /// ISO 639-1 audio language codes, deduplicated, in order of discovery. Flags count as
+    /// audio; languages only said to be subtitles (`Sub.Ita`, `VOSTFR`) are not here.
     pub languages: Vec<String>,
+    /// ISO 639-1 codes of the subtitle languages the text names (`Sub.Ita`, `VOSTFR`,
+    /// `Legendado`), deduplicated, in order of discovery. They do not count for ranking.
+    pub subtitle_languages: Vec<String>,
     /// Whether the source advertises several audio tracks ("Multi", "Dual Audio").
     pub multi_audio: bool,
     /// Indexer or tracker the source came from, such as `"ThePirateBay"`.

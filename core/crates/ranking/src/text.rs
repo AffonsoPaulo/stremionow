@@ -17,6 +17,9 @@ pub(crate) struct Token<'a> {
     pub raw: &'a str,
     /// The token lowercased.
     pub lower: String,
+    /// It comes after the year or episode tag of a release name, among the release's tags,
+    /// rather than in the title or on a line that is not a release name.
+    pub after_title: bool,
 }
 
 /// Splits `text` into [`Token`]s. Emoji, punctuation and whitespace are separators.
@@ -26,6 +29,7 @@ pub(crate) fn tokenize(text: &str) -> Vec<Token<'_>> {
         .map(|raw| Token {
             raw,
             lower: raw.to_lowercase(),
+            after_title: false,
         })
         .collect()
 }
@@ -112,7 +116,8 @@ fn unit_multiplier(unit: &str) -> Option<f64> {
     })
 }
 
-/// The first size such as `14.2 GB`, `700MB`, `1,5 GB` or `3.1 GiB` in `text`, in bytes.
+/// The first size such as `14.2 GB`, `700MB`, `1,5 GB`, `1.234,5 GB` or `3.1 GiB` in `text`,
+/// in bytes.
 pub(crate) fn first_size(text: &str) -> Option<u64> {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -120,10 +125,13 @@ pub(crate) fn first_size(text: &str) -> Option<u64> {
         let starts_number =
             bytes[i].is_ascii_digit() && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric());
         if starts_number {
-            if let Some(size) = size_at(text, i) {
+            let end = number_end(bytes, i);
+            if let Some(size) = size_at(text, i, end) {
                 return Some(size);
             }
-            i += count_while(&bytes[i..], |b| b.is_ascii_digit());
+            // The whole number is skipped, so that a later group of it ("500" of "1,500.5")
+            // is never read as a number of its own.
+            i = end;
         } else {
             i += 1;
         }
@@ -131,29 +139,67 @@ pub(crate) fn first_size(text: &str) -> Option<u64> {
     None
 }
 
-/// Parses `<number>[.,<digits>] *<unit>` starting at byte `start` (an ASCII digit) into bytes.
-fn size_at(text: &str, start: usize) -> Option<u64> {
-    let bytes = text.as_bytes();
-    let int_end = start + count_while(&bytes[start..], |b| b.is_ascii_digit());
-    let mut integer = text[start..int_end].to_owned();
-    let mut fraction = "";
-    let mut end = int_end;
-    if let Some(&sep) = bytes.get(int_end).filter(|b| matches!(b, b'.' | b',')) {
-        let frac_end = int_end + 1 + count_while(&bytes[int_end + 1..], |b| b.is_ascii_digit());
-        let digits = &text[int_end + 1..frac_end];
-        if !digits.is_empty() {
-            // "1,500 MB" is a thousands separator, "1,5 GB" a decimal comma.
-            if sep == b',' && digits.len() == 3 {
-                integer.push_str(digits);
-            } else {
-                fraction = digits;
-            }
-            end = frac_end;
+/// Where the number starting at byte `start` ends: digits, with single `.` or `,` between
+/// groups of digits.
+fn number_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    loop {
+        end += count_while(&bytes[end..], |b| b.is_ascii_digit());
+        let separated = matches!(bytes.get(end), Some(b'.' | b','))
+            && bytes.get(end + 1).is_some_and(u8::is_ascii_digit);
+        if !separated {
+            return end;
         }
+        end += 1;
     }
-    let unit_start = end + count_while(&bytes[end..], |b| b == b' ');
-    let unit_end = unit_start + count_while(&bytes[unit_start..], |b| b.is_ascii_alphabetic());
-    let multiplier = unit_multiplier(&text[unit_start..unit_end].to_ascii_lowercase())?;
+}
+
+/// The integer and fraction digits of a number written with grouping or decimal separators.
+/// `1.5` and `1,5` are decimals, `1,500` and `1.234.567` are grouped, and where both kinds
+/// appear the last is the decimal point (`1.234,5`, `1,500.5`). None for anything else, such
+/// as a version number (`5.1.2`).
+fn number_parts(number: &str) -> Option<(String, &str)> {
+    let separators: Vec<(usize, u8)> = number
+        .bytes()
+        .enumerate()
+        .filter(|(_, b)| !b.is_ascii_digit())
+        .collect();
+    let Some(&(last_at, last)) = separators.last() else {
+        return Some((number.to_owned(), ""));
+    };
+    let digits_after =
+        |at: usize| count_while(&number.as_bytes()[at + 1..], |b| b.is_ascii_digit());
+    let one_kind = separators.iter().all(|&(_, sep)| sep == last);
+    // "1,500 MB" is a thousands separator, "1,5 GB" a decimal comma, "1.500 GB" a decimal point.
+    let decimal =
+        !one_kind || (separators.len() == 1 && !(last == b',' && digits_after(last_at) == 3));
+    let grouping = if decimal {
+        &separators[..separators.len() - 1]
+    } else {
+        &separators[..]
+    };
+    let well_grouped = grouping
+        .iter()
+        .all(|&(at, sep)| digits_after(at) == 3 && (!decimal || sep != last));
+    if !well_grouped {
+        return None;
+    }
+    let (integer, fraction) = if decimal {
+        (&number[..last_at], &number[last_at + 1..])
+    } else {
+        (number, "")
+    };
+    let integer = integer.chars().filter(char::is_ascii_digit).collect();
+    Some((integer, fraction))
+}
+
+/// Parses `<number> *<unit>`, the number between bytes `start` and `end`, into bytes. Plain,
+/// no-break and thin spaces may stand between the number and its unit.
+fn size_at(text: &str, start: usize, end: usize) -> Option<u64> {
+    let (integer, fraction) = number_parts(&text[start..end])?;
+    let rest = text[end..].trim_start_matches([' ', '\u{a0}', '\u{202f}', '\u{2009}']);
+    let unit_len = count_while(rest.as_bytes(), |b| b.is_ascii_alphabetic());
+    let multiplier = unit_multiplier(&rest[..unit_len].to_ascii_lowercase())?;
     let value: f64 = format!("{integer}.{fraction}0").parse().ok()?;
     let size = value * multiplier;
     // Float to integer casts saturate, so this cannot overflow.
@@ -241,6 +287,28 @@ mod tests {
             first_size("99999999999999999999999999999 TB"),
             Some(u64::MAX)
         );
+    }
+
+    #[test]
+    fn sizes_with_grouping_and_other_spaces() {
+        let mib = 1024.0_f64.powi(2);
+        let gib = 1024.0 * mib;
+        assert_eq!(first_size("1.234,5 GB"), Some((1234.5 * gib) as u64));
+        assert_eq!(first_size("1,500.5 MB"), Some((1500.5 * mib) as u64));
+        assert_eq!(first_size("💾 1,234,567 KB"), Some(1_234_567 * 1024));
+        assert_eq!(first_size("1.234.567 KB"), Some(1_234_567 * 1024));
+        assert_eq!(first_size("14.2\u{a0}GB"), Some((14.2 * gib) as u64));
+        assert_eq!(
+            first_size("14,2\u{202f}Go GB"),
+            None,
+            "the unit must follow"
+        );
+        assert_eq!(first_size("700\u{202f}MB"), Some(700 * 1024 * 1024));
+        assert_eq!(first_size("1.500 GB"), Some((1.5 * gib) as u64));
+        // Not numbers: no group of it is read alone.
+        assert_eq!(first_size("5.1.2 GB"), None);
+        assert_eq!(first_size("1,50,0 MB"), None);
+        assert_eq!(first_size("1.234.5 GB"), None);
     }
 
     #[test]

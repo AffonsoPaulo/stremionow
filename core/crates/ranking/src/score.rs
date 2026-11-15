@@ -116,13 +116,23 @@ fn cache_score(t: &Traits, p: &Preferences) -> i64 {
     }
 }
 
-/// Primary language subtag, lowercased: `"pt-BR"` becomes `"pt"`.
+/// Primary language subtag, lowercased: `"pt-BR"` becomes `"pt"`. Codes that name the same
+/// language become the one sources are tagged with: Java's withdrawn `iw`, `in` and `ji`, and
+/// Tagalog's `tl` for Filipino (`fil`).
 fn primary_subtag(code: &str) -> String {
-    code.split(['-', '_'])
+    let primary = code
+        .split(['-', '_'])
         .next()
         .unwrap_or_default()
         .trim()
-        .to_lowercase()
+        .to_lowercase();
+    match primary.as_str() {
+        "iw" => "he".into(),
+        "in" => "id".into(),
+        "ji" => "yi".into(),
+        "tl" => "fil".into(),
+        _ => primary,
+    }
 }
 
 fn language_score(t: &Traits, p: &Preferences) -> i64 {
@@ -344,6 +354,38 @@ mod tests {
                 "Movie.480p.DVDRip 🇮🇹",
             ]
         );
+    }
+
+    #[test]
+    fn old_and_alternative_codes_match_their_language() {
+        for (wanted, have) in [("iw", "he"), ("in", "id"), ("tl", "fil"), ("fil", "fil")] {
+            let prefs = Preferences {
+                preferred_languages: vec![wanted.into()],
+                ..Preferences::default()
+            };
+            let source = traits(|t| t.languages = vec![have.into()]);
+            assert!(
+                score(&source, &prefs) > score(&Traits::default(), &prefs),
+                "{wanted}"
+            );
+        }
+    }
+
+    #[test]
+    fn subtitles_alone_do_not_match_the_language() {
+        let prefs = Preferences {
+            preferred_languages: vec!["it".into()],
+            ..Preferences::default()
+        };
+        let order = ranked(
+            &[
+                "Movie.2023.1080p.Eng.Sub.Ita",
+                "Movie.2023.720p.Ita",
+                "Movie.2023.1080p.VOSTFR",
+            ],
+            &prefs,
+        );
+        assert_eq!(order[0], "Movie.2023.720p.Ita");
     }
 
     #[test]

@@ -76,6 +76,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /** Sources found so far for one video, and how many addons are still answering. */
@@ -133,7 +134,10 @@ class SourcesLoader(
                             if (found.isEmpty()) {
                                 state.value.sources
                             } else {
-                                withContext(Dispatchers.Default) { core.rankStreams(state.value.sources + found) }
+                                withContext(Dispatchers.Default) {
+                                    // The device's language ranks first while no audio language is chosen.
+                                    core.rankStreams(state.value.sources + found, Locale.getDefault().language)
+                                }
                             }
                         mutableState.update {
                             it.copy(

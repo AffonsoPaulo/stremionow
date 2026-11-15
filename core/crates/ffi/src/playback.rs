@@ -12,7 +12,7 @@ use stremionow_ranking::{Preferences, Resolution, SourceText, badges, format_siz
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::{AddonInfo, CoreError};
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, language_code};
 
 /// Progress below this is not worth a "Continue watching" entry.
 const MIN_PROGRESS_MS: u64 = 30_000;
@@ -176,13 +176,16 @@ impl StremioCore {
         })
     }
 
-    /// Orders sources best first for the user's preferences.
-    pub fn rank_streams(&self, sources: Vec<StreamSource>) -> Vec<StreamSource> {
-        let preferences = self
-            .settings()
-            .map(|settings| ranking_preferences(&settings))
-            .unwrap_or_default();
-        rank(sources, &preferences)
+    /// Orders sources best first for the user's preferences. `device_language` is the
+    /// language the device or system is set to (an ISO 639 code such as `pt`, or empty), which
+    /// stands in for the audio language while the user has not chosen one.
+    pub fn rank_streams(
+        &self,
+        sources: Vec<StreamSource>,
+        device_language: String,
+    ) -> Vec<StreamSource> {
+        let settings = self.settings().unwrap_or_default();
+        rank(sources, &ranking_preferences(&settings, &device_language))
     }
 
     /// Subtitles for a video from every subtitle addon. Addons that fail are skipped.
@@ -573,8 +576,12 @@ fn is_info_hash(hash: &str) -> bool {
         || (hash.len() == 32 && hash.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
-/// The ranking preferences that follow from the user's settings.
-fn ranking_preferences(settings: &AppSettings) -> Preferences {
+/// The ranking preferences that follow from the user's settings. Without an audio language
+/// chosen, the device's language is preferred: most people want the audio they read in.
+fn ranking_preferences(settings: &AppSettings, device_language: &str) -> Preferences {
+    let audio = Some(settings.audio_language.clone())
+        .filter(|language| !language.is_empty())
+        .unwrap_or_else(|| language_code(device_language));
     Preferences {
         max_resolution: match settings.max_resolution {
             2160 => Some(Resolution::P2160),
@@ -582,11 +589,13 @@ fn ranking_preferences(settings: &AppSettings) -> Preferences {
             720 => Some(Resolution::P720),
             _ => None,
         },
-        preferred_languages: [&settings.audio_language]
+        preferred_languages: [audio]
             .into_iter()
             .filter(|language| !language.is_empty())
-            .cloned()
             .collect(),
+        // mpv decodes AV1 in software (dav1d) on the desktop, but on Android it would mostly
+        // be software decoding on a phone or TV box without an AV1 decoder, which stutters.
+        supports_av1: !cfg!(target_os = "android"),
         ..Preferences::default()
     }
 }
@@ -1088,11 +1097,14 @@ mod tests {
 
     #[test]
     fn settings_limit_resolution_and_prefer_language() {
-        let preferences = ranking_preferences(&AppSettings {
-            max_resolution: 1080,
-            audio_language: "pt".into(),
-            ..AppSettings::default()
-        });
+        let preferences = ranking_preferences(
+            &AppSettings {
+                max_resolution: 1080,
+                audio_language: "pt".into(),
+                ..AppSettings::default()
+            },
+            "en",
+        );
         let ranked = rank(
             vec![
                 source("4k", Some("https://cdn.example/4k.mkv"), None),
@@ -1101,7 +1113,58 @@ mod tests {
             &preferences,
         );
         assert_eq!(ranked[0].name, "1080p", "sources above the limit sink");
-        assert_eq!(preferences.preferred_languages, ["pt"]);
+        assert_eq!(
+            preferences.preferred_languages,
+            ["pt"],
+            "the chosen language, not the device's"
+        );
+    }
+
+    #[test]
+    fn the_device_language_stands_in_for_an_unchosen_audio_language() {
+        let unset = AppSettings::default();
+        assert_eq!(
+            ranking_preferences(&unset, "it").preferred_languages,
+            ["it"]
+        );
+        assert_eq!(
+            ranking_preferences(&unset, "iw").preferred_languages,
+            ["he"],
+            "Java's old code for Hebrew"
+        );
+        assert!(
+            ranking_preferences(&unset, "")
+                .preferred_languages
+                .is_empty()
+        );
+        assert!(
+            ranking_preferences(&unset, "not a code")
+                .preferred_languages
+                .is_empty()
+        );
+        let ranked = rank(
+            vec![
+                source(
+                    "Movie.2023.2160p 🇬🇧",
+                    Some("https://cdn.example/en.mkv"),
+                    None,
+                ),
+                source(
+                    "Movie.2023.720p 🇮🇹",
+                    Some("https://cdn.example/it.mkv"),
+                    None,
+                ),
+            ],
+            &ranking_preferences(&unset, "it"),
+        );
+        assert_eq!(ranked[0].name, "Movie.2023.720p 🇮🇹");
+    }
+
+    #[test]
+    fn av1_is_penalised_only_where_it_may_not_decode() {
+        let preferences = ranking_preferences(&AppSettings::default(), "");
+        assert_eq!(preferences.supports_av1, !cfg!(target_os = "android"));
+        assert!(preferences.supports_hevc && preferences.supports_hdr);
     }
 
     #[test]

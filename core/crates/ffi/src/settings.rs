@@ -530,12 +530,20 @@ fn hdr_title_key(meta_id: &str) -> Option<String> {
 }
 
 /// Keeps a language code to two or three ASCII letters, lowercased; anything else is empty.
-fn language_code(value: &str) -> String {
+/// Java and older Android versions still give the withdrawn codes for Hebrew (`iw`),
+/// Indonesian (`in`) and Yiddish (`ji`), which addons and the ranking never use, so those
+/// become today's codes.
+pub(crate) fn language_code(value: &str) -> String {
     let value = value.trim();
-    if (2..=3).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphabetic()) {
-        value.to_ascii_lowercase()
-    } else {
-        String::new()
+    if !((2..=3).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphabetic())) {
+        return String::new();
+    }
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
+        "iw" => "he".into(),
+        "in" => "id".into(),
+        "ji" => "yi".into(),
+        _ => value,
     }
 }
 
@@ -612,6 +620,22 @@ fn clamp_cache(megabytes: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_codes_are_cleaned_and_brought_up_to_date() {
+        for (given, kept) in [
+            ("PT", "pt"),
+            (" fil ", "fil"),
+            ("iw", "he"),
+            ("IN", "id"),
+            ("ji", "yi"),
+            ("pt-BR", ""),
+            ("e", ""),
+            ("../etc", ""),
+        ] {
+            assert_eq!(language_code(given), kept, "{given}");
+        }
+    }
 
     #[test]
     fn settings_round_trip_with_defaults_and_limits() {

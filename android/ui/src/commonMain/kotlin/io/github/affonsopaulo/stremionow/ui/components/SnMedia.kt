@@ -160,7 +160,8 @@ fun SnPosterCard(
 
 /**
  * 16:9 card for episodes, with an optional progress bar, and a "Watched" badge when
- * [watchedLabel] is given. Under the pointer it grows, lifts and gets a light border.
+ * [watchedLabel] is given. Under the pointer it grows, lifts and gets a light border. With
+ * [keepMetaLine], the meta line keeps its room when empty, so cards in a row stay one size.
  */
 @Composable
 fun SnEpisodeCard(
@@ -173,6 +174,7 @@ fun SnEpisodeCard(
     progress: Float? = null,
     highlighted: Boolean = false,
     watchedLabel: String? = null,
+    keepMetaLine: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
@@ -235,11 +237,12 @@ fun SnEpisodeCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        if (!meta.isNullOrBlank()) {
+        if (!meta.isNullOrBlank() || keepMetaLine) {
             BasicText(
-                text = meta,
+                text = meta.orEmpty(),
                 style = SnTypography.caption.copy(color = if (highlighted) SnColors.accentText else SnColors.fgMuted),
                 maxLines = 1,
+                minLines = 1,
             )
         }
         if (!overview.isNullOrBlank()) {

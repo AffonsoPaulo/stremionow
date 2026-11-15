@@ -440,13 +440,8 @@ internal fun PlayerOverlay(
                 enter = EnterTransition.None,
                 exit = fadeOut(tween(OPENING_FADE_MS)),
             ) {
-                if (providerDownloading) {
-                    ProviderDownloading(
-                        logo = selection.details.item.logo,
-                        title = selection.details.item.name,
-                        onChangeSource = onChangeSource,
-                    )
-                } else {
+                // While the provider downloads, its screen shows above the controls instead.
+                if (!providerDownloading) {
                     SnLogoLoader(
                         logo = selection.details.item.logo,
                         title = selection.details.item.name,
@@ -505,6 +500,16 @@ internal fun PlayerOverlay(
             )
         }
 
+        // Above the controls, so their shading does not dim its button.
+        if (providerDownloading && !failed) {
+            ProviderDownloading(
+                logo = selection.details.item.logo,
+                title = selection.details.item.name,
+                onChangeSource = onChangeSource,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
         if (playback.error == PlayerError.PlayerUnavailable) {
             PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (failed) {
@@ -546,6 +551,8 @@ internal fun PlayerOverlay(
                 onSeekTo = player::seekTo,
                 onOpenEpisode = onOpenEpisode,
                 upNext = viewModel.upNext,
+                showSkip = state.areControlsVisible,
+                onSkipBegins = state::poke,
                 modifier =
                     Modifier
                         .align(Alignment.BottomEnd)

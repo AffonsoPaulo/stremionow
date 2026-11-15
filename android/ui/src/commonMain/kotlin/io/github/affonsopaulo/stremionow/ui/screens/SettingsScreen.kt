@@ -656,6 +656,16 @@ private fun PrivacyPage() {
             onSelect = CrashReports::setMode,
         )
     }
+    val viewModel = settingsViewModel()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    settings?.let { current ->
+        SettingsToggle(
+            title = stringResource(Res.string.settings_debug_logs),
+            body = stringResource(Res.string.settings_debug_logs_body),
+            checked = current.debugLogs,
+            onToggle = { viewModel.update { it.copy(debugLogs = !it.debugLogs) } },
+        )
+    }
 }
 
 /**
@@ -789,16 +799,6 @@ private fun AboutPage() {
                 style = SnButtonStyle.Ghost,
             )
         }
-    }
-    val viewModel = settingsViewModel()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    settings?.let { current ->
-        SettingsToggle(
-            title = stringResource(Res.string.settings_debug_logs),
-            body = stringResource(Res.string.settings_debug_logs_body),
-            checked = current.debugLogs,
-            onToggle = { viewModel.update { it.copy(debugLogs = !it.debugLogs) } },
-        )
     }
 }
 

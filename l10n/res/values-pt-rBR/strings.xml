@@ -323,7 +323,7 @@
   <string name="player_incomplete_save">Salvar progresso</string>
   <string name="player_incomplete_default_in">Não salva em %1$d s</string>
   <string name="player_provider_downloading">O provedor está baixando este vídeo</string>
-  <string name="player_provider_downloading_body">Ele começa sozinho assim que ficar pronto.</string>
+  <string name="player_provider_downloading_body">Ele começa sozinho quando ficar pronto, o que pode levar alguns minutos.</string>
   <string name="player_choose_other_source">Escolher outra fonte</string>
   <string name="settings_debug_logs">Registro de depuração</string>
   <string name="settings_debug_logs_body">Escreve no registro do app o que ele faz ao procurar e preparar fontes, para descobrir por que uma não toca. Nunca endereços nem chaves.</string>

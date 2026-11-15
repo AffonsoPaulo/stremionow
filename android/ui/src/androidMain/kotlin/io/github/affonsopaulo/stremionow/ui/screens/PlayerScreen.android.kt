@@ -236,12 +236,7 @@ actual fun PlayerScreen(
 
         if (!prepareFailed && state.error == null) {
             if (providerDownloading) {
-                ProviderDownloading(
-                    logo = playing.details.item.logo,
-                    title = playing.details.item.name,
-                    onChangeSource = onChangeSource,
-                    modifier = Modifier.align(Alignment.Center),
-                )
+                // Its screen shows above the controls, further down.
             } else if (preparing || !state.isLoaded) {
                 // Until the first frame: the title's logo fills while the source gets ready.
                 SnLogoLoader(
@@ -288,6 +283,16 @@ actual fun PlayerScreen(
             )
         }
 
+        // Above the controls, so their shading does not dim its button.
+        if (providerDownloading && !prepareFailed && state.error == null) {
+            ProviderDownloading(
+                logo = playing.details.item.logo,
+                title = playing.details.item.name,
+                onChangeSource = onChangeSource,
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
         if (state.error != null || prepareFailed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (incomplete != null) {
@@ -308,6 +313,8 @@ actual fun PlayerScreen(
                 skips = skips,
                 // A video whose progress does not count (much shorter than expected) leads on to nothing.
                 next = next.takeIf { progressCounts },
+                showSkip = controlsVisible,
+                onSkipBegins = poke,
                 onSeekTo = viewModel.player::seekTo,
                 onOpenEpisode = openEpisode,
                 upNext = viewModel.upNext,

@@ -109,6 +109,14 @@ pub struct WatchProgress {
     pub updated_at: i64,
 }
 
+/// What [`StremioCore::source_ready`] found: whether the source is ready, and the size of the
+/// file its address leads to, when the server tells (for the debug log).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SourceCheck {
+    pub ready: bool,
+    pub size_bytes: Option<u64>,
+}
+
 /// The episode after the one playing, for "Continue watching" to move on to it.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct NextVideo {
@@ -153,12 +161,18 @@ impl StremioCore {
     /// address now leads to the file rather than to the addon's short "being downloaded" clip,
     /// told by size. Asking also has the service start the download, as playing would. A source
     /// without an address, or whose size the server does not tell, counts as ready.
-    pub async fn source_ready(&self, source: StreamSource) -> Result<bool, CoreError> {
+    pub async fn source_ready(&self, source: StreamSource) -> Result<SourceCheck, CoreError> {
         let Some(url) = source.url else {
-            return Ok(true);
+            return Ok(SourceCheck {
+                ready: true,
+                size_bytes: None,
+            });
         };
         let size = self.client.file_size(&url).await?;
-        Ok(size.is_none_or(|size| size >= READY_MIN_BYTES))
+        Ok(SourceCheck {
+            ready: size.is_none_or(|size| size >= READY_MIN_BYTES),
+            size_bytes: size,
+        })
     }
 
     /// Orders sources best first for the user's preferences.
@@ -1000,13 +1014,12 @@ mod tests {
             url: Some(format!("{}{route}", server.uri())),
             ..source("A", None, None)
         };
-        assert!(!core.source_ready(at("/clip")).await.expect("asks"));
-        assert!(core.source_ready(at("/episode")).await.expect("asks"));
-        assert!(
-            core.source_ready(source("A", None, None))
-                .await
-                .expect("no address")
-        );
+        let clip = core.source_ready(at("/clip")).await.expect("asks");
+        assert!(!clip.ready);
+        assert_eq!(clip.size_bytes, Some(4_200_000));
+        assert!(core.source_ready(at("/episode")).await.expect("asks").ready);
+        let no_address = core.source_ready(source("A", None, None)).await;
+        assert!(no_address.expect("no address").ready);
     }
 
     #[test]

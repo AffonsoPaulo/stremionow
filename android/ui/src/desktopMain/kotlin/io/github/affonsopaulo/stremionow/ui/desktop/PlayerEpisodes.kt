@@ -149,6 +149,8 @@ internal fun EpisodesStrip(
                     onClick = { if (playing) onClose() else onOpenEpisode(episode) },
                     progress = progress,
                     highlighted = playing,
+                    // "Watching now" under one card must not make it taller than the rest.
+                    keepMetaLine = true,
                     watchedLabel =
                         if (!playing &&
                             episode.id in watched

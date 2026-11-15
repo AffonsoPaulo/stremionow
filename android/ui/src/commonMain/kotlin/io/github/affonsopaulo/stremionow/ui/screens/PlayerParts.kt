@@ -160,6 +160,8 @@ internal fun PlaybackPrompts(
     modifier: Modifier = Modifier,
     takeFocus: Boolean = false,
     upNext: UpNextBehavior = UpNextBehavior.DEFAULT,
+    showSkip: Boolean = true,
+    onSkipBegins: () -> Unit = {},
 ) {
     // Without a countdown, "Play the next episode automatically" moves on when this one ends.
     val currentOnOpenEpisode by rememberUpdatedState(onOpenEpisode)
@@ -183,8 +185,13 @@ internal fun PlaybackPrompts(
     LaunchedEffect(prompt, takeFocus) {
         if (prompt != null && takeFocus) runCatching { focus.requestFocus() }
     }
+    // An intro, recap or credits beginning brings the controls up, and its button with them.
+    val skipping = (prompt as? PlaybackPrompt.Skip)?.kind
+    val currentOnSkipBegins by rememberUpdatedState(onSkipBegins)
+    LaunchedEffect(skipping) { if (skipping != null) currentOnSkipBegins() }
     when (prompt) {
         is PlaybackPrompt.Skip -> {
+            if (!showSkip) return
             SkipPill(
                 text =
                     stringResource(
@@ -810,16 +817,14 @@ internal fun ProviderDownloading(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
     ) {
+        val downloading = stringResource(Res.string.player_provider_downloading)
         SnLogoLoader(
             logo = logo,
             title = title,
             progress = null,
-            status = stringResource(Res.string.player_provider_downloading),
-            label = stringResource(Res.string.player_provider_downloading),
-        )
-        BasicText(
-            stringResource(Res.string.player_provider_downloading_body),
-            style = SnTypography.body.copy(color = SnColors.fgSecondary, textAlign = TextAlign.Center),
+            // What is happening, and right under it what comes next.
+            status = downloading + "\n" + stringResource(Res.string.player_provider_downloading_body),
+            label = downloading,
         )
         SnButton(
             stringResource(Res.string.player_choose_other_source),

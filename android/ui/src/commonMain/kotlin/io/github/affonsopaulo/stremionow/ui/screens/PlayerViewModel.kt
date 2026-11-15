@@ -53,6 +53,9 @@ private const val SUBTITLE_WAIT_MS = 10_000L
 /** How long moving on to an episode looks for its source before showing its sources. */
 private const val EPISODE_LOOKUP_MS = 6_000L
 
+/** Bytes in a megabyte, for the debug log. */
+private const val BYTES_PER_MB = 1_048_576L
+
 /** How often a source still being downloaded by its debrid service is checked again. */
 private const val PROVIDER_CHECK_MS = 15_000L
 
@@ -262,9 +265,19 @@ class PlayerViewModel<out P : VideoPlayer>(
      */
     private suspend fun waitForProvider(source: StreamSource) {
         mutableProviderDownloading.value = true
+        val began = System.currentTimeMillis()
         while (true) {
-            val ready = runCatching { core.sourceReady(source) }.getOrDefault(false)
-            DebugLog.log { "provider check: ${if (ready) "ready" else "still downloading"}" }
+            val asked = System.currentTimeMillis()
+            val check = runCatching { core.sourceReady(source) }
+            val ready = check.getOrNull()?.ready == true
+            DebugLog.log {
+                val size = check.getOrNull()?.sizeBytes?.let { "${it.toLong() / BYTES_PER_MB} MB" } ?: "size unknown"
+                val outcome =
+                    check.exceptionOrNull()?.let { "check failed (${it::class.simpleName})" }
+                        ?: if (ready) "ready" else "still downloading"
+                "provider check: $outcome, $size, answered in ${System.currentTimeMillis() - asked} ms, " +
+                    "waiting ${(System.currentTimeMillis() - began) / 1000} s"
+            }
             if (ready) break
             delay(PROVIDER_CHECK_MS)
         }

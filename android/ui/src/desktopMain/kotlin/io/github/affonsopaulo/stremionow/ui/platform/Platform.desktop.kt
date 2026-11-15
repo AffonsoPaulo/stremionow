@@ -52,3 +52,12 @@ internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSup
 internal actual fun automaticStreamMemory(): StreamMemory? = StreamMemory.forThisComputer()
 
 internal actual fun isDesktopApp(): Boolean = true
+
+internal actual fun externalPlayerSupported(): Boolean = false
+
+internal actual fun openInExternalPlayer(
+    context: PlatformContext,
+    url: String,
+    title: String,
+    chooserTitle: String,
+): Boolean = false

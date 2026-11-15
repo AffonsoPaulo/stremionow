@@ -740,6 +740,18 @@
   <!-- No background box, or no outline. -->
   <string name="settings_color_none">None</string>
 
+  <!-- Settings › Playback (Android): which app plays sources. -->
+  <string name="settings_play_in">Play in</string>
+  <string name="settings_play_in_body">Another app, such as VLC, MX Player or Just Player, can play the sources instead; you pick it each time. StremioNow can\'t follow your progress there, so Continue watching and watched episodes don\'t update.</string>
+  <string name="settings_play_in_app">StremioNow</string>
+  <string name="settings_play_in_other_app">Another app</string>
+  <!-- While a source gets ready to open in another app. -->
+  <string name="external_title">Opening in another app</string>
+  <!-- Title of the system's list of apps that can play the video. -->
+  <string name="external_chooser">Play with</string>
+  <string name="external_failed">Couldn\'t get this source ready. Try another one.</string>
+  <string name="external_no_app">No app on this device can play videos. Install one, such as VLC, or play in StremioNow.</string>
+
   <!-- Settings › Playback: moving on to the next episode. The card is the one shown near the end of an episode. -->
   <string name="settings_autoplay_next">Play the next episode automatically</string>
   <string name="settings_autoplay_next_body">The next episode starts by itself near the end of this one. When off, the next episode\'s card still shows, without counting down.</string>

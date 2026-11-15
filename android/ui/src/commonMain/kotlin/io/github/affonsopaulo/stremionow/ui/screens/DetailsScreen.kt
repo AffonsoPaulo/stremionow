@@ -139,6 +139,10 @@ class DetailsViewModel(
 
     /** The "Only on Wi-Fi" preference for torrents. */
     val wifiOnly = mutableWifiOnly.asStateFlow()
+    private val mutablePlaysInOtherApp = MutableStateFlow(false)
+
+    /** Sources open in another app (Settings' "Play in", Android). */
+    val playsInOtherApp = mutablePlaysInOtherApp.asStateFlow()
     private val mutableSourcesFor = MutableStateFlow<String?>(null)
 
     /** The video whose sources show in place of the episodes: always the movie, for movies. */
@@ -169,7 +173,9 @@ class DetailsViewModel(
     init {
         load()
         viewModelScope.launch {
-            mutableWifiOnly.value = runCatching { io { core.settings().torrentWifiOnly } }.getOrDefault(false)
+            val settings = runCatching { io { core.settings() } }.getOrNull()
+            mutableWifiOnly.value = settings?.torrentWifiOnly ?: false
+            mutablePlaysInOtherApp.value = settings.playsInOtherApp()
         }
     }
 
@@ -339,6 +345,7 @@ private fun DetailsContent(
     val watched by viewModel.watched.collectAsStateWithLifecycle()
     val rating by viewModel.rating.collectAsStateWithLifecycle()
     val wifiOnly by viewModel.wifiOnly.collectAsStateWithLifecycle()
+    val playsInOtherApp by viewModel.playsInOtherApp.collectAsStateWithLifecycle()
     val sourcesFor by viewModel.sourcesFor.collectAsStateWithLifecycle()
     val sources by viewModel.sources.collectAsStateWithLifecycle()
     val reveal by viewModel.reveal.collectAsStateWithLifecycle()
@@ -379,6 +386,7 @@ private fun DetailsContent(
     // The search, filters and order of the sources hold for every video of the page.
     var sourceFilters by remember(item.id) { mutableStateOf(SourceFilters()) }
     var confirmMobileData by remember { mutableStateOf<StreamSource?>(null) }
+    var openingElsewhere by remember { mutableStateOf<Pair<StreamSource, Episode?>?>(null) }
     var watchedChoices by remember { mutableStateOf<List<WatchedChoice>?>(null) }
     var sharing by remember { mutableStateOf(false) }
 
@@ -417,10 +425,14 @@ private fun DetailsContent(
         // The episode these sources are for; none for a movie.
         val episode = details.episodes.firstOrNull { it.id == sources.videoId }
         sources.videoId?.let { viewModel.rememberSource(it, source) }
-        PlaybackSession.select(PlaybackSession.Selection(details, episode))
-        PlaybackSession.source = source
-        PlaybackSession.alternatives = sources.sources
-        onPlay()
+        if (playsInOtherApp) {
+            openingElsewhere = source to episode
+        } else {
+            PlaybackSession.select(PlaybackSession.Selection(details, episode))
+            PlaybackSession.source = source
+            PlaybackSession.alternatives = sources.sources
+            onPlay()
+        }
     }
     val choose: (StreamSource) -> Unit = { source ->
         when {
@@ -473,6 +485,9 @@ private fun DetailsContent(
             },
             onDismiss = { confirmMobileData = null },
         )
+    }
+    openingElsewhere?.let { (source, episode) ->
+        ExternalPlayerDialog(source, title = item.name, episode = episode, onDone = { openingElsewhere = null })
     }
     watchedChoices?.let { WatchedDialog(it, onDismiss = { watchedChoices = null }) }
     val shareUrl = details.shareUrl

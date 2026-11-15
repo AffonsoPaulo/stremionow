@@ -53,3 +53,23 @@ internal expect fun automaticStreamMemory(): StreamMemory?
  * shorter Shift+arrow seek step and how the window behaves there.
  */
 internal expect fun isDesktopApp(): Boolean
+
+/**
+ * Whether sources can play in another app on this device (Settings' "Play in"): on Android,
+ * phones and TVs, where VLC, MX Player, Just Player and others take video addresses. The
+ * desktop's player is always its own.
+ */
+internal expect fun externalPlayerSupported(): Boolean
+
+/**
+ * Hands [url], the local server's playback address and never an addon's or debrid's, to another
+ * app that plays video, through the system's chooser titled [chooserTitle]; [title] is what that
+ * app shows, for the apps that read it. False when nothing can play it or the platform has no
+ * such apps.
+ */
+internal expect fun openInExternalPlayer(
+    context: PlatformContext,
+    url: String,
+    title: String,
+    chooserTitle: String,
+): Boolean

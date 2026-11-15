@@ -547,6 +547,15 @@
   <string name="settings_color_translucent_black">Preto translúcido</string>
   <string name="settings_color_none">Nenhum</string>
 
+  <string name="settings_play_in">Reproduzir em</string>
+  <string name="settings_play_in_body">Outro app, como VLC, MX Player ou Just Player, pode reproduzir as fontes no lugar do StremioNow; você escolhe qual a cada vez. O StremioNow não acompanha o progresso lá, então Continuar assistindo e os episódios assistidos não são atualizados.</string>
+  <string name="settings_play_in_app">StremioNow</string>
+  <string name="settings_play_in_other_app">Outro app</string>
+  <string name="external_title">Abrindo em outro app</string>
+  <string name="external_chooser">Reproduzir com</string>
+  <string name="external_failed">Não foi possível preparar esta fonte. Tente outra.</string>
+  <string name="external_no_app">Nenhum app deste aparelho reproduz vídeos. Instale um, como o VLC, ou reproduza no StremioNow.</string>
+
   <string name="settings_autoplay_next">Reproduzir o próximo episódio automaticamente</string>
   <string name="settings_autoplay_next_body">O próximo episódio começa sozinho perto do fim deste. Desligado, o cartão do próximo episódio continua aparecendo, sem contagem regressiva.</string>
   <string name="settings_up_next_countdown">Contagem para o próximo episódio</string>

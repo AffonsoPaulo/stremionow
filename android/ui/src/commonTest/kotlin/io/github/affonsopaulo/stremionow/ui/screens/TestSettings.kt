@@ -3,6 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.screens
 
 import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.DisplaySwitch
+import io.github.affonsopaulo.stremionow.core.PlayerType
 import io.github.affonsopaulo.stremionow.core.StreamMemoryChoice
 
 /**
@@ -35,4 +36,5 @@ internal fun defaultSettings() =
         upNextCountdownSeconds = 10u,
         seekStepSeconds = 10u,
         seekShortStepSeconds = 3u,
+        playerType = PlayerType.INTERNAL,
     )

@@ -55,6 +55,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.DisplaySwitch
+import io.github.affonsopaulo.stremionow.core.PlayerType
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
@@ -82,6 +83,7 @@ import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.automaticStreamMemory
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.platform.displaySwitchingSupported
+import io.github.affonsopaulo.stremionow.ui.platform.externalPlayerSupported
 import io.github.affonsopaulo.stremionow.ui.platform.isDesktopApp
 import io.github.affonsopaulo.stremionow.ui.platform.openExternalLink
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
@@ -385,6 +387,7 @@ private fun PlaybackPage() {
             onSelect = { lines -> viewModel.update { it.copy(maxResolution = lines) } },
         )
     }
+    if (externalPlayerSupported()) PlayInSetting(current, viewModel::update)
     NextEpisodeSettings(current, viewModel::update)
     SeekStepSetting(current, viewModel.seekStepChoices, viewModel::update)
     SettingsToggle(
@@ -396,6 +399,34 @@ private fun PlaybackPage() {
     // Only where the player takes the choice (the desktop); Android keeps its own sizes.
     val automatic = remember { automaticStreamMemory() }
     if (automatic != null) VideoMemorySetting(current, automatic, viewModel::update)
+}
+
+/** Which app plays sources: this one, or another that plays video (Android). */
+@Composable
+private fun PlayInSetting(
+    current: AppSettings,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_play_in), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(Res.string.settings_play_in_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = listOf(PlayerType.INTERNAL, PlayerType.EXTERNAL),
+            selected = current.playerType,
+            label = {
+                stringResource(
+                    when (it) {
+                        PlayerType.INTERNAL -> Res.string.settings_play_in_app
+                        PlayerType.EXTERNAL -> Res.string.settings_play_in_other_app
+                    },
+                )
+            },
+            onSelect = { choice -> onChange { it.copy(playerType = choice) } },
+        )
+    }
 }
 
 /**

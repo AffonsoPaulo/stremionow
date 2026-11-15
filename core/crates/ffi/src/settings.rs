@@ -51,6 +51,7 @@ pub const UP_NEXT_COUNTDOWN_RANGE: (u32, u32) = (5, 90);
 const DEFAULT_UP_NEXT_COUNTDOWN_SECONDS: u32 = 10;
 const SEEK_STEP_SECONDS: &str = "seek_step_seconds";
 const SEEK_SHORT_STEP_SECONDS: &str = "seek_short_step_seconds";
+const PLAYER_TYPE: &str = "player_type";
 
 /// Seek steps the user can pick, in seconds (Stremio offers 3 to 30 too; its defaults, 10 and
 /// 3, are ours).
@@ -137,6 +138,33 @@ impl StreamMemoryChoice {
     }
 }
 
+/// Which app plays the sources that play in the app (Stremio's `playerType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum PlayerType {
+    /// The app's own player.
+    #[default]
+    Internal,
+    /// Another app on the device that plays video, chosen each time (Android). The app
+    /// hands it the local server's address and cannot follow the progress there.
+    External,
+}
+
+impl PlayerType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::External => "external",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "external" => Self::External,
+            _ => Self::Internal,
+        }
+    }
+}
+
 /// Preferences the user can change in Settings.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppSettings {
@@ -198,6 +226,8 @@ pub struct AppSettings {
     /// The shorter step of Shift and the arrow keys (desktop), in seconds: one of
     /// [`SEEK_STEP_CHOICES`].
     pub seek_short_step_seconds: u32,
+    /// Which app plays sources: the app's own player, or another one (Android only).
+    pub player_type: PlayerType,
 }
 
 impl Default for AppSettings {
@@ -227,6 +257,7 @@ impl Default for AppSettings {
             up_next_countdown_seconds: DEFAULT_UP_NEXT_COUNTDOWN_SECONDS,
             seek_step_seconds: 10,
             seek_short_step_seconds: 3,
+            player_type: PlayerType::Internal,
         }
     }
 }
@@ -326,6 +357,9 @@ impl StremioCore {
                 .setting(SEEK_SHORT_STEP_SECONDS)?
                 .and_then(|value| value.parse().ok())
                 .map_or(defaults.seek_short_step_seconds, seek_step),
+            player_type: store
+                .setting(PLAYER_TYPE)?
+                .map_or(defaults.player_type, |value| PlayerType::parse(&value)),
         })
     }
 
@@ -420,6 +454,7 @@ impl StremioCore {
             SEEK_SHORT_STEP_SECONDS,
             &seek_step(settings.seek_short_step_seconds).to_string(),
         )?;
+        store.set_setting(PLAYER_TYPE, settings.player_type.as_str())?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
         self.apply_network_policy();
@@ -583,6 +618,7 @@ mod tests {
             up_next_countdown_seconds: 300,
             seek_step_seconds: 0,
             seek_short_step_seconds: 1000,
+            player_type: PlayerType::External,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -619,6 +655,21 @@ mod tests {
         assert_eq!(saved.up_next_countdown_seconds, UP_NEXT_COUNTDOWN_RANGE.1);
         assert_eq!(saved.seek_step_seconds, 3, "the nearest choice");
         assert_eq!(saved.seek_short_step_seconds, 30);
+        assert_eq!(saved.player_type, PlayerType::External);
+    }
+
+    #[test]
+    fn the_app_plays_until_told_otherwise() {
+        assert_eq!(AppSettings::default().player_type, PlayerType::Internal);
+        assert_eq!(PlayerType::parse("external"), PlayerType::External);
+        assert_eq!(
+            PlayerType::parse("vlc"),
+            PlayerType::Internal,
+            "unknown means the app"
+        );
+        for choice in [PlayerType::External, PlayerType::Internal] {
+            assert_eq!(PlayerType::parse(choice.as_str()), choice);
+        }
     }
 
     #[test]

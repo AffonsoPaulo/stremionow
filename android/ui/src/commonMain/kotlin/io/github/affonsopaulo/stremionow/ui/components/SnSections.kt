@@ -179,7 +179,7 @@ fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
 }
 
 /** A poster card's width where a pointer drives the screen, before fitting the window. */
-internal val POINTER_POSTER_CARD_WIDTH = 160.dp
+internal val POINTER_POSTER_CARD_WIDTH = 165.dp
 
 /** Room between poster cards where a pointer drives the screen. */
 internal val POSTER_SPACING = 40.dp

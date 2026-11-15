@@ -21,8 +21,9 @@ class PosterRowSizingTest {
 
     @Test
     fun `cards keep their size while the last one shows between a quarter and three quarters`() {
-        // 1870 of room: 9 cards of 160 and 40 (1800), and 70 of the tenth, 44% of it.
-        val sizing = posterRowSizing(1918.dp, 48.dp)
+        // A window whose last card shows half of itself at the usual width keeps it.
+        val half = 48.dp + (POINTER_POSTER_CARD_WIDTH + POSTER_SPACING) * 8 + POINTER_POSTER_CARD_WIDTH / 2
+        val sizing = posterRowSizing(half, 48.dp)
         assertEquals(POINTER_POSTER_CARD_WIDTH, sizing.cardWidth)
         assertEquals(POSTER_SPACING, sizing.spacing)
     }

@@ -192,7 +192,10 @@ internal object MpvConstants {
     const val FORMAT_INT64 = 4
     const val FORMAT_DOUBLE = 5
 
+    const val END_FILE_REASON_STOP = 2
+    const val END_FILE_REASON_QUIT = 3
     const val END_FILE_REASON_ERROR = 4
+    const val END_FILE_REASON_REDIRECT = 5
 
     const val RENDER_PARAM_INVALID = 0
     const val RENDER_PARAM_API_TYPE = 1

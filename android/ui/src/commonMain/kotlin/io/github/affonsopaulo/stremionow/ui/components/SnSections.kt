@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -132,20 +134,72 @@ fun SnPosterRow(
     modifier: Modifier = Modifier,
     slot: String = "row",
 ) {
-    SnRow(
-        modifier = modifier,
-        controlsCenter = SnSpacing.space2 + PosterCardWidth * 1.5f / 2,
-    ) {
-        items(items, key = { "${it.kind}/${it.id}" }) { item ->
-            SnPosterCard(
-                item.name,
-                item.poster,
-                subtitle(item),
-                onClick = { onOpen(item) },
-                origin = titleOrigin(slot, item),
-            )
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val sizing = rememberPosterRowSizing(maxWidth)
+        SnRow(
+            spacing = sizing.spacing,
+            controlsCenter = SnSpacing.space2 + sizing.cardWidth * 1.5f / 2,
+        ) {
+            items(items, key = { "${it.kind}/${it.id}" }) { item ->
+                SnPosterCard(
+                    item.name,
+                    item.poster,
+                    subtitle(item),
+                    onClick = { onOpen(item) },
+                    width = sizing.cardWidth,
+                    origin = titleOrigin(slot, item),
+                )
+            }
         }
     }
+}
+
+/** How wide a row's poster cards are, and how far apart. */
+data class PosterRowSizing(
+    val cardWidth: Dp,
+    val spacing: Dp,
+)
+
+/**
+ * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, the cards fill
+ * the window: eight whole ones and half of a ninth past the page gutter, the cut card telling
+ * there is more to the side, never narrower than phones' and TV's [PosterCardWidth] nor wider
+ * than [MAX_POSTER_CARD_WIDTH]. Elsewhere they keep [PosterCardWidth].
+ */
+@Composable
+fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
+    val mouseFirst = LocalSnFeedback.current.mouseFirst
+    val gutter = SnLayout.gutter
+    return remember(rowWidth, mouseFirst, gutter) {
+        if (mouseFirst) {
+            PosterRowSizing(posterCardWidth(rowWidth, gutter, POINTER_POSTER_SPACING), POINTER_POSTER_SPACING)
+        } else {
+            PosterRowSizing(PosterCardWidth, SnSpacing.space4)
+        }
+    }
+}
+
+/** Whole cards a row shows where a pointer drives the screen; half of the next one shows too. */
+internal const val POSTER_ROW_WHOLE_CARDS = 8
+
+/** Widest a poster card grows in a wide window. */
+internal val MAX_POSTER_CARD_WIDTH = 240.dp
+
+/** Room between poster cards where a pointer drives the screen. */
+internal val POINTER_POSTER_SPACING = 24.dp
+
+/**
+ * The width of each card so that [POSTER_ROW_WHOLE_CARDS] whole cards and half of the next fit in
+ * [rowWidth] after the page [gutter], with [spacing] between them.
+ */
+internal fun posterCardWidth(
+    rowWidth: Dp,
+    gutter: Dp,
+    spacing: Dp,
+): Dp {
+    val shown = POSTER_ROW_WHOLE_CARDS + 0.5f
+    val width = (rowWidth - gutter - spacing * POSTER_ROW_WHOLE_CARDS) / shown
+    return width.coerceIn(PosterCardWidth, MAX_POSTER_CARD_WIDTH)
 }
 
 /** A titled section: header, optional "See all" action and a poster row; see [SnPosterRow] for [slot]. */

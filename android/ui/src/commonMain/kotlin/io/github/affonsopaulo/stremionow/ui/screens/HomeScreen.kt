@@ -94,6 +94,7 @@ import io.github.affonsopaulo.stremionow.ui.components.ClearHeaderOverHero
 import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.PosterCardWidth
+import io.github.affonsopaulo.stremionow.ui.components.PosterRowSizing
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnHeroBackdrop
@@ -111,6 +112,7 @@ import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.components.rememberPosterRowSizing
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
 import io.github.affonsopaulo.stremionow.ui.components.titleCard
@@ -477,17 +479,25 @@ private fun NewEpisodesRow(
 /** Where a row still loading will be: blank posters, hidden from screen readers. */
 @Composable
 private fun PlaceholderRow() {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        PlaceholderCards(rememberPosterRowSizing(maxWidth))
+    }
+}
+
+/** The grey cards of [PlaceholderRow], as large and as far apart as the row's will be. */
+@Composable
+private fun PlaceholderCards(sizing: PosterRowSizing) {
     Row(
         Modifier
             .fillMaxWidth()
             .clearAndSetSemantics {}
             .padding(horizontal = SnLayout.gutter, vertical = SnSpacing.space2),
-        horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+        horizontalArrangement = Arrangement.spacedBy(sizing.spacing),
     ) {
         repeat(PLACEHOLDER_CARDS) {
             Box(
                 Modifier
-                    .width(PosterCardWidth)
+                    .width(sizing.cardWidth)
                     .aspectRatio(2f / 3f)
                     .background(SnColors.surfaceMuted, RoundedCornerShape(SnRadius.radiusMd)),
             )

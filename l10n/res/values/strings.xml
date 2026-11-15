@@ -44,6 +44,11 @@
 
   <!-- Remaining time on a card. %1$s is a duration already formatted for the locale, for example "18 min". -->
   <string name="time_left">%1$s left</string>
+  <!-- Remaining time on a card, in minutes. %1$d is the number of minutes. -->
+  <plurals name="time_left_minutes">
+    <item quantity="one">%1$d min left</item>
+    <item quantity="other">%1$d min left</item>
+  </plurals>
 
   <!-- Source picker summary: %1$s is sources_count, %2$s is sources_addons, for example "12 sources from 3 addons". -->
   <string name="sources_summary">%1$s from %2$s</string>
@@ -85,6 +90,11 @@
   <string name="explore_genre_all">All</string>
   <string name="explore_loading_more">Loading more…</string>
   <string name="explore_empty_body">This catalog has nothing to show for this filter.</string>
+  <!-- A genre page whose genre none of the catalogs can filter by. %1$s is the genre. -->
+  <string name="explore_genre_missing_title">No catalog for %1$s</string>
+  <string name="explore_genre_missing_body">None of your addons\' catalogs can list titles by this genre.</string>
+  <!-- Button on that page that shows the first catalog without a genre. -->
+  <string name="explore_genre_missing_action">Show all titles</string>
 
   <!-- Search screen. -->
   <string name="search_field_label">Search movies and series</string>

@@ -28,6 +28,11 @@
   <string name="episode_numbered">%1$d. %2$s</string>
 
   <string name="time_left">faltam %1$s</string>
+  <plurals name="time_left_minutes">
+    <item quantity="one">falta %1$d min</item>
+    <item quantity="many">faltam %1$d min</item>
+    <item quantity="other">faltam %1$d min</item>
+  </plurals>
 
   <string name="sources_summary">%1$s de %2$s</string>
   <plurals name="sources_count">
@@ -62,6 +67,9 @@
   <string name="explore_genre_all">Todos</string>
   <string name="explore_loading_more">Carregando mais…</string>
   <string name="explore_empty_body">Este catálogo não tem nada para este filtro.</string>
+  <string name="explore_genre_missing_title">Nenhum catálogo de %1$s</string>
+  <string name="explore_genre_missing_body">Nenhum catálogo dos seus addons consegue listar títulos deste gênero.</string>
+  <string name="explore_genre_missing_action">Mostrar todos os títulos</string>
 
   <string name="search_field_label">Buscar filmes e séries</string>
   <string name="search_hint">Filmes e séries</string>

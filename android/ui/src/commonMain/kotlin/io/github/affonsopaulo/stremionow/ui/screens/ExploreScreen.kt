@@ -36,6 +36,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
 import io.github.affonsopaulo.stremionow.ui.components.titleOrigin
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.data.runCatchingUnlessCancelled
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
@@ -54,6 +55,11 @@ data class ExploreState(
     val catalogs: List<CatalogInfo> = emptyList(),
     val catalog: CatalogInfo? = null,
     val genre: String? = null,
+    /**
+     * The genre the page was opened for when none of the catalogs can filter by it: the page
+     * says so rather than showing a list that is not that genre's.
+     */
+    val missingGenre: String? = null,
     val items: List<MetaItem> = emptyList(),
     val loading: Boolean = true,
     val failed: Boolean = false,
@@ -65,25 +71,40 @@ class ExploreViewModel(
     private val kind: String,
     private val initialGenre: String? = null,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ExploreState())
+    // The genre shows in the title from the start, while the catalogs are read.
+    private val mutableState = MutableStateFlow(ExploreState(genre = initialGenre))
     val state = mutableState.asStateFlow()
     private var pageJob: Job? = null
 
     init {
         viewModelScope.launch {
             val catalogs = runCatching { io { core.catalogs(kind) } }.getOrDefault(emptyList())
-            // Opened from a genre link: start on a catalog that can filter by it.
-            val catalog =
-                catalogs.firstOrNull { initialGenre != null && initialGenre in it.genres } ?: catalogs.firstOrNull()
-            val genre = initialGenre?.takeIf { catalog?.genres?.contains(it) == true }
-            mutableState.update { it.copy(catalogs = catalogs, catalog = catalog, genre = genre) }
+            if (initialGenre != null) {
+                // Opened from a genre link: start on a catalog that can filter by it.
+                val catalog = catalogs.firstOrNull { initialGenre in it.genres }
+                if (catalog == null) {
+                    mutableState.update {
+                        it.copy(
+                            catalogs = catalogs,
+                            catalog = null,
+                            genre = null,
+                            missingGenre = initialGenre.takeIf { catalogs.isNotEmpty() },
+                            loading = false,
+                        )
+                    }
+                    return@launch
+                }
+                mutableState.update { it.copy(catalogs = catalogs, catalog = catalog, genre = initialGenre) }
+            } else {
+                mutableState.update { it.copy(catalogs = catalogs, catalog = catalogs.firstOrNull()) }
+            }
             if (catalogs.isEmpty()) mutableState.update { it.copy(loading = false) } else reload()
         }
     }
 
     fun selectCatalog(catalog: CatalogInfo) {
         if (catalog == state.value.catalog) return
-        mutableState.update { it.copy(catalog = catalog, genre = null) }
+        mutableState.update { it.copy(catalog = catalog, genre = null, missingGenre = null) }
         reload()
     }
 
@@ -107,18 +128,30 @@ class ExploreViewModel(
         mutableState.update { it.copy(loading = true, failed = false) }
         pageJob =
             viewModelScope.launch {
-                runCatching { core.catalogPage(catalog, current.genre, current.items.size.toUInt()) }
+                // A page cancelled by a reload must leave the new load's state alone.
+                runCatchingUnlessCancelled { core.catalogPage(catalog, current.genre, current.items.size.toUInt()) }
                     .onSuccess { page ->
                         mutableState.update { state ->
-                            val known = state.items.mapTo(HashSet()) { it.id }
-                            val fresh = page.filter { it.id !in known }
+                            val known = state.items.mapTo(HashSet()) { it.key() }
+                            val fresh = page.distinctBy { it.key() }.filter { it.key() !in known }
                             // An empty or fully repeated page means the catalog has no more items.
-                            state.copy(items = state.items + fresh, loading = false, endReached = fresh.isEmpty())
+                            state.copy(
+                                items = state.items + fresh,
+                                loading = false,
+                                failed = false,
+                                endReached = fresh.isEmpty(),
+                            )
                         }
                     }.onFailure { mutableState.update { it.copy(loading = false, failed = true) } }
             }
     }
 }
+
+/**
+ * A title's key in a list: the core tells titles apart by type and id, so one id can be a
+ * movie and a series on one page, and keying by the id alone would repeat a key.
+ */
+private fun MetaItem.key(): String = "$kind/$id"
 
 @Composable
 fun ExploreScreen(
@@ -149,8 +182,10 @@ fun ExploreScreen(
             modifier = Modifier.padding(horizontal = SnLayout.gutter),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
         ) {
+            // The title names what the list shows: the genre chosen, else the type.
             SnPageTitle(
-                initialGenre ?: stringResource(if (kind == "series") Res.string.nav_series else Res.string.nav_movies),
+                state.genre ?: state.missingGenre
+                    ?: stringResource(if (kind == "series") Res.string.nav_series else Res.string.nav_movies),
             )
             if (state.catalogs.size > 1) {
                 SnChipRow(
@@ -168,6 +203,15 @@ fun ExploreScreen(
         }
 
         when {
+            state.missingGenre != null -> {
+                SnMessage(
+                    title = stringResource(Res.string.explore_genre_missing_title, state.missingGenre.orEmpty()),
+                    body = stringResource(Res.string.explore_genre_missing_body),
+                    actionText = stringResource(Res.string.explore_genre_missing_action),
+                    onAction = { state.catalogs.firstOrNull()?.let(viewModel::selectCatalog) },
+                )
+            }
+
             state.items.isEmpty() && state.loading -> {
                 SnLoading()
             }
@@ -185,7 +229,7 @@ fun ExploreScreen(
 
             else -> {
                 SnPosterGrid(state = grid) {
-                    items(state.items, key = { it.id }) { item ->
+                    items(state.items, key = { it.key() }) { item ->
                         SnPosterCard(
                             item.name,
                             item.poster,

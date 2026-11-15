@@ -79,6 +79,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import io.github.affonsopaulo.stremionow.core.CatalogRole
 import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.HomeEntry
@@ -121,7 +122,9 @@ import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.data.runCatchingUnlessCancelled
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
@@ -136,6 +139,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnSize
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -184,7 +188,7 @@ class HomeViewModel(
         feedJob =
             viewModelScope.launch {
                 // Installing the defaults can fail offline; the cached home may still load.
-                runCatching { core.ensureDefaultAddons() }
+                runCatchingUnlessCancelled { core.ensureDefaultAddons() }
                     .onFailure { logWarning("Could not install the default addons", it) }
                 // Signed in: bring account changes from other devices first. An expired session
                 // signs out quietly; local data stays and the app keeps working.
@@ -206,13 +210,16 @@ class HomeViewModel(
     }
 
     private suspend fun fetchFeed() {
+        // A load replaced by a newer one (load() cancels it) must leave the new one's state
+        // alone: no late stage, and no failure for its own cancellation.
+        val job = currentCoroutineContext()[Job]
         val listener =
             object : HomeListener {
                 override fun onUpdate(feed: HomeFeed) {
-                    mutableFeed.value = Loadable.Ready(feed)
+                    if (job?.isActive != false) mutableFeed.value = Loadable.Ready(feed)
                 }
             }
-        runCatching { core.homeFeed(listener) }
+        runCatchingUnlessCancelled { core.homeFeed(listener) }
             .onSuccess { mutableFeed.value = Loadable.Ready(it) }
             .onFailure { error ->
                 logWarning("Could not load the home screen", error)
@@ -245,8 +252,12 @@ fun HomeScreen(
     val continueWatching by viewModel.continueWatching.collectAsStateWithLifecycle()
     val lastSources by viewModel.lastSources.collectAsStateWithLifecycle()
     // A card goes straight to the player with the source chosen before, looked up again
-    // (ResumePlayback.kt); without one that could be found, it opens the title's page.
-    val openProgress = { progress: WatchProgress ->
+    // (ResumePlayback.kt); without one that could be found, it opens the title's page. A second
+    // click while the first one's pages are coming in is dropped, before it starts another
+    // resume over the first.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val openProgress = openProgress@{ progress: WatchProgress ->
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@openProgress
         val request = resumeRequest(progress, lastSources[progress.id])
         if (request != null) {
             PlaybackSession.resume(request)
@@ -379,7 +390,8 @@ private fun HomeContent(
                 if (continueWatching.isNotEmpty()) {
                     item(key = "continue") { SnMinimalScroll { ContinueWatchingRow(continueWatching, onOpenProgress) } }
                 }
-                items(feed.sections, key = { it.key }) { section ->
+                // Keys must be unique in a lazy list; a repeated row is dropped rather than crash.
+                items(feed.sections.distinctBy { it.key }, key = { it.key }) { section ->
                     SnMinimalScroll { HomeRow(section, sharedNames, onOpenTitle) }
                 }
             }
@@ -451,7 +463,8 @@ private fun NewEpisodesRow(
     onOpenTitle: (MetaItem) -> Unit,
 ) {
     SnRow(controlsCenter = EpisodeRowControlsCenter) {
-        items(entries, key = { it.item.id }) { entry ->
+        // The core sends each series once; a repeated one would repeat a key and crash the row.
+        items(entries.distinctBy { it.item.id }, key = { it.item.id }) { entry ->
             val episode = entry.episode
             val season = episode?.season?.toInt()
             val number = episode?.episode?.toInt()
@@ -829,30 +842,52 @@ private fun Hero(
 /** How far a swipe on the hero must travel to change the pick. */
 private val SwipeThreshold = 48.dp
 
-/** The title's logo image when the addon has one, else its name in the display face. */
+/**
+ * The title's logo image when the addon has one, else its name in the display face. The name
+ * also shows while the logo loads and stays when it cannot be loaded, so the title is never
+ * missing. Both lie in one box anchored at its bottom, as the heroes' text is, so the logo
+ * taking the name's place moves nothing under it.
+ */
 @Composable
 fun TitleLogo(
     item: MetaItem,
     modifier: Modifier = Modifier,
     maxLines: Int = 3,
 ) {
-    if (item.logo != null) {
+    val logo = item.logo
+    if (logo == null) {
+        TitleName(item.name, maxLines, modifier)
+        return
+    }
+    var loaded by remember(logo) { mutableStateOf(false) }
+    Box(modifier, contentAlignment = Alignment.BottomStart) {
+        if (!loaded) TitleName(item.name, maxLines)
         AsyncImage(
-            model = item.logo,
-            contentDescription = item.name,
-            modifier = modifier.heightIn(max = 96.dp).widthIn(max = 420.dp),
+            model = logo,
+            // Until the logo shows, the name above says the title.
+            contentDescription = if (loaded) item.name else null,
+            modifier = Modifier.heightIn(max = 96.dp).widthIn(max = 420.dp),
             contentScale = ContentScale.Fit,
             alignment = Alignment.CenterStart,
-        )
-    } else {
-        BasicText(
-            text = item.name.uppercase(),
-            modifier = modifier,
-            style = SnTypography.logoXl.copy(color = SnColors.fg),
-            maxLines = maxLines,
-            overflow = TextOverflow.Ellipsis,
+            onState = { loaded = it is AsyncImagePainter.State.Success },
         )
     }
+}
+
+/** The title's name in the display face, for a title without a logo image. */
+@Composable
+private fun TitleName(
+    name: String,
+    maxLines: Int,
+    modifier: Modifier = Modifier,
+) {
+    BasicText(
+        text = name.uppercase(),
+        modifier = modifier,
+        style = SnTypography.logoXl.copy(color = SnColors.fg),
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** Titles in progress, with how far along each one is and the time left. */
@@ -864,10 +899,17 @@ private fun ContinueWatchingRow(
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(stringResource(Res.string.home_continue_watching))
         SnRow(controlsCenter = EpisodeRowControlsCenter) {
-            items(items, key = { it.id }) { progress ->
+            items(items.distinctBy { it.id }, key = { it.id }) { progress ->
                 val season = progress.season?.toInt()
                 val episode = progress.episode?.toInt()
-                val minutesLeft = ((progress.durationMs - progress.positionMs).toLong() / 60_000).coerceAtLeast(1)
+                // Without a duration, or past it, the time left is unknown: the line is left out
+                // (the subtraction is unsigned and would wrap around).
+                val minutesLeft =
+                    if (progress.durationMs > progress.positionMs) {
+                        ((progress.durationMs - progress.positionMs).toLong() / 60_000).coerceAtLeast(1).toInt()
+                    } else {
+                        null
+                    }
                 val meta =
                     listOfNotNull(
                         if (season != null &&
@@ -877,8 +919,8 @@ private fun ContinueWatchingRow(
                         } else {
                             null
                         },
-                        stringResource(Res.string.time_left, "$minutesLeft min"),
-                    ).joinToString(" · ")
+                        minutesLeft?.let { pluralStringResource(Res.plurals.time_left_minutes, it, it) },
+                    ).joinToString(" · ").ifEmpty { null }
                 SnEpisodeCard(
                     title = progress.name,
                     thumbnail = progress.background ?: progress.poster,

@@ -34,6 +34,7 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -116,7 +117,8 @@ fun LibraryScreen(
                         )
                     } else {
                         SnPosterGrid {
-                            items(shown, key = { it.id }) { item ->
+                            // Titles are told apart by type and id, as the core does.
+                            items(shown.distinctBy { "${it.kind}/${it.id}" }, key = { "${it.kind}/${it.id}" }) { item ->
                                 SnPosterCard(
                                     item.name,
                                     item.poster,
@@ -202,10 +204,10 @@ private fun LibraryItem.statusLine(): String? {
     if (playing != null && playing.durationMs > playing.positionMs) {
         val season = playing.season?.toInt()
         val episode = playing.episode?.toInt()
-        val minutesLeft = ((playing.durationMs - playing.positionMs).toLong() / 60_000).coerceAtLeast(1)
+        val minutesLeft = ((playing.durationMs - playing.positionMs).toLong() / 60_000).coerceAtLeast(1).toInt()
         return listOfNotNull(
             if (season != null && episode != null) stringResource(Res.string.episode_short, season, episode) else null,
-            stringResource(Res.string.time_left, "$minutesLeft min"),
+            pluralStringResource(Res.plurals.time_left_minutes, minutesLeft, minutesLeft),
         ).joinToString(" · ")
     }
     if (watched) return stringResource(Res.string.library_status_watched)

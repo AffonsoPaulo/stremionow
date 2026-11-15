@@ -19,6 +19,10 @@ object NativeLibraries {
     /** JNA name of the Rust core, which the UniFFI bindings load. */
     private const val CORE = "stremionow_ffi"
 
+    /** JNA's own native library, and the property that names the folder it is loaded from first. */
+    private const val JNA_DISPATCH = "jnidispatch"
+    private const val JNA_BOOT_PATH_PROPERTY = "jna.boot.library.path"
+
     /** The bundled resources directory, or null when the app runs without one. */
     val resourcesDirectory: File? by lazy {
         System
@@ -30,6 +34,23 @@ object NativeLibraries {
     /** Mozilla CA store for mpv's TLS verification, or null when it is not bundled. */
     val caBundle: File?
         get() = resourcesDirectory?.resolve("cacert.pem")?.takeIf(File::isFile)
+
+    /**
+     * Has JNA load its own native part (`jnidispatch`) from the bundled resources, where the
+     * build puts the copy from the JNA jar in use. Otherwise JNA unpacks it from its jar into the
+     * temporary folder on every launch. Call before anything touches JNA; without a bundled copy
+     * (a start from an IDE) JNA does as before.
+     *
+     * `jna.nounpack` stays off on purpose: JNA loads from this path before it would unpack
+     * anything, and with the property on it would also stop deleting the copies that earlier
+     * launches left in the temporary folder.
+     */
+    fun useBundledJnaDispatch() {
+        val directory = resourcesDirectory ?: return
+        // JNA looks for .jnilib on macOS, as its jar names the file.
+        val name = System.mapLibraryName(JNA_DISPATCH).replace(".dylib", ".jnilib")
+        if (File(directory, name).isFile) System.setProperty(JNA_BOOT_PATH_PROPERTY, directory.absolutePath)
+    }
 
     /**
      * Points JNA at the bundled Rust core. Call before any native library loads.

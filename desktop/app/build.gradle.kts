@@ -76,8 +76,11 @@ compose.desktop {
             appResourcesRootDir.set(layout.buildDirectory.dir(DesktopNativesPlugin.RESOURCES_ROOT))
             // From `./gradlew suggestRuntimeModules`: jlink leaves out the rest of the JDK, and a module
             // missing here fails only in installed apps (java.management, through jdk.management,
-            // sizes the video memory from the computer's RAM).
-            modules("java.instrument", "jdk.management", "jdk.unsupported")
+            // sizes the video memory from the computer's RAM). Two are loaded as services, which
+            // that task cannot see: jdk.localedata holds every locale but English (without it,
+            // dates, numbers and sorting are English whatever the language), and
+            // jdk.accessibility bridges Swing to Windows' screen readers.
+            modules("java.instrument", "jdk.management", "jdk.unsupported", "jdk.localedata", "jdk.accessibility")
 
             // Drawn by AppIcon.kt; `./gradlew :app:writeAppIcons` writes them again after a change.
             windows {

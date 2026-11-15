@@ -29,7 +29,6 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -203,7 +202,7 @@ class DetailsViewModel(
             mutableInLibrary.value = runCatching { io { core.isInLibrary(id) } }.getOrDefault(false)
             mutableRating.value = runCatching { io { core.rating(id) } }.getOrDefault(TitleRating.NONE)
             val result =
-                runCatching { core.meta(kind, id) }
+                runCatching { core.meta(kind, id).asShown() }
                     .onFailure { logWarning("Could not load $kind/$id", it) }
             mutableDetails.value = result.fold({ Loadable.Ready(it) }, { Loadable.Failed(it) })
             result.getOrNull()?.let { details ->
@@ -221,7 +220,12 @@ class DetailsViewModel(
         reveal: Boolean = false,
     ) {
         mutableSourcesFor.value = videoId
-        val kept = loaders[videoId]?.takeIf { System.currentTimeMillis() - it.startedAt < SOURCES_FRESH_MS }
+        // Sources found are kept a while; a search that ended empty or with failed addons is
+        // made again, since a new one may find what this one could not.
+        val kept =
+            loaders[videoId]?.takeIf {
+                System.currentTimeMillis() - it.startedAt < SOURCES_FRESH_MS && it.state.value.reusable
+            }
         val loader =
             kept ?: SourcesLoader(core, viewModelScope, kind, videoId).also { fresh ->
                 loaders.remove(videoId)?.cancel()
@@ -234,6 +238,13 @@ class DetailsViewModel(
         following?.cancel()
         following = viewModelScope.launch { loader.state.collect { mutableSources.value = it } }
         if (reveal) mutableReveal.value = true
+    }
+
+    /** Asks the addons again for the sources on show, as after a search that found nothing. */
+    fun retrySources() {
+        val videoId = mutableSourcesFor.value ?: return
+        loaders.remove(videoId)?.cancel()
+        openSources(videoId)
     }
 
     /** Remembers [source] as the one played for [videoId], to offer it first next time. */
@@ -489,30 +500,26 @@ private fun DetailsContent(
     val isSeries = details.episodes.isNotEmpty()
     val now = remember(watched, progress) { Instant.now() }
     val next = remember(details, progress, watched, now) { nextUp(details, progress, watched, now) }
+    // A tab with nothing in it is left out rather than shown blank. Related titles arrive
+    // after the page, so the tab chosen is kept by name, not by its place among the tabs.
     val tabs =
-        if (isSeries) {
-            listOf(DetailsTab.Episodes, DetailsTab.Related, DetailsTab.Info)
-        } else {
-            listOf(DetailsTab.Sources, DetailsTab.Related, DetailsTab.Info)
+        buildList {
+            add(if (isSeries) DetailsTab.Episodes else DetailsTab.Sources)
+            if (related.isNotEmpty()) add(DetailsTab.Related)
+            if (hasInfo(details)) add(DetailsTab.Info)
         }
-    var tabIndex by rememberSaveable(item.id) { mutableIntStateOf(0) }
-    val tab = tabs[tabIndex.coerceIn(0, tabs.lastIndex)]
-    // Regular seasons first, specials (season 0) last.
-    val seasons =
-        remember(details) {
-            details.episodes
-                .groupBy { it.season ?: 0u }
-                .toSortedMap(compareBy<UInt> { it == 0u }.thenBy { it })
-        }
+    var tabName by rememberSaveable(item.id) { mutableStateOf(tabs.first().name) }
+    val tab = tabs.firstOrNull { it.name == tabName } ?: tabs.first()
+    val seasons = remember(details) { seasonGroups(details.episodes) }
     var season by rememberSaveable(item.id) {
-        mutableLongStateOf((next.episode?.season ?: seasons.keys.firstOrNull() ?: 0u).toLong())
+        mutableLongStateOf(next.episode?.seasonKey() ?: seasons.keys.firstOrNull() ?: 0L)
     }
     // Opens on the season of the episode the main button leads to, once progress is known,
     // unless the user picked another one.
     var seasonPicked by rememberSaveable(item.id) { mutableStateOf(false) }
-    LaunchedEffect(next.episode?.season) {
-        val nextSeason = next.episode?.season
-        if (!seasonPicked && nextSeason != null) season = nextSeason.toLong()
+    LaunchedEffect(next.episode?.seasonKey()) {
+        val nextSeason = next.episode?.seasonKey()
+        if (!seasonPicked && nextSeason != null) season = nextSeason
     }
     // Each season's row keeps its scroll position while sources show in its place.
     val rowStates = remember(item.id) { mutableMapOf<Long, LazyListState>() }
@@ -544,10 +551,10 @@ private fun DetailsContent(
 
     fun showSources(episode: Episode?) {
         if (episode != null) {
-            season = (episode.season ?: 0u).toLong()
+            season = episode.seasonKey()
             viewModel.openSources(episode.id)
         }
-        tabIndex = 0
+        tabName = tabs.first().name
         revealSources()
     }
 
@@ -599,7 +606,7 @@ private fun DetailsContent(
     LaunchedEffect(reveal) {
         if (reveal) {
             viewModel.revealed()
-            sourcesEpisode?.let { season = (it.season ?: 0u).toLong() }
+            sourcesEpisode?.let { season = it.seasonKey() }
             showSources(null)
         }
     }
@@ -647,16 +654,18 @@ private fun DetailsContent(
         }
     val seriesCovered = remember(details, now) { coveredVideos(details, WatchScope.Series, null, null, now) }
     val watchedChoicesFor =
-        watchedChoices(details, sourcesEpisode ?: next.episode, season.toUInt(), watched, now, viewModel)
+        watchedChoices(details, sourcesEpisode ?: next.episode, season, watched, now, viewModel)
     val actions =
         DetailActions(
             onTrailer = rowTrailer(isSeries, trailer),
             inLibrary = inLibrary,
             onToggleLibrary = { viewModel.toggleLibrary(item) },
             watched = allWatched(seriesCovered, watched),
+            // A series with no episode out yet has nothing to mark: no empty dialog.
+            canMarkWatched = seriesCovered.isNotEmpty(),
             onWatched = {
                 if (isSeries) {
-                    watchedChoices = watchedChoicesFor
+                    if (watchedChoicesFor.isNotEmpty()) watchedChoices = watchedChoicesFor
                 } else {
                     viewModel.setWatched(seriesCovered, !allWatched(seriesCovered, watched))
                 }
@@ -726,8 +735,8 @@ private fun DetailsContent(
                     SnMinimalScroll {
                         SnTabs(
                             tabs.map { it.label() },
-                            tabIndex.coerceIn(0, tabs.lastIndex),
-                            { tabIndex = it },
+                            tabs.indexOf(tab),
+                            { tabName = tabs[it].name },
                             Modifier.padding(horizontal = SnLayout.gutter),
                         )
                     }
@@ -747,6 +756,7 @@ private fun DetailsContent(
                         phone = phone,
                         firstFocus = firstSourceFocus,
                         onChoose = choose,
+                        onRetry = viewModel::retrySources,
                     )
                 } else {
                     item(key = "tab-content-$tab") {
@@ -828,7 +838,7 @@ private fun episodeHeading(episode: Episode): String {
 private fun watchedChoices(
     details: MetaDetails,
     episode: Episode?,
-    season: UInt,
+    season: Long,
     watched: Set<String>,
     now: Instant,
     viewModel: DetailsViewModel,
@@ -849,11 +859,17 @@ private fun watchedChoices(
             )
         }
         val seasonCovered = coveredVideos(details, WatchScope.Season, null, season, now)
-        if (season == 0u) {
+        if (season == 0L) {
             choice(
                 seasonCovered,
                 stringResource(Res.string.watched_specials_mark),
                 stringResource(Res.string.watched_specials_unmark),
+            )
+        } else if (season == NO_SEASON) {
+            choice(
+                seasonCovered,
+                stringResource(Res.string.watched_no_season_mark),
+                stringResource(Res.string.watched_no_season_unmark),
             )
         } else {
             choice(
@@ -946,7 +962,7 @@ private fun HeroButtons(
 
 @Composable
 private fun EpisodesTab(
-    seasons: Map<UInt, List<Episode>>,
+    seasons: Map<Long, List<Episode>>,
     season: Long,
     onSeason: (Long) -> Unit,
     rowState: LazyListState,
@@ -957,19 +973,26 @@ private fun EpisodesTab(
     onChoose: (Episode) -> Unit,
 ) {
     val specials = stringResource(Res.string.details_specials)
+    val noSeason = stringResource(Res.string.details_no_season)
     val watchedLabel = stringResource(Res.string.episode_watched)
     val locale = remember { Locale.getDefault(Locale.Category.FORMAT) }
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space4)) {
         if (seasons.size > 1) {
             SnChipRow(
-                options = seasons.keys.map { it.toLong() },
+                options = seasons.keys.toList(),
                 selected = season,
-                label = { if (it == 0L) specials else stringResource(Res.string.details_season, it.toInt()) },
+                label = {
+                    when (it) {
+                        0L -> specials
+                        NO_SEASON -> noSeason
+                        else -> stringResource(Res.string.details_season, it.toInt())
+                    }
+                },
                 onSelect = onSeason,
                 modifier = Modifier.padding(horizontal = SnLayout.gutter),
             )
         }
-        val episodes = seasons[season.toUInt()].orEmpty()
+        val episodes = seasons[season].orEmpty()
         if (episodes.isEmpty()) {
             BasicText(
                 stringResource(Res.string.details_no_episodes),

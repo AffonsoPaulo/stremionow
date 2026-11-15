@@ -35,6 +35,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NamedNavArgument
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -282,7 +283,14 @@ fun StremioNowApp(
             // A link from outside (the TV home screen) opens its title over whatever is showing.
             LaunchedEffect(link, setup) {
                 if (link != null && !setup) {
-                    navController.navigate(Routes.details(link.kind, link.id)) { launchSingleTop = true }
+                    // Over another title's page it opens a page of its own, so Back returns to
+                    // that one; only the same title already on top is left as it is.
+                    val top = navController.currentBackStackEntry
+                    val showing =
+                        top?.destination?.route == Routes.DETAILS &&
+                            top.arguments?.read { getStringOrNull("kind") } == link.kind &&
+                            top.arguments?.read { getStringOrNull("id") } == link.id
+                    if (!showing) navController.navigate(Routes.details(link.kind, link.id))
                     onLinkOpened()
                 }
             }
@@ -415,7 +423,11 @@ private fun AppPages(
         popEnterTransition = { move(this, true).enter(reducedMotion) },
         popExitTransition = { move(this, true).exit(reducedMotion) },
     ) {
-        val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
+        // A link opens its page only from a page that has settled (resumed), as
+        // dropUnlessResumed does: a second click while the first one's page is still on its way
+        // in would open it twice.
+        val openPage = { route: String -> navController.ifSettled { navController.navigate(route) } }
+        val openTitle = { kind: String, id: String -> openPage(Routes.details(kind, id)) }
         page(Routes.HOME, underHeader = true) {
             HomeScreen(
                 onOpenTitle = { openTitle(it.kind, it.id) },
@@ -423,8 +435,10 @@ private fun AppPages(
                 // The title's page goes under the player, as when playing from it: Back, "Change
                 // source" and a source that cannot be found again all lead there.
                 onResume = {
-                    openTitle(it.kind, it.id)
-                    navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+                    navController.ifSettled {
+                        navController.navigate(Routes.details(it.kind, it.id))
+                        navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+                    }
                 },
                 onOpenAddons = { navController.openSettings(SettingsPage.Addons) },
             )
@@ -514,8 +528,8 @@ private fun AppPages(
                 kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
                 id = backStack.arguments?.read { getStringOrNull("id") }.orEmpty(),
                 onOpenTitle = { openTitle(it.kind, it.id) },
-                onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
-                onSearchPerson = { navController.navigate(Routes.person(it)) },
+                onOpenGenre = { kind, genre -> openPage(Routes.genre(kind, genre)) },
+                onSearchPerson = { openPage(Routes.person(it)) },
                 // The sources are on the title's page, so Back from the player returns there.
                 onPlay = { navController.navigate(Routes.PLAYER) { launchSingleTop = true } },
             )
@@ -686,6 +700,15 @@ private fun NavHostController.openSettings(page: SettingsPage?) {
     popBackStack(Routes.SETTINGS_SECTION, inclusive = true)
     popBackStack(Routes.SETTINGS, inclusive = true)
     navigate(page?.let(SettingsRoutes::of) ?: Routes.SETTINGS) { launchSingleTop = true }
+}
+
+/**
+ * Runs [block] only while the page on top has settled, as `dropUnlessResumed` does for the
+ * page itself: from the moment a navigation starts, the page coming in stays short of resumed
+ * until its transition ends, so a second click in the meantime is dropped.
+ */
+private inline fun NavHostController.ifSettled(block: () -> Unit) {
+    if (currentBackStackEntry?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) block()
 }
 
 /**

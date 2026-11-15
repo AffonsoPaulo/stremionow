@@ -302,7 +302,8 @@ private fun ResultRows(
             contentPadding = PaddingValues(vertical = SnSpacing.space4),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
         ) {
-            items(rows, key = { it.key() }) { row ->
+            // The core lists each catalog once; keys must be unique, so a repeat is dropped.
+            items(rows.distinctBy { it.key() }, key = { it.key() }) { row ->
                 val type = kindLabel(row.catalog.kind)
                 SnPosterSection(
                     slot = row.key(),

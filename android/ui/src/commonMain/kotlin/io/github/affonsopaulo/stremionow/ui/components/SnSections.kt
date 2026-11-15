@@ -140,7 +140,8 @@ fun SnPosterRow(
             spacing = sizing.spacing,
             controlsCenter = SnSpacing.space2 + sizing.cardWidth * 1.5f / 2,
         ) {
-            items(items, key = { "${it.kind}/${it.id}" }) { item ->
+            // Keys must be unique in a lazy row; a title repeated by an addon shows once.
+            items(items.distinctBy { "${it.kind}/${it.id}" }, key = { "${it.kind}/${it.id}" }) { item ->
                 SnPosterCard(
                     item.name,
                     item.poster,

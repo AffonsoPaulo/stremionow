@@ -57,7 +57,7 @@ class RustCorePlugin : Plugin<Project> {
                     workspaceDirectory.set(workspace)
                     sources.from(workspaceSources)
                     crateName.set(CRATE)
-                    abis.set(ANDROID_ABIS)
+                    abis.set(project.androidAbis())
                     // Android Kotlin Multiplatform libraries have no `ndkVersion`; use the pinned NDK.
                     ndkDirectory.set(components.sdkComponents.sdkDirectory.map { it.dir("ndk/$ndkVersion") })
                     outputDirectory.set(project.layout.buildDirectory.dir("generated/rustCore/jniLibs"))

@@ -32,8 +32,11 @@ class DesktopNativesPlugin : Plugin<Project> {
         val buildRustCore =
             tasks.register("buildRustCore", CargoHostBuildTask::class.java) {
                 group = "build"
-                description = "Builds the Rust core as a release shared library for this machine."
+                description = "Builds the Rust core as a shared library for this machine."
                 workspaceDirectory.set(workspace)
+                // `-Pstremionow.cargo.profile=dev` for faster builds in CI's checks; installers
+                // and `run` use release.
+                profile.set(properties.gradleProperty("stremionow.cargo.profile").orElse("release"))
                 sources.from(workspaceSources)
                 crateName.set(CRATE)
                 libraryName.set(LIBRARY)

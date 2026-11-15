@@ -18,8 +18,8 @@ import java.io.File
 import javax.inject.Inject
 
 /**
- * Builds a crate of the Rust workspace as a release shared library for the machine running
- * Gradle and copies it into [outputDirectory].
+ * Builds a crate of the Rust workspace as a shared library for the machine running Gradle, with
+ * the Cargo [profile] given (release unless said otherwise), and copies it into [outputDirectory].
  */
 @CacheableTask
 abstract class CargoHostBuildTask : DefaultTask() {
@@ -40,6 +40,13 @@ abstract class CargoHostBuildTask : DefaultTask() {
     @get:Input
     abstract val libraryName: Property<String>
 
+    /**
+     * Cargo profile: `release` for the app people run, or `dev`, which compiles several times
+     * faster, for CI's checks.
+     */
+    @get:Input
+    abstract val profile: Property<String>
+
     /** Receives the shared library. */
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
@@ -57,11 +64,13 @@ abstract class CargoHostBuildTask : DefaultTask() {
         execOperations.exec {
             workingDir = workspace
             executable = cargoExecutable()
-            args = listOf("build", "--release", "--package", crateName.get())
+            args = listOf("build", "--profile", profile.get(), "--package", crateName.get())
             environment("PATH", pathWithCargo())
         }
 
         val fileName = hostLibraryFileName(libraryName.get())
-        File(workspace, "target/release/$fileName").copyTo(File(output, fileName))
+        // Cargo writes the dev profile to target/debug, and every other profile under its name.
+        val folder = if (profile.get() == "dev") "debug" else profile.get()
+        File(workspace, "target/$folder/$fileName").copyTo(File(output, fileName))
     }
 }

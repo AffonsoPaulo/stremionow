@@ -10,7 +10,27 @@ import org.gradle.api.artifacts.VersionCatalog
 import org.gradle.api.artifacts.VersionCatalogsExtension
 
 /** ABIs the apps ship and the Rust core is built for. */
-internal val ANDROID_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+private val ANDROID_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+
+/**
+ * The ABIs this build makes: all of [ANDROID_ABIS], or those `-Pstremionow.abis` lists (comma
+ * separated). CI's checks build only `arm64-v8a`, which is enough to compile, lint and test and
+ * compiles the Rust core once instead of three times; releases always build them all.
+ */
+internal fun Project.androidAbis(): List<String> {
+    val chosen =
+        providers
+            .gradleProperty("stremionow.abis")
+            .orNull
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?: return ANDROID_ABIS
+    require(chosen.isNotEmpty() && ANDROID_ABIS.containsAll(chosen)) {
+        "stremionow.abis must list some of ${ANDROID_ABIS.joinToString()}"
+    }
+    return chosen
+}
 
 /**
  * Settings shared by every Android application module: SDK levels, Java level, per-ABI APKs,
@@ -38,7 +58,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 abi {
                     isEnable = true
                     reset()
-                    include(*ANDROID_ABIS.toTypedArray())
+                    include(*project.androidAbis().toTypedArray())
                     isUniversalApk = true
                 }
             }

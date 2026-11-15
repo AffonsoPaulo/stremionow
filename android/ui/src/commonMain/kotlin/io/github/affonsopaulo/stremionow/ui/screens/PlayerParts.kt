@@ -80,6 +80,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.interfaceLocale
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.formatShortFileSize
@@ -340,9 +341,11 @@ internal fun TracksList(
     }
 }
 
-/** A track's language in the device's language, and its title when it adds something. */
+/** A track's language in the interface's language, and its title when it adds something. */
 @Composable
 internal fun trackLabel(track: Track): String {
+    // Observed, so the names follow a change of language.
+    val shownIn = interfaceLocale()
     val language =
         track.language?.let { code ->
             // By its two-letter code when it has one: Java names `fr` but not `fre`, as files
@@ -350,7 +353,6 @@ internal fun trackLabel(track: Track): String {
             // With its region when it has one: "Portuguese (Brazil)".
             val tag = displayLanguageTag(code)
             val locale = Locale.forLanguageTag(tag)
-            val shownIn = Locale.getDefault()
             val name =
                 if (locale.country.isEmpty()) {
                     locale.getDisplayLanguage(

@@ -8,6 +8,7 @@ import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.os.Build
 import android.os.LocaleList
+import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
@@ -70,6 +71,7 @@ actual object AppLanguage {
      * After an update to Android 13, a choice the app kept before becomes the system's per-app
      * language, unless the system already has one; the app's copy then goes, so this runs once.
      */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun moveSavedChoice(context: Context) {
         val preferences = preferences(context)
         if (!preferences.contains(KEY)) return

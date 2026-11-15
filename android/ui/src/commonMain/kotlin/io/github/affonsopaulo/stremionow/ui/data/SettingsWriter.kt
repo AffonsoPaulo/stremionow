@@ -52,7 +52,8 @@ internal class SerialQueue(
         jobs.trySend {
             try {
                 job()
-            } catch (failure: Exception) {
+            } catch (failure: Throwable) {
+                // Errors too (a missing native symbol): the queue must outlive any one job.
                 logWarning("Could not save the settings", failure)
             }
         }
@@ -64,7 +65,7 @@ internal class SerialQueue(
         jobs.trySend {
             try {
                 result.complete(job())
-            } catch (failure: Exception) {
+            } catch (failure: Throwable) {
                 result.completeExceptionally(failure)
             }
         }

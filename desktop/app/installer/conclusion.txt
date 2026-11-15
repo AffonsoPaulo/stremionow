@@ -1,0 +1,3 @@
+StremioNow is installed. New versions download on their own and install when you quit the app.
+
+O StremioNow está instalado. As novas versões são baixadas sozinhas e instaladas quando você encerra o app.

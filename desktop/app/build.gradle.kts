@@ -67,7 +67,9 @@ compose.desktop {
         }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Msi, TargetFormat.Dmg, TargetFormat.Deb)
+            // Windows installs with Velopack's installer instead (packageVelopack below): an MSI from
+            // here would install into the same folder and block it.
+            targetFormats(TargetFormat.Dmg, TargetFormat.Deb)
             packageName = "StremioNow"
             // Installers need MAJOR > 0; the core's version is shown in the app.
             packageVersion = "1.0.0"
@@ -87,12 +89,8 @@ compose.desktop {
 
             // Drawn by AppIcon.kt; `./gradlew :app:writeAppIcons` writes them again after a change.
             windows {
+                // The icon of StremioNow.exe, the app folder's launcher.
                 iconFile.set(layout.projectDirectory.file("icons/StremioNow.ico"))
-                menuGroup = "StremioNow"
-                perUserInstall = true
-                shortcut = true
-                // Fixed so that newer installers upgrade older ones instead of installing side by side.
-                upgradeUuid = "6f0c1d2e-5b7a-4f43-9c1e-8a2d4b6e9f10"
             }
             linux {
                 iconFile.set(layout.projectDirectory.file("icons/StremioNow.png"))
@@ -128,15 +126,23 @@ tasks.register<JavaExec>("writeAppIcons") {
     systemProperty("java.awt.headless", "true")
 }
 
-// The Windows installer people download: Velopack's one-click Setup.exe, which installs the app
-// in the user's profile (%LOCALAPPDATA%\StremioNow, no administrator rights), shows
-// icons/StremioNow-splash.png while it does, adds the Start menu and desktop shortcuts and
-// opens the app; Velopack also makes the packages that later updates are built from. It wraps
+// The Windows installer people download: Velopack's StremioNow-win.msi, a wizard that welcomes,
+// asks to accept the licence (installer/), installs the app in the user's profile
+// (%LOCALAPPDATA%\StremioNow, no administrator rights) with the Start menu and desktop shortcuts,
+// and ends with a box, ticked, to open the app. Its pages show icons/StremioNow-dialog.bmp and
+// icons/StremioNow-banner.bmp, and icons/StremioNow-splash.png shows while the app installs or
+// updates. Velopack also makes the packages that later updates are built from, and a one-click
+// StremioNow-win-Setup.exe, which is not published. It wraps
 // the folder `createDistributable` makes, so packaging needs a JDK with jpackage, as the MSI:
 //   ./gradlew :app:packageVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
 // `vpk` is a .NET tool pinned in desktop/dotnet-tools.json (`dotnet tool restore` installs it).
 // Each release needs a higher version than the last (appVersion above) for updates to apply.
-// Output: build/velopack/ (StremioNow-win-Setup.exe, the portable zip and the packages).
+// Output: build/velopack/ (StremioNow-win.msi, the portable zip and the packages).
+fun installer(name: String) =
+    layout.projectDirectory
+        .file("installer/$name")
+        .asFile.absolutePath
+
 tasks.register<Exec>("packageVelopack") {
     description = "Builds the Windows installer (Velopack) from the app folder createDistributable makes."
     group = "compose desktop"
@@ -181,13 +187,30 @@ tasks.register<Exec>("packageVelopack") {
         // The app updates from full packages only (AppUpdates.kt).
         "--delta",
         "None",
+        "--msi",
+        "--instLocation",
+        "PerUser",
+        "--instWelcome",
+        installer("welcome.txt"),
+        "--instLicense",
+        installer("license.md"),
+        "--instConclusion",
+        installer("conclusion.txt"),
+        "--msiTopBanner",
+        layout.projectDirectory
+            .file("icons/StremioNow-banner.bmp")
+            .asFile.absolutePath,
+        "--msiDialogBackground",
+        layout.projectDirectory
+            .file("icons/StremioNow-dialog.bmp")
+            .asFile.absolutePath,
         "--outputDir",
         output.get().asFile.absolutePath,
     )
 }
 
 // Attaches the Windows files packageVelopack made to the GitHub release v<appVersion>: the
-// installer, the portable zip and what installed apps update from (AppUpdates.kt reads the
+// installer (the MSI), the portable zip and what installed apps update from (AppUpdates.kt reads the
 // latest published release). The Release workflow adds the Android APKs to the same release
 // when the tag is pushed; whichever runs first creates the draft, the other adds to it. Needs the
 // GitHub CLI signed in (`gh auth login`) and the commit pushed:
@@ -219,7 +242,7 @@ abstract class PublishWindowsRelease
             val folder = packages.get().asFile
             val files =
                 listOf(
-                    "StremioNow-win-Setup.exe",
+                    "StremioNow-win.msi",
                     "StremioNow-win-Portable.zip",
                     "StremioNow-${version.get()}-full.nupkg",
                     "releases.win.json",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.desktop
 
+import org.jetbrains.skia.Canvas
 import org.jetbrains.skia.Data
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Font
@@ -12,61 +13,115 @@ import org.jetbrains.skia.Rect
 import org.jetbrains.skia.SamplingMode
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.TextLine
+import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import javax.imageio.ImageIO
 
 /**
- * The picture the installer shows while it installs (Velopack's splash): the app's icon and its
- * wordmark, "Stremio" in white and "Now" in the accent, on the app's background, as the app
- * draws them. Drawn with Skia, the app's own renderer, so the wordmark is Outfit ExtraBold like
- * in the app (Java2D cannot pick a weight of a variable font). The installer draws its progress
- * bar along the bottom, in the accent.
+ * The pictures of the Windows installer (Velopack's MSI), drawn with Skia, the app's own
+ * renderer, so the wordmark is Outfit ExtraBold like in the app (Java2D cannot pick a weight of
+ * a variable font): the icon and the wordmark, "Stremio" in white and "Now" in the accent, on
+ * the app's background.
+ *
+ * - [splash]: shown while the app installs or updates, with the progress bar in the accent.
+ * - [dialog]: the background of the installer's first and last pages. Windows draws their text
+ *   in black on the right, so only the left column is dark.
+ * - [banner]: the strip across the top of the other pages, under black text on the left.
  */
 internal object AppSplash {
-    const val WIDTH = 600
-    const val HEIGHT = 300
-
     private const val BACKGROUND = 0xFF0A0B10.toInt()
     private const val FOREGROUND = 0xFFF4F5F8.toInt()
     private const val ACCENT = 0xFF8B7CFF.toInt()
+    private const val WHITE = 0xFFFFFFFF.toInt()
 
-    /** The icon's side and the wordmark's size, in pixels. */
-    private const val ICON = 104
-    private const val WORDMARK_SIZE = 54f
-    private const val GAP = 28f
+    /** The installer's progress window: the icon beside the wordmark. */
+    fun splash(): ByteArray =
+        draw(600, 300) { canvas ->
+            canvas.clear(BACKGROUND)
+            val font = Font(wordmarkTypeface(), 54f)
+            val icon = 104f
+            val gap = 28f
+            val left = (600 - (icon + gap + wordmarkWidth(font))) / 2f
+            drawIcon(canvas, left, (300 - icon) / 2f, icon)
+            drawWordmark(canvas, font, left + icon + gap, 300 / 2f + font.metrics.capHeight / 2f)
+        }
 
-    /** The splash as PNG bytes. */
-    fun png(): ByteArray {
-        val surface = Surface.makeRasterN32Premul(WIDTH, HEIGHT)
-        val canvas = surface.canvas
-        canvas.clear(BACKGROUND)
+    /** The first and last pages' background (493 × 312, WiX's size): a dark column on the left. */
+    fun dialog(): ByteArray =
+        draw(493, 312) { canvas ->
+            canvas.clear(WHITE)
+            val column = 164f
+            canvas.drawRect(Rect.makeWH(column, 312f), Paint().apply { color = BACKGROUND })
+            val icon = 72f
+            drawIcon(canvas, (column - icon) / 2f, 96f, icon)
+            val font = Font(wordmarkTypeface(), 22f)
+            drawWordmark(canvas, font, (column - wordmarkWidth(font)) / 2f, 96f + icon + 34f)
+        }
 
-        val font = Font(wordmarkTypeface(), WORDMARK_SIZE)
-        val stremio = TextLine.make("Stremio", font)
-        val now = TextLine.make("Now", font)
-        val wordmarkWidth = stremio.width + now.width
-        val left = (WIDTH - (ICON + GAP + wordmarkWidth)) / 2f
-        val top = (HEIGHT - ICON) / 2f
+    /** The other pages' top strip (493 × 58, WiX's size): white, with the icon on the right. */
+    fun banner(): ByteArray =
+        draw(493, 58) { canvas ->
+            canvas.clear(WHITE)
+            val icon = 40f
+            drawIcon(canvas, 493f - icon - 12f, (58f - icon) / 2f, icon)
+        }
 
-        val icon = Image.makeFromEncoded(iconPng())
+    /** PNG bytes as BMP, the only format Windows Installer's pages take. */
+    fun bmp(png: ByteArray): ByteArray {
+        val source = ImageIO.read(ByteArrayInputStream(png))
+        val rgb = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_RGB)
+        rgb.createGraphics().apply {
+            drawImage(source, 0, 0, null)
+            dispose()
+        }
+        return ByteArrayOutputStream().use { bytes ->
+            check(ImageIO.write(rgb, "bmp", bytes)) { "No BMP writer" }
+            bytes.toByteArray()
+        }
+    }
+
+    private fun draw(
+        width: Int,
+        height: Int,
+        paint: (Canvas) -> Unit,
+    ): ByteArray {
+        val surface = Surface.makeRasterN32Premul(width, height)
+        paint(surface.canvas)
+        val data =
+            surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG) ?: error("Could not encode the picture")
+        return data.bytes
+    }
+
+    private fun drawIcon(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        size: Float,
+    ) {
+        // Drawn larger than shown so it stays sharp when scaled down.
+        val icon = Image.makeFromEncoded(iconPng((size * 2).toInt()))
         canvas.drawImageRect(
             icon,
             Rect.makeWH(icon.width.toFloat(), icon.height.toFloat()),
-            Rect.makeXYWH(left, top, ICON.toFloat(), ICON.toFloat()),
+            Rect.makeXYWH(x, y, size, size),
             SamplingMode.MITCHELL,
             Paint(),
             true,
         )
+    }
 
-        // The wordmark centred on the icon's middle, by its cap height.
-        val x = left + ICON + GAP
-        val baseline = HEIGHT / 2f + font.metrics.capHeight / 2f
+    private fun wordmarkWidth(font: Font) = TextLine.make("Stremio", font).width + TextLine.make("Now", font).width
+
+    private fun drawWordmark(
+        canvas: Canvas,
+        font: Font,
+        x: Float,
+        baseline: Float,
+    ) {
+        val stremio = TextLine.make("Stremio", font)
         canvas.drawTextLine(stremio, x, baseline, Paint().apply { color = FOREGROUND })
-        canvas.drawTextLine(now, x + stremio.width, baseline, Paint().apply { color = ACCENT })
-
-        val data =
-            surface.makeImageSnapshot().encodeToData(EncodedImageFormat.PNG) ?: error("Could not encode the splash")
-        return data.bytes
+        canvas.drawTextLine(TextLine.make("Now", font), x + stremio.width, baseline, Paint().apply { color = ACCENT })
     }
 
     /** Outfit at ExtraBold, the wordmark's face, from the shared interface's fonts. */
@@ -76,10 +131,9 @@ internal object AppSplash {
             ?.makeClone(FontVariation("wght", EXTRA_BOLD))
             ?: error("Could not read the wordmark's font")
 
-    /** The icon, drawn larger than shown so it stays sharp when scaled down. */
-    private fun iconPng(): ByteArray =
+    private fun iconPng(size: Int): ByteArray =
         ByteArrayOutputStream().use { bytes ->
-            ImageIO.write(AppIcon.render(ICON * 2), "png", bytes)
+            ImageIO.write(AppIcon.render(size), "png", bytes)
             bytes.toByteArray()
         }
 

@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.data
 
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.ui.crash.KnownSecrets
 import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
@@ -9,6 +10,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -34,8 +36,17 @@ object AppGraph {
         core ?: synchronized(this) {
             core ?: StremioCore(coreDataDirectory(context).absolutePath)
                 .also { opened ->
-                    SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let(opened::restoreSession)
+                    SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let { key ->
+                        KnownSecrets.add(key)
+                        opened.restoreSession(key)
+                    }
                     core = opened
+                    // Crash reports remove the keys in addons' addresses too.
+                    scope.launch {
+                        runCatching { opened.addons() }.onSuccess { addons ->
+                            KnownSecrets.addAddressKeys(addons.map { it.manifestUrl })
+                        }
+                    }
                     DeviceSharing.restore(context, opened)
                     DebugLog.enabled = runCatching { opened.settings().debugLogs }.getOrDefault(false)
                 }

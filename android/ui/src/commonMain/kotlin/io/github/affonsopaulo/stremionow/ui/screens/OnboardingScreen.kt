@@ -38,6 +38,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.SnWordmark
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.crash.KnownSecrets
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -114,6 +115,7 @@ class OnboardingViewModel(
             mutableState.update { it.copy(debridFailed = true) }
             return
         }
+        KnownSecrets.add(key)
         mutableState.update { it.copy(busy = true, debridFailed = false) }
         viewModelScope.launch {
             val url = "https://torrentio.strem.fun/${service.torrentioKey}=$key/manifest.json"

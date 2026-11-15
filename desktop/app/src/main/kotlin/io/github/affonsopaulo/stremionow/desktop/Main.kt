@@ -17,6 +17,7 @@ import io.github.affonsopaulo.stremionow.ui.components.AppShortcuts
 import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.KeepRunning
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.SmokeTest
@@ -79,8 +80,10 @@ fun main(args: Array<String>) {
         val input = remember { DesktopInput() }
         // Seen at the window, so they work even when nothing in it has focus yet.
         val shortcuts = remember { AppShortcuts() }
+        // Quits, or keeps running in the system tray when Settings says so.
+        val keepRunning = remember { KeepRunning(onQuit = ::exitApplication) }
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = keepRunning::onCloseRequest,
             state = windowState,
             title = APP_NAME,
             onPreviewKeyEvent = { event -> input.onPreviewKeyEvent(event) || shortcuts.onPreviewKeyEvent(event) },
@@ -90,6 +93,7 @@ fun main(args: Array<String>) {
                 window.minimumSize = MINIMUM_SIZE
                 window.background = BACKGROUND
                 SystemTitleBar.follow(window)
+                keepRunning.attach(window, AppIcon.images)
             }
             val host =
                 remember(window) {

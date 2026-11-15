@@ -740,6 +740,15 @@
   <!-- No background box, or no outline. -->
   <string name="settings_color_none">None</string>
 
+  <!-- Settings › General (desktop): how the windows behave. -->
+  <string name="settings_esc_full_screen">Esc leaves full screen</string>
+  <string name="settings_esc_full_screen_body">In the player, Esc first leaves full screen. When off, Esc goes straight back, as when the player isn\'t full screen.</string>
+  <string name="settings_quit_on_close">Closing the window quits the app</string>
+  <string name="settings_quit_on_close_body">When off, StremioNow keeps running in the system tray, so other devices it serves keep playing. Open it again or quit from the tray icon.</string>
+  <!-- The menu of the app's icon in the system tray. -->
+  <string name="tray_open">Open StremioNow</string>
+  <string name="tray_quit">Quit</string>
+
   <!-- Settings › Playback (Android): which app plays sources. -->
   <string name="settings_play_in">Play in</string>
   <string name="settings_play_in_body">Another app, such as VLC, MX Player or Just Player, can play the sources instead; you pick it each time. StremioNow can\'t follow your progress there, so Continue watching and watched episodes don\'t update.</string>

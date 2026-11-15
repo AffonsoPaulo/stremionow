@@ -37,4 +37,6 @@ internal fun defaultSettings() =
         seekStepSeconds = 10u,
         seekShortStepSeconds = 3u,
         playerType = PlayerType.INTERNAL,
+        escExitsFullScreen = true,
+        quitOnClose = true,
     )

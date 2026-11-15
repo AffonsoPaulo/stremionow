@@ -75,6 +75,9 @@ class PlayerViewModel<out P : VideoPlayer>(
     /** How far the keys and the skip buttons move, from Settings › Playback. */
     internal val seekSteps = SeekSteps.from(settings)
 
+    /** Esc leaves full screen first (desktop), from Settings › General. */
+    internal val escLeavesFullScreen = settings?.escExitsFullScreen ?: true
+
     val player: P =
         createPlayer(
             PlayerOptions(

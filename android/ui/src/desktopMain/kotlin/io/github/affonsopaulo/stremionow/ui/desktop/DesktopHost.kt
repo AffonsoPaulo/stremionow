@@ -63,6 +63,13 @@ class DesktopHost(
         mainWindow.isVisible = false
     }
 
+    /**
+     * Set when the player's window was closed with "Closing the window quits the app" off: the
+     * player leaves first, and once it has gone the app's window closes the way that setting
+     * says (see `KeepRunning`), rather than leaving the video playing out of sight.
+     */
+    internal var closeAfterPlayer = false
+
     /** Closes the app, as the close button of its window does, from the player's window. */
     internal fun closeApp() {
         mainWindow.dispatchEvent(WindowEvent(mainWindow, WindowEvent.WINDOW_CLOSING))

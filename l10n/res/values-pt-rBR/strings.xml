@@ -547,6 +547,13 @@
   <string name="settings_color_translucent_black">Preto translúcido</string>
   <string name="settings_color_none">Nenhum</string>
 
+  <string name="settings_esc_full_screen">Esc sai da tela cheia</string>
+  <string name="settings_esc_full_screen_body">No player, o Esc primeiro sai da tela cheia. Desligado, o Esc volta direto, como quando o player não está em tela cheia.</string>
+  <string name="settings_quit_on_close">Fechar a janela encerra o app</string>
+  <string name="settings_quit_on_close_body">Desligado, o StremioNow continua rodando na bandeja do sistema, para que outros aparelhos que ele atende continuem reproduzindo. Abra de novo ou encerre pelo ícone na bandeja.</string>
+  <string name="tray_open">Abrir o StremioNow</string>
+  <string name="tray_quit">Encerrar</string>
+
   <string name="settings_play_in">Reproduzir em</string>
   <string name="settings_play_in_body">Outro app, como VLC, MX Player ou Just Player, pode reproduzir as fontes no lugar do StremioNow; você escolhe qual a cada vez. O StremioNow não acompanha o progresso lá, então Continuar assistindo e os episódios assistidos não são atualizados.</string>
   <string name="settings_play_in_app">StremioNow</string>

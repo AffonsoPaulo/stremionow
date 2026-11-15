@@ -172,7 +172,8 @@ internal class OverlayState {
 /**
  * Space, K, Left, Right, J, L, Up, Down, M, F, N, E, S and Esc, wherever the focus is in the overlay.
  * Left and Right (and J and L) move by [seek]'s step, Shift with Left and Right by its shorter
- * one. S skips the intro, recap or credits whose prompt shows.
+ * one. S skips the intro, recap or credits whose prompt shows. Esc leaves full screen first unless
+ * [escLeavesFullScreen] is off (Settings), in which case it steps back as out of full screen.
  * Up and Down change the volume and M mutes it. Esc (and the
  * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
  * [onNext], when there is one; E opens and closes the episodes, when the title has them.
@@ -186,6 +187,7 @@ internal fun handlePlayerShortcut(
     onNext: (() -> Unit)?,
     hasEpisodes: Boolean = false,
     seek: SeekSteps = SeekSteps.DEFAULT,
+    escLeavesFullScreen: Boolean = true,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
     when (event.key) {
@@ -240,7 +242,7 @@ internal fun handlePlayerShortcut(
         }
 
         Key.Escape -> {
-            playerBack(pair, state, onBack)
+            playerBack(pair, state, onBack, leavesFullScreen = escLeavesFullScreen)
         }
 
         // Compose moves the focus; the controls only need to be showing.
@@ -257,21 +259,45 @@ internal fun handlePlayerShortcut(
     return true
 }
 
-/** One step back: out of full screen, then out of an open panel, then out of the player. */
+/** What one step back does in the player, in this order. */
+internal enum class BackStep { DismissHdr, LeaveFullScreen, ClosePanel, Leave }
+
+/**
+ * The next step back: the HDR question, then full screen (unless [leavesFullScreen] is off),
+ * then an open panel, then the player itself.
+ */
+internal fun backStep(
+    askingHdr: Boolean,
+    fullScreen: Boolean,
+    panelOpen: Boolean,
+    leavesFullScreen: Boolean = true,
+): BackStep =
+    when {
+        askingHdr -> BackStep.DismissHdr
+        fullScreen && leavesFullScreen -> BackStep.LeaveFullScreen
+        panelOpen -> BackStep.ClosePanel
+        else -> BackStep.Leave
+    }
+
+/**
+ * One step back (see [backStep]). The mouse's back button always leaves full screen first;
+ * Esc does unless Settings says otherwise ([leavesFullScreen]).
+ */
 internal fun playerBack(
     pair: WindowPair,
     state: OverlayState,
     onBack: () -> Unit,
+    leavesFullScreen: Boolean = true,
 ) {
-    when {
+    when (backStep(state.isAskingHdr, pair.isFullScreen, state.panel != null, leavesFullScreen)) {
         // Dismissing the HDR prompt changes nothing, as when it times out.
-        state.isAskingHdr -> state.isAskingHdr = false
+        BackStep.DismissHdr -> state.isAskingHdr = false
 
-        pair.isFullScreen -> pair.exitFullScreen()
+        BackStep.LeaveFullScreen -> pair.exitFullScreen()
 
-        state.panel != null -> state.panel = null
+        BackStep.ClosePanel -> state.panel = null
 
-        else -> onBack()
+        BackStep.Leave -> onBack()
     }
     state.poke()
 }

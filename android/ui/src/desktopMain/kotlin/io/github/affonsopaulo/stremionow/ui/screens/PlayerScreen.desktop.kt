@@ -16,6 +16,7 @@ import io.github.affonsopaulo.stremionow.player.MpvPlayer
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.DesktopWindowSettings
 import io.github.affonsopaulo.stremionow.ui.desktop.DisplayChoices
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.MediaKeys
@@ -37,6 +38,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import kotlinx.coroutines.launch
 import java.awt.Dialog
+import java.awt.EventQueue
 import java.awt.Frame
 import java.awt.Rectangle
 import java.awt.event.WindowAdapter
@@ -108,8 +110,20 @@ actual fun PlayerScreen(
     val state = remember { OverlayState() }
     val leave = remember(player) { Leave() }
     // The window's close button, Alt+F4 and the taskbar's "Close window" close the app, as in
-    // the app's own window; Back and Esc are the way back to it.
-    val overlay = remember(player) { createOverlay(player.video, onCloseRequest = host::closeApp) }
+    // the app's own window; Back and Esc are the way back to it. When closing keeps the app
+    // running, the player leaves first and the app's window closes once it is gone.
+    val overlay =
+        remember(player) {
+            createOverlay(player.video) {
+                if (DesktopWindowSettings.quitsOnClose()) {
+                    host.closeApp()
+                } else {
+                    player.pause()
+                    host.closeAfterPlayer = true
+                    leave.back()
+                }
+            }
+        }
     val pair = remember(player) { WindowPair(player.video.frame, overlay) }
     SideEffect {
         leave.onBack = onBack
@@ -131,6 +145,11 @@ actual fun PlayerScreen(
         onDispose {
             display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
             player.video.hide()
+            if (host.closeAfterPlayer) {
+                host.closeAfterPlayer = false
+                // After this composition is applied, not in the middle of it.
+                EventQueue.invokeLater(host::closeApp)
+            }
         }
     }
 
@@ -154,6 +173,7 @@ actual fun PlayerScreen(
                     viewModel.selection.details.episodes
                         .isNotEmpty(),
                 seek = viewModel.seekSteps,
+                escLeavesFullScreen = viewModel.escLeavesFullScreen,
             )
         },
     ) {

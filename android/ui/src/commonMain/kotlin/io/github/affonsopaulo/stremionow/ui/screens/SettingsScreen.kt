@@ -323,7 +323,10 @@ private fun settingsViewModel(): SettingsViewModel {
     return viewModel { SettingsViewModel(AppGraph.core(context)) }
 }
 
-/** The interface language; the system's by default (see [AppLanguage]). */
+/**
+ * The interface language, the system's by default (see [AppLanguage]); on the desktop, also how
+ * its windows behave.
+ */
 @Composable
 private fun GeneralPage() {
     val context = LocalPlatformContext.current
@@ -346,6 +349,27 @@ private fun GeneralPage() {
             },
         )
     }
+    if (isDesktopApp()) WindowSettings()
+}
+
+/** How the desktop app's windows behave: Esc in the player's full screen, and closing the window. */
+@Composable
+private fun WindowSettings() {
+    val viewModel = settingsViewModel()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val current = settings ?: return
+    SettingsToggle(
+        title = stringResource(Res.string.settings_esc_full_screen),
+        body = stringResource(Res.string.settings_esc_full_screen_body),
+        checked = current.escExitsFullScreen,
+        onToggle = { viewModel.update { it.copy(escExitsFullScreen = !it.escExitsFullScreen) } },
+    )
+    SettingsToggle(
+        title = stringResource(Res.string.settings_quit_on_close),
+        body = stringResource(Res.string.settings_quit_on_close_body),
+        checked = current.quitOnClose,
+        onToggle = { viewModel.update { it.copy(quitOnClose = !it.quitOnClose) } },
+    )
 }
 
 @Composable

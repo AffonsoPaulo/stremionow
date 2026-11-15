@@ -52,6 +52,8 @@ const DEFAULT_UP_NEXT_COUNTDOWN_SECONDS: u32 = 10;
 const SEEK_STEP_SECONDS: &str = "seek_step_seconds";
 const SEEK_SHORT_STEP_SECONDS: &str = "seek_short_step_seconds";
 const PLAYER_TYPE: &str = "player_type";
+const ESC_EXITS_FULL_SCREEN: &str = "esc_exits_full_screen";
+const QUIT_ON_CLOSE: &str = "quit_on_close";
 
 /// Seek steps the user can pick, in seconds (Stremio offers 3 to 30 too; its defaults, 10 and
 /// 3, are ours).
@@ -228,6 +230,11 @@ pub struct AppSettings {
     pub seek_short_step_seconds: u32,
     /// Which app plays sources: the app's own player, or another one (Android only).
     pub player_type: PlayerType,
+    /// Esc leaves the player's full screen first (desktop); off, it goes back at once.
+    pub esc_exits_full_screen: bool,
+    /// Closing the app's window quits the app (desktop); off, it keeps running out of sight,
+    /// for serving other devices, and comes back from the system tray.
+    pub quit_on_close: bool,
 }
 
 impl Default for AppSettings {
@@ -258,6 +265,8 @@ impl Default for AppSettings {
             seek_step_seconds: 10,
             seek_short_step_seconds: 3,
             player_type: PlayerType::Internal,
+            esc_exits_full_screen: true,
+            quit_on_close: true,
         }
     }
 }
@@ -360,6 +369,12 @@ impl StremioCore {
             player_type: store
                 .setting(PLAYER_TYPE)?
                 .map_or(defaults.player_type, |value| PlayerType::parse(&value)),
+            esc_exits_full_screen: store
+                .setting(ESC_EXITS_FULL_SCREEN)?
+                .map_or(defaults.esc_exits_full_screen, |value| value == "1"),
+            quit_on_close: store
+                .setting(QUIT_ON_CLOSE)?
+                .map_or(defaults.quit_on_close, |value| value == "1"),
         })
     }
 
@@ -455,6 +470,8 @@ impl StremioCore {
             &seek_step(settings.seek_short_step_seconds).to_string(),
         )?;
         store.set_setting(PLAYER_TYPE, settings.player_type.as_str())?;
+        store.set_setting(ESC_EXITS_FULL_SCREEN, flag(settings.esc_exits_full_screen))?;
+        store.set_setting(QUIT_ON_CLOSE, flag(settings.quit_on_close))?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
         self.apply_network_policy();
@@ -619,6 +636,8 @@ mod tests {
             seek_step_seconds: 0,
             seek_short_step_seconds: 1000,
             player_type: PlayerType::External,
+            esc_exits_full_screen: false,
+            quit_on_close: false,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -656,6 +675,30 @@ mod tests {
         assert_eq!(saved.seek_step_seconds, 3, "the nearest choice");
         assert_eq!(saved.seek_short_step_seconds, 30);
         assert_eq!(saved.player_type, PlayerType::External);
+        assert!(!saved.esc_exits_full_screen);
+        assert!(!saved.quit_on_close);
+    }
+
+    #[test]
+    fn the_window_behaves_as_stremios_until_changed() {
+        let defaults = AppSettings::default();
+        assert!(defaults.esc_exits_full_screen);
+        assert!(defaults.quit_on_close);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert!(
+            core.settings().expect("reads").quit_on_close,
+            "never set means on"
+        );
+        core.update_settings(AppSettings {
+            quit_on_close: false,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert!(!saved.quit_on_close);
+        assert!(saved.esc_exits_full_screen);
     }
 
     #[test]

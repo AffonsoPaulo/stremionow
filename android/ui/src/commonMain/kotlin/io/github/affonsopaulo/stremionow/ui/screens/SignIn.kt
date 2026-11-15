@@ -214,6 +214,9 @@ internal class SignInFlow(
         val key = result.getOrNull()
         if (key != null) {
             SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, key)
+            // The first sync runs once the key is kept, so quitting during it stays signed in. A
+            // failed one is not a failed sign-in: the next sync retries.
+            runCatching { core.sync() }.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             AccountEvents.changed()
             onMain(mine) { onSignedIn() }
             return

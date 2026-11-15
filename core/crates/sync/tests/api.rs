@@ -231,6 +231,22 @@ async fn other_api_errors_keep_code_and_message() {
 }
 
 #[tokio::test]
+async fn other_login_errors_are_a_refused_sign_in_without_the_message() {
+    let (server, api) = setup().await;
+    mock(
+        &server,
+        "login",
+        login_request("pw"),
+        json!({ "error": { "code": 77, "message": "Second step for user@example.com" } }),
+    )
+    .await;
+
+    let error = api.login("user@example.com", "pw").await.unwrap_err();
+    assert_eq!(error, SyncError::SignInRefused { code: 77 });
+    assert!(!format!("{error} {error:?}").contains("user@example.com"));
+}
+
+#[tokio::test]
 async fn http_errors_without_envelope_are_reported() {
     let (server, api) = setup().await;
     Mock::given(path("/api/getUser"))
@@ -336,8 +352,14 @@ async fn library_is_fetched_and_round_trips_unknown_fields() {
     )
     .await;
 
-    let items = api.library(KEY).await.expect("library");
-    assert_eq!(items.len(), 1, "unreadable items are skipped");
+    let library = api.library(KEY).await.expect("library");
+    let items = &library.items;
+    assert_eq!(items.len(), 1, "unreadable items are set apart");
+    assert_eq!(
+        library.unreadable["broken-without-mtime"],
+        json!({ "_id": "broken-without-mtime", "type": "movie" }),
+        "and kept as the server sent them"
+    );
     let item = &items[0];
     assert!(item.in_library());
     assert_eq!(item.progress(), Some(("tt0111161", 2000, 8_520_000)));

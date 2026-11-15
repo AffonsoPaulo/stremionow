@@ -3,8 +3,12 @@
 //!
 //! Ratings are kept on the device. Signed in, they also go to Stremio's likes service, as the
 //! official apps do, so they follow the account: a change is sent right away and, when that
-//! fails (offline), marked pending and sent again the next time the title opens.
+//! fails (offline), marked pending and sent again the next time the title opens. A rating set
+//! while signed out is pending too, so it reaches the account signed in next.
 
+use std::sync::atomic::Ordering;
+
+use stremionow_library::Store;
 use stremionow_sync::Rating;
 
 use crate::core::StremioCore;
@@ -12,8 +16,24 @@ use crate::records::CoreError;
 
 /// Settings with each title's rating: `rating:<id>` holds `liked`, `loved` or nothing.
 const RATING_PREFIX: &str = "rating:";
-/// Settings marking ratings not yet sent to the account: `rating_pending:<id>`.
-pub(crate) const PENDING_PREFIX: &str = "rating_pending:";
+/// Settings marking ratings not yet sent to the account: `rating_pending:<id>`, holding
+/// [`PENDING_FOR_ACCOUNT`] or [`PENDING_SIGNED_OUT`].
+const PENDING_PREFIX: &str = "rating_pending:";
+/// A rating set while signed in that the account has not received: it belongs to that account.
+const PENDING_FOR_ACCOUNT: &str = "1";
+/// A rating set while signed out: it goes to whichever account signs in.
+const PENDING_SIGNED_OUT: &str = "signed-out";
+
+/// Forgets the ratings waiting for the account last signed in, before another one signs in.
+/// The ratings stay on the device, and those set while signed out still go to the new account.
+pub(crate) fn forget_account_ratings(store: &Store) -> Result<(), CoreError> {
+    for (key, value) in store.settings_with_prefix(PENDING_PREFIX)? {
+        if value != PENDING_SIGNED_OUT {
+            store.delete_setting(&key)?;
+        }
+    }
+    Ok(())
+}
 /// Longest title id or type accepted, like the other per-title settings.
 const MAX_ID_LEN: usize = 200;
 
@@ -82,12 +102,18 @@ impl StremioCore {
         if !valid(&id) || !valid(&kind) {
             return Ok(TitleRating::None);
         }
+        let pending_key = format!("{PENDING_PREFIX}{id}");
+        let key = self.account.auth_key();
         {
             let store = self.store()?;
+            self.account.ratings_changed.fetch_add(1, Ordering::SeqCst);
             store.set_setting(&format!("{RATING_PREFIX}{id}"), rating.stored())?;
-            store.delete_setting(&format!("{PENDING_PREFIX}{id}"))?;
+            match key {
+                Some(_) => store.delete_setting(&pending_key)?,
+                None => store.set_setting(&pending_key, PENDING_SIGNED_OUT)?,
+            }
         }
-        if let Some(key) = self.account.auth_key()
+        if let Some(key) = key
             && let Err(error) = self
                 .account
                 .likes
@@ -96,7 +122,7 @@ impl StremioCore {
         {
             log::warn!("could not send a rating to the account: {error}");
             self.store()?
-                .set_setting(&format!("{PENDING_PREFIX}{id}"), "1")?;
+                .set_setting(&pending_key, PENDING_FOR_ACCOUNT)?;
         }
         Ok(rating)
     }
@@ -107,6 +133,7 @@ impl StremioCore {
         if !valid(&id) || !valid(&kind) {
             return Ok(TitleRating::None);
         }
+        let changes = self.account.ratings_changed.load(Ordering::SeqCst);
         let local = self.local_rating(&id)?;
         let Some(key) = self.account.auth_key() else {
             return Ok(local);
@@ -121,15 +148,23 @@ impl StremioCore {
                 .await
                 .is_ok()
             {
-                self.store()?.delete_setting(&pending_key)?;
+                let store = self.store()?;
+                // Rated again while this was on its way: that rating is the one to send.
+                if self.account.ratings_changed.load(Ordering::SeqCst) == changes {
+                    store.delete_setting(&pending_key)?;
+                }
             }
             return Ok(local);
         }
         match self.account.likes.status(&key, &id, &kind).await {
             Ok(remote) => {
                 let rating = TitleRating::from_remote(remote);
-                self.store()?
-                    .set_setting(&format!("{RATING_PREFIX}{id}"), rating.stored())?;
+                let store = self.store()?;
+                // Rated here while the account was asked: that rating stands.
+                if self.account.ratings_changed.load(Ordering::SeqCst) != changes {
+                    return stored_rating(&store, &id);
+                }
+                store.set_setting(&format!("{RATING_PREFIX}{id}"), rating.stored())?;
                 Ok(rating)
             }
             Err(error) => {
@@ -142,11 +177,14 @@ impl StremioCore {
 
 impl StremioCore {
     fn local_rating(&self, id: &str) -> Result<TitleRating, CoreError> {
-        Ok(self
-            .store()?
-            .setting(&format!("{RATING_PREFIX}{id}"))?
-            .map_or(TitleRating::None, |value| TitleRating::from_stored(&value)))
+        stored_rating(&*self.store()?, id)
     }
+}
+
+fn stored_rating(store: &Store, id: &str) -> Result<TitleRating, CoreError> {
+    Ok(store
+        .setting(&format!("{RATING_PREFIX}{id}"))?
+        .map_or(TitleRating::None, |value| TitleRating::from_stored(&value)))
 }
 
 /// A title id or type that can be stored and sent: not empty, not overlong, no control
@@ -238,6 +276,78 @@ mod tests {
                 .expect("refreshes"),
             TitleRating::Loved,
             "rated on another device"
+        );
+        assert_eq!(
+            core.rating("tt2".into()).expect("reads"),
+            TitleRating::Loved
+        );
+    }
+
+    #[tokio::test]
+    async fn ratings_set_signed_out_reach_the_account_and_beat_a_late_answer() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/send"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"message": "ok"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/get_status"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"status": "liked"}))
+                    .set_delay(std::time::Duration::from_millis(200)),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        core.set_rating("movie".into(), "tt1".into(), TitleRating::Loved)
+            .await
+            .expect("rates signed out");
+
+        core.restore_session("secret-key".into());
+        assert_eq!(
+            core.refresh_rating("movie".into(), "tt1".into())
+                .await
+                .expect("refreshes"),
+            TitleRating::Loved,
+            "sent instead of taking the account's"
+        );
+        let first: Vec<serde_json::Value> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|r| r.url.path() == "/api/send")
+            .map(|r| serde_json::from_slice(&r.body).expect("json"))
+            .collect();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0]["mediaId"], "tt1");
+        assert_eq!(first[0]["status"], "loved");
+
+        // Rated while the account is asked: the late answer does not overwrite it.
+        let refreshing = tokio::spawn({
+            let core = std::sync::Arc::clone(&core);
+            async move { core.refresh_rating("movie".into(), "tt2".into()).await }
+        });
+        while !server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|r| r.url.path() == "/api/get_status")
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        core.set_rating("movie".into(), "tt2".into(), TitleRating::Loved)
+            .await
+            .expect("rates");
+        assert_eq!(
+            refreshing.await.expect("joins").expect("refreshes"),
+            TitleRating::Loved
         );
         assert_eq!(
             core.rating("tt2".into()).expect("reads"),

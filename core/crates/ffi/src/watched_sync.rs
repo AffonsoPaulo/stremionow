@@ -18,10 +18,10 @@ use std::collections::{HashMap, HashSet};
 
 use futures::stream::{self, StreamExt};
 use stremionow_library::{Store, WatchedSync};
-use stremionow_protocol::MetaDetail;
+use stremionow_protocol::{Extra, MetaDetail, MetaResponse};
 use stremionow_sync::{
-    RemoteLibraryItem, WatchedVideo, format_timestamp, merge_mark, merge_watched, parse_timestamp,
-    watched_order,
+    RemoteLibraryItem, WatchedVideo, decode_watched, format_timestamp, merge_mark, merge_watched,
+    parse_timestamp, watched_order,
 };
 
 use crate::account::SKIPPED_KIND;
@@ -106,17 +106,23 @@ impl StremioCore {
     /// the account changed, and adds to `upload` (or edits there) the items whose watched
     /// state must change on the account. `merged` and `upload` come from
     /// [`stremionow_sync::merge_library`], without the items that are never uploaded.
+    ///
+    /// Nothing is read or changed once the session is no longer the one of `generation`.
     pub(crate) async fn reconcile_watched(
         &self,
         remote: &[RemoteLibraryItem],
         merged: &[RemoteLibraryItem],
         upload: &mut Vec<RemoteLibraryItem>,
+        generation: u64,
     ) -> Result<WatchedPlan, CoreError> {
-        let titles = self.watched_titles_to_sync(remote, merged)?;
         let mut plan = WatchedPlan {
             synced: Vec::new(),
             downloaded: HashSet::new(),
         };
+        if !self.account.is_current(generation) {
+            return Ok(plan);
+        }
+        let titles = self.watched_titles_to_sync(remote, merged)?;
         let now = now_millis();
 
         // Movies need no metadata, unless the account has never seen the title: its item is
@@ -150,7 +156,10 @@ impl StremioCore {
             .map(|index| {
                 let title = &titles[index];
                 async move {
-                    let meta = self.meta_detail(&title.kind, &title.id).await;
+                    if !self.account.is_current(generation) {
+                        return (index, None);
+                    }
+                    let meta = self.title_meta(title).await;
                     if let Err(error) = &meta {
                         log::debug!(
                             "no metadata to sync the watched videos of {}: {error}",
@@ -164,6 +173,9 @@ impl StremioCore {
             .collect()
             .await;
 
+        if !self.account.is_current(generation) {
+            return Ok(plan);
+        }
         for (index, meta) in metas {
             // Without metadata the title waits for the next sync; its marks stay as they are.
             let Some(meta) = meta else { continue };
@@ -175,6 +187,43 @@ impl StremioCore {
             }
         }
         Ok(plan)
+    }
+
+    /// A title's metadata for syncing its marks, through the cache. When the account's string
+    /// cannot be read against the cached video list and marks changed here, which would
+    /// replace that string, the list is read again from the addon first: a video added since
+    /// the cache was filled (the account's anchor) makes the string readable, and replacing it
+    /// would have dropped the account's marks. Without a fresh list the title waits.
+    async fn title_meta(&self, title: &Title<'_>) -> Result<MetaDetail, CoreError> {
+        let meta = self.meta_detail(&title.kind, &title.id).await?;
+        if title.kind == MOVIE || title.local == title.base() {
+            return Ok(meta);
+        }
+        let Some(field) = title.remote_field() else {
+            return Ok(meta);
+        };
+        if decode_watched(field, &order_of(&meta)).is_ok() {
+            return Ok(meta);
+        }
+        self.fresh_meta_detail(&title.kind, &title.id).await
+    }
+
+    /// A title's details straight from the first addon that provides them, refreshing the
+    /// cache, as [`StremioCore::meta_detail`] without serving a cached copy.
+    async fn fresh_meta_detail(&self, kind: &str, id: &str) -> Result<MetaDetail, CoreError> {
+        let addon = self
+            .enabled()?
+            .into_iter()
+            .find(|addon| addon.manifest.supports("meta", kind, id))
+            .ok_or(CoreError::NotFound)?;
+        let url = addon.url.resource("meta", kind, id, &Extra::new());
+        let body = self.client.get_bytes(&url).await?;
+        let response: MetaResponse =
+            serde_json::from_slice(&body).map_err(|e| CoreError::InvalidAddon {
+                reason: e.to_string(),
+            })?;
+        self.store()?.put_cached(&url, &body, now_millis())?;
+        Ok(response.meta)
     }
 
     /// Every title whose marks may need syncing: those in the merged library and those with
@@ -290,17 +339,7 @@ impl StremioCore {
         plan: &mut WatchedPlan,
         now: i64,
     ) -> Result<(), CoreError> {
-        let videos: Vec<WatchedVideo<'_>> = meta
-            .videos
-            .iter()
-            .map(|video| WatchedVideo {
-                id: &video.id,
-                season: video.season,
-                episode: video.episode,
-                released_ms: video.released.as_deref().and_then(parse_timestamp),
-            })
-            .collect();
-        let order = watched_order(&videos);
+        let order = order_of(meta);
         if order.is_empty() {
             return Ok(());
         }
@@ -342,7 +381,14 @@ impl StremioCore {
             }
         }
 
-        let mut account = remote_field.map(str::to_owned);
+        // A string that could not be read is not recorded as synced: the one recorded before
+        // stays, so the title is read again on the next sync (with newer metadata, the string
+        // may become readable) instead of passing for one already merged.
+        let mut account = if merge.remote_unreadable {
+            title.synced.remote.clone()
+        } else {
+            remote_field.map(str::to_owned)
+        };
         if let Some(field) = merge.upload {
             let Some(item) = target(upload, title, Some(meta), now) else {
                 return Ok(());
@@ -360,6 +406,21 @@ impl StremioCore {
         );
         Ok(())
     }
+}
+
+/// A title's videos in the official order of the watched bitfield.
+fn order_of(meta: &MetaDetail) -> Vec<String> {
+    let videos: Vec<WatchedVideo<'_>> = meta
+        .videos
+        .iter()
+        .map(|video| WatchedVideo {
+            id: &video.id,
+            season: video.season,
+            episode: video.episode,
+            released_ms: video.released.as_deref().and_then(parse_timestamp),
+        })
+        .collect();
+    watched_order(&videos)
 }
 
 /// Whether a movie is watched after merging this device, the account and the last sync.
@@ -627,13 +688,13 @@ mod tests {
 
         core.sign_out().await.expect("signs out");
         assert_eq!(watched(&core, "tt1"), ["tt1:1:1", "tt1:1:2"], "marks stay");
-        assert_eq!(
+        assert_ne!(
             core.store()
                 .expect("store")
                 .watched_sync("tt1")
                 .expect("reads"),
             WatchedSync::default(),
-            "the next account starts afresh"
+            "kept for this account, until another one signs in"
         );
     }
 
@@ -801,6 +862,17 @@ mod tests {
                 ["tt1:1:1", "tt1:1:2"],
                 "{garbled} kept the marks"
             );
+            if garbled.is_string() {
+                assert_eq!(
+                    core.store()
+                        .expect("store")
+                        .watched_sync("tt1")
+                        .expect("reads")
+                        .remote,
+                    Some(valid.clone()),
+                    "{garbled} is not recorded as synced"
+                );
+            }
             core.sync().await.expect("syncs again");
             assert_eq!(watched(&core, "tt1"), ["tt1:1:1", "tt1:1:2"]);
             if garbled.is_string() {
@@ -810,6 +882,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_string_anchored_on_a_new_episode_is_read_with_fresh_metadata() {
+        let remote = field("tt1", &[true, false, false, false]);
+        let server = account(vec![series("tt1", json!(remote), OLD)]).await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = core_for(&server, &dir);
+        core.sync().await.expect("syncs");
+        assert_eq!(watched(&core, "tt1"), ["tt1:1:1"]);
+
+        // A fifth episode came out and was watched on another device; the cached metadata
+        // still lists four, where the account's anchor cannot be found.
+        let five: Vec<String> = (1..=5).map(|e| format!("tt1:1:{e}")).collect();
+        let there = encode_watched(&[true, false, false, false, true], &five);
+        account_now_has(&server, vec![series("tt1", json!(there), NEWER)]).await;
+        let videos: Vec<Value> = (1..=5)
+            .map(|episode| {
+                json!({
+                    "id": format!("tt1:1:{episode}"), "season": 1, "episode": episode,
+                    "released": format!("2020-01-{:02}T00:00:00.000Z", episode * 5)
+                })
+            })
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/meta/series/tt1.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"meta": {
+                "id": "tt1", "type": "series", "name": "Show tt1", "videos": videos
+            }})))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        core.set_watched("tt1".into(), vec!["tt1:1:2".into()], true)
+            .expect("marks");
+
+        core.sync().await.expect("syncs");
+        assert_eq!(
+            watched(&core, "tt1"),
+            ["tt1:1:1", "tt1:1:2", "tt1:1:5"],
+            "the account's new mark arrived instead of being overwritten"
+        );
+        let changes = uploaded(&server).await;
+        let text = sent(&changes, "tt1")["state"]["watched"]
+            .as_str()
+            .expect("a watched field")
+            .to_owned();
+        assert_eq!(
+            decode_watched(&text, &five).expect("readable"),
+            [true, true, false, false, true]
+        );
     }
 
     #[tokio::test]

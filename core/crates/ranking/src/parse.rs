@@ -26,7 +26,7 @@ pub fn parse(text: &SourceText<'_>) -> Traits {
         quality: quality(&tokens),
         size_bytes: first_size(&joined),
         seeders: seeders(&lower),
-        cached: cached(&joined, &tokens),
+        cached: cached(truncate(text.name, MAX_INSPECTED_BYTES), &joined, &tokens),
         languages: languages(&joined, &tokens),
         multi_audio: multi_audio(&tokens),
         provider: provider(&joined),
@@ -260,18 +260,80 @@ const DEBRID_TAGS: &[&str] = &[
     "offcloud",
 ];
 
-fn cached(text: &str, tokens: &[Token<'_>]) -> Option<bool> {
+/// Debrid cache state. Addons say it in the stream name (`[RD+] Torrentio`, `[RD⚡] Comet`,
+/// `MediaFusion | RD ⏳`, `Jackettio Instant`) or spell it out (`Not cached`, `Cached: Yes`).
+/// Words and emoji that also turn up in release names and descriptions (`Instant.Family.2018`,
+/// a `⏳` before a duration) are only trusted in the name or right next to a debrid service.
+fn cached(name: &str, text: &str, tokens: &[Token<'_>]) -> Option<bool> {
     if let Some(state) = bracket_tags(text).find_map(debrid_tag_state) {
         return Some(state);
     }
-    let has_token = |words: &[&str]| tokens.iter().any(|t| words.contains(&t.lower.as_str()));
-    if text.contains('⏳') || has_token(&["uncached", "notcached"]) {
+    if let Some(state) = tokens.windows(2).find_map(stated_cache).or_else(|| {
+        // A spelled-out state as the very last word ("... Uncached").
+        tokens
+            .last()
+            .and_then(|t| stated_cache(std::slice::from_ref(t)))
+    }) {
+        return Some(state);
+    }
+    if let Some(state) = emoji_next_to_service(text) {
+        return Some(state);
+    }
+    let name_has = |words: &[&str]| {
+        tokenize(name).iter().any(|t| {
+            words.contains(&t.lower.as_str())
+                || t.lower
+                    .strip_suffix('+')
+                    .is_some_and(|service| DEBRID_TAGS.contains(&service))
+        })
+    };
+    if name.contains(['⏳', '⬇']) {
         Some(false)
-    } else if text.contains('⚡') || has_token(&["instant", "cached"]) {
+    } else if name.contains('⚡') || name_has(&["instant", "cached"]) {
         Some(true)
     } else {
         None
     }
+}
+
+/// A cache state spelled out at the start of `pair`: `uncached`, `not cached`, `cached: no`,
+/// `cached: yes`, or a debrid service followed by `cached`, `instant` or `download`. The
+/// positive words alone say nothing here; see [`cached`].
+fn stated_cache(pair: &[Token<'_>]) -> Option<bool> {
+    let a = pair.first().map_or("", |t| t.lower.as_str());
+    let b = pair.get(1).map_or("", |t| t.lower.as_str());
+    match [a, b] {
+        ["uncached" | "notcached" | "noncached", _] => Some(false),
+        ["not" | "non", "cached"] => Some(false),
+        ["cached", "no" | "false" | "0"] => Some(false),
+        ["cached", "yes" | "true" | "1"] => Some(true),
+        [service, state] if DEBRID_TAGS.contains(&service) => match state {
+            "cached" | "instant" => Some(true),
+            "uncached" | "download" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A `⚡` or `⏳` right after or before a debrid service, as in `RD ⚡️` or `⏳RD`.
+fn emoji_next_to_service(text: &str) -> Option<bool> {
+    let is_service = |word: &str| DEBRID_TAGS.contains(&word.to_lowercase().as_str());
+    let filler = |c: char| c.is_whitespace() || matches!(c, '\u{fe0f}' | '\u{200d}');
+    text.match_indices(['⚡', '⏳', '⬇'])
+        .find_map(|(at, emoji)| {
+            let before = text[..at].trim_end_matches(filler);
+            let word_before = before
+                .rsplit(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or_default();
+            let after = text[at + emoji.len()..].trim_start_matches(filler);
+            let word_after = after
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or_default();
+            (is_service(word_before) || is_service(word_after)).then_some(emoji == "⚡")
+        })
 }
 
 /// Contents of short `[...]` groups in `text`.
@@ -529,6 +591,70 @@ mod tests {
     #[test]
     fn instant_marker() {
         assert_eq!(parse3("Jackettio Instant 720p", "", "").cached, Some(true));
+    }
+
+    #[test]
+    fn spelled_out_cache_states() {
+        for (name, title, description, expected) in [
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nNot cached",
+                Some(false),
+            ),
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nCached: No",
+                Some(false),
+            ),
+            ("Addon", "Cached: false", "", Some(false)),
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nCached: Yes",
+                Some(true),
+            ),
+            ("Addon 1080p", "Movie.2020.1080p Uncached", "", Some(false)),
+            ("Addon", "", "Movie.2020 | TB instant", Some(true)),
+            ("Addon", "", "Movie.2020 | RD download", Some(false)),
+            ("Not cached", "", "", Some(false)),
+            ("RD+ Torrentio", "", "", Some(true)),
+            ("TorBox Cached\n4K", "", "", Some(true)),
+        ] {
+            assert_eq!(
+                parse3(name, title, description).cached,
+                expected,
+                "{name} / {title} / {description}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_names_and_descriptions_do_not_fake_a_cache_state() {
+        for (name, title, description) in [
+            (
+                "Torrentio\n1080p",
+                "Instant.Family.2018.1080p.BluRay.x264",
+                "",
+            ),
+            ("Torrentio\n1080p", "Cached.2005.1080p.BluRay", ""),
+            ("Addon", "", "Movie.2020.1080p\n⏳ 2h 10m"),
+            ("Addon", "Movie ⚡ Lightning.2019.720p", ""),
+            ("Addon", "", "💾 1.2 GB ⚡ fast mirror"),
+        ] {
+            assert_eq!(
+                parse3(name, title, description).cached,
+                None,
+                "{name} / {title} / {description}"
+            );
+        }
+    }
+
+    #[test]
+    fn emoji_next_to_a_debrid_service_count_anywhere() {
+        assert_eq!(parse3("MediaFusion", "", "RD ⚡️ 4K").cached, Some(true));
+        assert_eq!(parse3("MediaFusion", "", "⏳ TB 4K").cached, Some(false));
     }
 
     #[test]

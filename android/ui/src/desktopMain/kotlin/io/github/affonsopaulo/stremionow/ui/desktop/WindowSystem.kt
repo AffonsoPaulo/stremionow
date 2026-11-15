@@ -300,8 +300,8 @@ internal class Win32WindowSystem : WindowSystem {
 }
 
 /**
- * Plain AWT implementation for macOS and Linux. Not validated yet: see docs/poc/phase-5.md for the
- * native calls each system is expected to need.
+ * Plain AWT implementation for macOS and Linux. Not validated by hand yet: each system may need
+ * native calls of its own, as Windows does.
  */
 internal class AwtWindowSystem : WindowSystem {
     override fun bounds(window: Window): Rectangle = window.bounds

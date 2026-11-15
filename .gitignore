@@ -32,3 +32,6 @@ desktop.ini
 # Secrets
 *.env
 .env*
+
+# Plans and notes kept only on this machine
+docs/private/

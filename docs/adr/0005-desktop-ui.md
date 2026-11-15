@@ -1,7 +1,7 @@
 # 0005. Desktop UI: Compose Multiplatform over a native mpv window
 
 Date: 2026-11-11
-Status: Accepted; validated on Windows 11 ([phase 5 results](../poc/phase-5.md)); macOS and Linux implemented and checked in CI (start-up smoke test), not yet tried by hand
+Status: Accepted; validated by hand on Windows 11; macOS and Linux implemented and checked in CI (start-up smoke test), not yet tried by hand
 
 ## Context
 

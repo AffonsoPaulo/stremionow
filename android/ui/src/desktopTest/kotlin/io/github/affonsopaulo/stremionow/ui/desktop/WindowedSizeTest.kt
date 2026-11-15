@@ -10,7 +10,7 @@ import java.awt.Rectangle
 
 /**
  * The player's window keeps its size in dp across scale changes, whatever AWT did to each window
- * on the way (docs/poc/phase-5.md, known issue 1).
+ * on the way.
  */
 class WindowedSizeTest {
     @Test

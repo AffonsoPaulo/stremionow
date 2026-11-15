@@ -55,7 +55,7 @@ import javax.swing.WindowConstants
 actual fun PlayerScreen(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
-    onOpenEpisode: (Episode) -> Unit,
+    onOpenEpisode: (episode: Episode, bingeGroup: String?) -> Unit,
 ) {
     // What this player opened with. Moving on to the next episode clears the session's source
     // before the player has finished leaving; read live, that made the leaving player press
@@ -122,6 +122,8 @@ actual fun PlayerScreen(
     SideEffect {
         leave.onBack = onBack
         leave.restore = {
+            // Nothing more starts in a player on its way out, an episode lookup included.
+            viewModel.leave()
             player.mpv?.setColorspaceHint(false)
             display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
             val frame = player.video.frame
@@ -150,7 +152,11 @@ actual fun PlayerScreen(
     // Another episode plays in this player, in place of this one; only when its source cannot
     // be found does the title's page show its sources.
     val openEpisode: (Episode) -> Unit = { episode ->
-        viewModel.openEpisode(episode) { leave.to { onOpenEpisode(episode) } }
+        viewModel.openEpisode(episode) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
+    // The next episode (its button, Up Next, N, the media keys): the one left counts as watched.
+    val playNextEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode, asNext = true) { group -> leave.to { onOpenEpisode(episode, group) } }
     }
     val playing = viewModel.selection
     val playingTitle = windowTitle(playing)
@@ -161,7 +167,7 @@ actual fun PlayerScreen(
     // A panel open on the episode left (the episodes strip) closes with it.
     LaunchedEffect(playing.videoId) { state.panel = null }
     val next = playing.nextEpisode
-    val playNext: (() -> Unit)? = next?.let { episode -> { openEpisode(episode) } }
+    val playNext: (() -> Unit)? = next?.let { episode -> { playNextEpisode(episode) } }
     val currentPlayNext by rememberUpdatedState(playNext)
     val input = remember { DesktopInput() }
     SwingDialog(
@@ -206,6 +212,7 @@ actual fun PlayerScreen(
                 onBack = leave::back,
                 onChangeSource = { leave.to(onChangeSource) },
                 onOpenEpisode = openEpisode,
+                onPlayNext = playNextEpisode,
             )
         }
     }

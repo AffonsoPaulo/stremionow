@@ -16,6 +16,7 @@ import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.PlayerType
 import io.github.affonsopaulo.stremionow.core.StreamSource
+import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnDialogActions
@@ -37,10 +38,26 @@ internal fun AppSettings?.playsInOtherApp(): Boolean =
 
 /**
  * The torrent last handed to another app. Nothing tells the app when that app is done with it,
- * so it keeps downloading until the next one is handed over, which stops it, or the app quits.
+ * so it keeps downloading until the next one is handed over, which lets it go, or the app quits.
+ * Meanwhile it counts as one of the torrent's players in [TorrentUsers], so closing this app's
+ * own player on the same torrent does not cut the other app's stream.
  */
 internal object ExternalPlayback {
     @Volatile var torrent: String? = null
+        private set
+
+    /** [hash] is the torrent the other app now plays: it takes it, and lets the previous one go. */
+    @Synchronized
+    fun handOver(
+        hash: String?,
+        core: StremioCore,
+    ) {
+        val previous = torrent
+        if (previous == hash) return
+        hash?.let(TorrentUsers::take)
+        torrent = hash
+        previous?.let { TorrentUsers.release(core, it) }
+    }
 }
 
 private enum class ExternalState { Preparing, Failed, NoApp }
@@ -74,14 +91,11 @@ internal fun ExternalPlayerDialog(
     val core = remember(context) { AppGraph.core(context) }
     LaunchedEffect(source) {
         val hash = source.torrentHash()
-        ExternalPlayback.torrent?.takeIf { it != hash }?.let { previous ->
-            ExternalPlayback.torrent = null
-            AppGraph.scope.launch { runCatching { core.stopTorrent(previous) } }
-        }
+        // Another torrent goes to the other app: the one it had is let go, which stops it
+        // unless this app's player plays it too.
+        if (ExternalPlayback.torrent != hash) ExternalPlayback.handOver(null, core)
         val url =
-            runCatching { core.playbackUrl(source) }
-                .onFailure { logWarning("Could not prepare the source for another app", it) }
-                .getOrNull()
+            orNull({ logWarning("Could not prepare the source for another app", it) }) { core.playbackUrl(source) }
         state =
             when {
                 url == null -> {
@@ -89,7 +103,7 @@ internal fun ExternalPlayerDialog(
                 }
 
                 openInExternalPlayer(context, url, shownTitle, chooserTitle) -> {
-                    ExternalPlayback.torrent = hash
+                    ExternalPlayback.handOver(hash, core)
                     currentOnDone()
                     return@LaunchedEffect
                 }
@@ -100,9 +114,12 @@ internal fun ExternalPlayerDialog(
             }
     }
     // Only before the other app has it: the torrent started for nothing, so stop it, as the
-    // player does when it closes.
+    // player does when it closes, unless a player (this app's, or the other app with an earlier
+    // hand-over) plays it.
     val cancel = {
-        source.torrentHash()?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
+        source.torrentHash()?.takeUnless(TorrentUsers::inUse)?.let { hash ->
+            AppGraph.scope.launch { orNull { core.stopTorrent(hash) } }
+        }
         currentOnDone()
     }
     val buttonFocus = remember { FocusRequester() }

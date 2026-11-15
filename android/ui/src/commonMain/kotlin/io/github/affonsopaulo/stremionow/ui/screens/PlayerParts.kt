@@ -239,12 +239,16 @@ internal fun List<SkipSegment>.toMarkers(): Markers =
         },
     )
 
-/** Shown when the source could not be prepared or played: back, or choose another source. */
+/**
+ * Shown when the source could not be prepared or played: back, or choose another source.
+ * [providerGaveUp] says the debrid service never got it ready, instead of the usual text.
+ */
 @Composable
 internal fun PlaybackError(
     onChangeSource: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    providerGaveUp: Boolean = false,
 ) {
     Column(
         modifier.widthIn(max = 480.dp).padding(SnSpacing.space6),
@@ -256,7 +260,7 @@ internal fun PlaybackError(
             style = SnTypography.headingMd.copy(color = SnColors.fg),
         )
         BasicText(
-            stringResource(Res.string.player_error_body),
+            stringResource(if (providerGaveUp) Res.string.player_provider_gave_up else Res.string.player_error_body),
             style = SnTypography.body.copy(color = SnColors.fgSecondary),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
@@ -341,8 +345,21 @@ internal fun TracksList(
 internal fun trackLabel(track: Track): String {
     val language =
         track.language?.let { code ->
-            Locale.forLanguageTag(code).getDisplayLanguage(Locale.getDefault()).takeIf { it.isNotBlank() && it != code }
-                ?: code
+            // By its two-letter code when it has one: Java names `fr` but not `fre`, as files
+            // and subtitle sites write French.
+            // With its region when it has one: "Portuguese (Brazil)".
+            val tag = displayLanguageTag(code)
+            val locale = Locale.forLanguageTag(tag)
+            val shownIn = Locale.getDefault()
+            val name =
+                if (locale.country.isEmpty()) {
+                    locale.getDisplayLanguage(
+                        shownIn,
+                    )
+                } else {
+                    locale.getDisplayName(shownIn)
+                }
+            name.takeIf { it.isNotBlank() && it != code && it != tag } ?: code
         }
     return listOfNotNull(language, track.title?.takeIf { it.isNotBlank() && it != track.language })
         .joinToString(" · ")

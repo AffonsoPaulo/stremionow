@@ -538,10 +538,11 @@ private fun AppPages(
                         navController.popBackStack()
                     },
                     // Another episode plays in the player itself (PlayerViewModel.openEpisode);
-                    // this is for when its source could not be found: its sources show.
-                    onOpenEpisode = { episode ->
+                    // this is for when its source could not be found: its sources show. The
+                    // player gives the binge group of the source it left, since leaving the
+                    // video cleared the session's source.
+                    onOpenEpisode = { episode, group ->
                         val current = PlaybackSession.selection ?: return@PlayerScreen
-                        val group = PlaybackSession.source?.bingeGroup
                         PlaybackSession.select(current.copy(episode = episode))
                         PlaybackSession.continueWith = group
                         PlaybackSession.returnToSources()

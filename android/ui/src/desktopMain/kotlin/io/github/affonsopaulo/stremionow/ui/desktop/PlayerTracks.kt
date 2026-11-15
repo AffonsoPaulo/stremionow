@@ -142,13 +142,16 @@ internal fun formatSubtitleDelay(seconds: Double): String {
 
 /**
  * The subtitles and audio panel, above the controls: an Audio column and a Subtitles column of
- * choices, then the subtitles' sync, size and position.
+ * choices, then the subtitles' sync, size and position. Choices go through [onSelectAudio] and
+ * [onSelectSubtitle], so the player's model can remember the viewer's picks for the title.
  */
 @Composable
 internal fun TracksPanel(
     player: VideoPlayer,
     playback: PlaybackState,
     modifier: Modifier = Modifier,
+    onSelectAudio: (Int?) -> Unit = player::selectAudio,
+    onSelectSubtitle: (Int?) -> Unit = player::selectSubtitle,
 ) {
     val shape = RoundedCornerShape(SnRadius.radiusLg)
     val audio = playback.tracks.filter { it.type == Track.Type.Audio }
@@ -175,7 +178,7 @@ internal fun TracksPanel(
                         trackLabel(track),
                         audioDetail(track),
                         track.isSelected,
-                    ) { player.selectAudio(track.id) }
+                    ) { onSelectAudio(track.id) }
                 }
             }
             // A line between the columns, drawn along the Subtitles column's start: measuring
@@ -196,12 +199,12 @@ internal fun TracksPanel(
                         null,
                         subtitles.none { it.isSelected },
                     ) {
-                        player.selectSubtitle(null)
+                        onSelectSubtitle(null)
                     }
                 }
                 items(subtitles, key = { "s${it.id}" }) { track ->
                     TrackChoice(trackLabel(track), subtitleDetail(track), track.isSelected) {
-                        player.selectSubtitle(track.id)
+                        onSelectSubtitle(track.id)
                     }
                 }
             }

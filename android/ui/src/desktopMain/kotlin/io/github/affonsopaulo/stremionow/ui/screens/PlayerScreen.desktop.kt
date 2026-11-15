@@ -68,13 +68,7 @@ actual fun PlayerScreen(
     }
     val host = LocalDesktopHost.current
     val context = LocalPlatformContext.current
-    val episodeLabel =
-        selection.episode?.let { episode ->
-            val season = episode.season?.toInt()
-            val number = episode.episode?.toInt()
-            if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
-        }
-    val windowTitle = listOfNotNull(selection.details.item.name, episodeLabel).joinToString(" · ") + " – StremioNow"
+    val windowTitle = windowTitle(selection)
     val viewModel =
         viewModel(key = "player-${selection.videoId}-${source.url.hashCode()}") {
             PlayerViewModel(AppGraph.core(context), selection, source) { options ->
@@ -153,8 +147,21 @@ actual fun PlayerScreen(
         }
     }
 
-    val next = viewModel.selection.nextEpisode
-    val playNext: (() -> Unit)? = next?.let { episode -> { leave.to { onOpenEpisode(episode) } } }
+    // Another episode plays in this player, in place of this one; only when its source cannot
+    // be found does the title's page show its sources.
+    val openEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode) { leave.to { onOpenEpisode(episode) } }
+    }
+    val playing = viewModel.selection
+    val playingTitle = windowTitle(playing)
+    LaunchedEffect(playingTitle) {
+        player.video.frame.title = playingTitle
+        overlay.title = playingTitle
+    }
+    // A panel open on the episode left (the episodes strip) closes with it.
+    LaunchedEffect(playing.videoId) { state.panel = null }
+    val next = playing.nextEpisode
+    val playNext: (() -> Unit)? = next?.let { episode -> { openEpisode(episode) } }
     val currentPlayNext by rememberUpdatedState(playNext)
     val input = remember { DesktopInput() }
     SwingDialog(
@@ -198,7 +205,7 @@ actual fun PlayerScreen(
                 display = displayChoices,
                 onBack = leave::back,
                 onChangeSource = { leave.to(onChangeSource) },
-                onOpenEpisode = { episode -> leave.to { onOpenEpisode(episode) } },
+                onOpenEpisode = openEpisode,
             )
         }
     }
@@ -259,3 +266,15 @@ private fun createOverlay(
         addWindowListener(closeListener)
         video.frame.addWindowListener(closeListener)
     }
+
+/** The player windows' title: the title's name, the episode ("T1 E2") and the app's name. */
+@Composable
+private fun windowTitle(selection: PlaybackSession.Selection): String {
+    val episodeLabel =
+        selection.episode?.let { episode ->
+            val season = episode.season?.toInt()
+            val number = episode.episode?.toInt()
+            if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
+        }
+    return listOfNotNull(selection.details.item.name, episodeLabel).joinToString(" · ") + " – StremioNow"
+}

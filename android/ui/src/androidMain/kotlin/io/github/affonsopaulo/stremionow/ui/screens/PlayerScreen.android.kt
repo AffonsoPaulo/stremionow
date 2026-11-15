@@ -121,6 +121,10 @@ actual fun PlayerScreen(
                 MpvPlayer.create(appContext, options.copy(verboseLogs = debuggable))
             }
         }
+    // The video playing: another episode plays in this player, in place of the one it opened
+    // with; only when its source cannot be found does the title's page show its sources.
+    val playing = viewModel.selection
+    val openEpisode: (Episode) -> Unit = { episode -> viewModel.openEpisode(episode) { onOpenEpisode(episode) } }
     val state by viewModel.player.state.collectAsStateWithLifecycle()
     val preparing by viewModel.preparing.collectAsStateWithLifecycle()
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
@@ -140,13 +144,13 @@ actual fun PlayerScreen(
     ImmersivePlayback()
     PlayerMediaSession(
         player = viewModel.player,
-        title = selection.details.item.name,
-        subtitle = selection.episode?.title,
+        title = playing.details.item.name,
+        subtitle = playing.episode?.title,
         positionSeconds = state.positionSeconds,
         durationSeconds = state.durationSeconds,
         paused = state.isPaused,
-        hasNext = selection.nextEpisode != null,
-        onNext = { selection.nextEpisode?.let(onOpenEpisode) },
+        hasNext = playing.nextEpisode != null,
+        onNext = { playing.nextEpisode?.let(openEpisode) },
         seekStepSeconds = seekStep,
     )
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
@@ -160,7 +164,9 @@ actual fun PlayerScreen(
         }
     }
     BackHandler(enabled = panel != null) { panel = null }
-    val next = selection.nextEpisode
+    // A panel open on the episode left closes with it.
+    LaunchedEffect(playing.videoId) { panel = null }
+    val next = playing.nextEpisode
 
     val rootFocus = remember { FocusRequester() }
     // Whenever nothing in the player has the focus (at first, or after the focused control or
@@ -229,8 +235,8 @@ actual fun PlayerScreen(
             if (preparing || !state.isLoaded) {
                 // Until the first frame: the title's logo fills while the source gets ready.
                 SnLogoLoader(
-                    logo = selection.details.item.logo,
-                    title = selection.details.item.name,
+                    logo = playing.details.item.logo,
+                    title = playing.details.item.name,
                     progress = null,
                     status = torrent?.let { torrentStatusText(it) },
                     label = stringResource(Res.string.player_preparing),
@@ -243,7 +249,7 @@ actual fun PlayerScreen(
 
         AnimatedVisibility(controlsVisible && state.error == null, enter = fadeIn(), exit = fadeOut()) {
             Controls(
-                selection = selection,
+                selection = playing,
                 state = state,
                 scrubSeconds = scrubSeconds,
                 hasNext = next != null,
@@ -268,7 +274,7 @@ actual fun PlayerScreen(
                 onTracks = { panel = Panel.Tracks },
                 onEpisodes = { panel = Panel.Episodes },
                 onChangeSource = onChangeSource,
-                onNext = { next?.let(onOpenEpisode) },
+                onNext = { next?.let(openEpisode) },
             )
         }
 
@@ -280,7 +286,7 @@ actual fun PlayerScreen(
                 skips = skips,
                 next = next,
                 onSeekTo = viewModel.player::seekTo,
-                onOpenEpisode = onOpenEpisode,
+                onOpenEpisode = openEpisode,
                 upNext = viewModel.upNext,
                 modifier =
                     Modifier
@@ -308,7 +314,7 @@ actual fun PlayerScreen(
 
             Panel.Episodes -> {
                 SidePanel(stringResource(Res.string.player_episodes), onClose = { panel = null }) {
-                    EpisodesList(selection, onOpenEpisode)
+                    EpisodesList(playing, openEpisode)
                 }
             }
 

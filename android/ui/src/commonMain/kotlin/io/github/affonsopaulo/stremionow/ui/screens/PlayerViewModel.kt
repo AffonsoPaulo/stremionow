@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.screens
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.NextVideo
 import io.github.affonsopaulo.stremionow.core.StreamSource
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.core.SubtitleTrack
 import io.github.affonsopaulo.stremionow.core.TorrentProgress
+import io.github.affonsopaulo.stremionow.core.TrackChoice
 import io.github.affonsopaulo.stremionow.core.WatchProgress
 import io.github.affonsopaulo.stremionow.player.Markers
 import io.github.affonsopaulo.stremionow.player.PlayerOptions
@@ -17,13 +22,18 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.util.Locale
 
@@ -36,17 +46,37 @@ private const val PROGRESS_INTERVAL_MS = 10_000L
 /** External subtitles kept per language, so the list stays usable. */
 private const val SUBTITLES_PER_LANGUAGE = 3
 
+/** How long tracks wait for the external subtitle picked before, while addons answer. */
+private const val SUBTITLE_WAIT_MS = 10_000L
+
+/** How long moving on to an episode looks for its source before showing its sources. */
+private const val EPISODE_LOOKUP_MS = 6_000L
+
+/** After the last player of a torrent goes, how long before it is stopped, in case another takes it. */
+private const val TORRENT_STOP_DELAY_MS = 3_000L
+
 /**
- * Plays one source of [selection]: asks the core for the address to play, picks subtitles in
- * the viewer's languages and saves progress while playing and when the screen goes away. The
- * platform's player comes from [createPlayer], given the playback preferences.
+ * Plays [selection] with [source]: asks the core for the address to play, picks subtitles in
+ * the viewer's languages and the tracks picked before for the title, and saves progress while
+ * playing and when the screen goes away. The platform's player comes from [createPlayer],
+ * given the playback preferences.
+ *
+ * Moving on to another episode happens in this player ([openEpisode]), as in Stremio: the same
+ * window, display mode, volume and tracks, the new video in place of the old one.
  */
 class PlayerViewModel<out P : VideoPlayer>(
     private val core: StremioCore,
-    val selection: PlaybackSession.Selection,
-    private val source: StreamSource,
+    selection: PlaybackSession.Selection,
+    source: StreamSource,
     createPlayer: (PlayerOptions) -> P,
 ) : ViewModel() {
+    /** The video playing; it changes when the player moves on to another episode. */
+    var selection: PlaybackSession.Selection by mutableStateOf(selection)
+        private set
+
+    /** The source playing [selection]. */
+    private var source: StreamSource by mutableStateOf(source)
+
     /** The user's choices from setup and Settings, falling back to the device language. */
     private val settings = runCatching { core.settings() }.getOrNull()
     private val audioLanguage = settings?.audioLanguage?.ifEmpty { null } ?: Locale.getDefault().language
@@ -115,45 +145,17 @@ class PlayerViewModel<out P : VideoPlayer>(
     /** The title's videos marked watched, for the episodes strip; empty until read. */
     val watched = mutableWatched.asStateFlow()
 
+    /** The work of the video playing, cancelled when the player moves on to another. */
+    private var videoWork: Job? = null
+
+    /** The tracks picked in this player, carried to the next video it plays. */
+    private var carriedTracks: TrackChoice? = null
+
+    /** The torrent the video playing holds in [TorrentUsers], if it plays one. */
+    private var heldTorrent: String? = null
+
     init {
-        viewModelScope.launch {
-            mutableWatched.value =
-                runCatching { io { core.watchedVideos(selection.details.item.id) } }.getOrDefault(emptyList()).toSet()
-        }
-        source.infoHash?.let { hash ->
-            viewModelScope.launch {
-                while (isActive) {
-                    mutableTorrent.value = core.torrentStatus(hash)
-                    delay(TORRENT_STATUS_INTERVAL_MS)
-                }
-            }
-        }
-        viewModelScope.launch {
-            // Every source plays through the local server, so the player never sees debrid keys.
-            val url =
-                runCatching { core.playbackUrl(source) }
-                    .onFailure { logWarning("Could not prepare the source", it) }
-                    .getOrNull()
-            if (url == null) {
-                mutablePreparing.value = false
-                mutablePrepareFailed.value = true
-                return@launch
-            }
-            mutablePreparing.value = false
-            val saved = runCatching { io { core.progress(selection.details.item.id) } }.getOrNull()
-            val start =
-                saved
-                    ?.takeIf { it.videoId == selection.videoId }
-                    ?.positionMs
-                    ?.toDouble()
-                    ?.div(1000) ?: 0.0
-            player.load(url, start)
-            addSubtitles()
-            selectSubtitleIfMissing()
-        }
-        if (settings?.aniskip != false) viewModelScope.launch { findSkips() }
-        viewModelScope.launch { findNextSource() }
-        viewModelScope.launch { rememberSource() }
+        startVideo()
         viewModelScope.launch {
             while (isActive) {
                 delay(PROGRESS_INTERVAL_MS)
@@ -162,13 +164,109 @@ class PlayerViewModel<out P : VideoPlayer>(
         }
     }
 
+    /** Starts everything the current video needs, under [videoWork]. */
+    private fun startVideo() {
+        val selection = selection
+        val source = source
+        heldTorrent = source.torrentHash()?.also(TorrentUsers::take)
+        videoWork =
+            viewModelScope.launch {
+                launch {
+                    mutableWatched.value =
+                        runCatching { io { core.watchedVideos(selection.details.item.id) } }
+                            .getOrDefault(emptyList())
+                            .toSet()
+                }
+                source.torrentHash()?.let { hash ->
+                    launch {
+                        while (isActive) {
+                            mutableTorrent.value = core.torrentStatus(hash)
+                            delay(TORRENT_STATUS_INTERVAL_MS)
+                        }
+                    }
+                }
+                launch { prepare(selection, source) }
+                if (settings?.aniskip != false) launch { findSkips(selection) }
+                launch { findNextSource(selection, source) }
+                launch { rememberSource(selection, source) }
+            }
+    }
+
+    private suspend fun prepare(
+        selection: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
+        // Every source plays through the local server, so the player never sees debrid keys.
+        val url =
+            runCatching { core.playbackUrl(source) }
+                .onFailure { logWarning("Could not prepare the source", it) }
+                .getOrNull()
+        if (url == null) {
+            mutablePreparing.value = false
+            mutablePrepareFailed.value = true
+            return
+        }
+        mutablePreparing.value = false
+        val saved = runCatching { io { core.progress(selection.details.item.id) } }.getOrNull()
+        val start =
+            saved
+                ?.takeIf { it.videoId == selection.videoId }
+                ?.positionMs
+                ?.toDouble()
+                ?.div(1000) ?: 0.0
+        player.load(url, start)
+        addSubtitles(selection, source)
+        val remembered =
+            carriedTracks ?: runCatching { io { core.tracks(selection.details.item.id) } }.getOrNull()
+        if (remembered != null) applyTracks(remembered) else selectSubtitleIfMissing()
+        recordTracks(selection)
+    }
+
+    /**
+     * Picks the tracks of [choice] once the file lists its own, waiting a little for the
+     * addons' subtitles when the one picked before is among them.
+     */
+    private suspend fun applyTracks(choice: TrackChoice) {
+        val loaded = player.state.first { it.isLoaded && it.tracks.isNotEmpty() }
+        val tracks =
+            withTimeoutOrNull(SUBTITLE_WAIT_MS) {
+                player.state.first { hasWantedSubtitle(it.tracks, choice) }.tracks
+            } ?: player.state.value.tracks
+                .ifEmpty { loaded.tracks }
+        val pick = pickTracks(tracks, choice)
+        pick.audio?.let(player::selectAudio)
+        when (val subtitle = pick.subtitle) {
+            is SubtitlePick.Track -> player.selectSubtitle(subtitle.id)
+            SubtitlePick.Off -> player.selectSubtitle(null)
+            null -> Unit
+        }
+    }
+
+    /**
+     * From now on, keeps the tracks the viewer picks for the title, to pick them again next
+     * time and in the next episode.
+     */
+    private suspend fun recordTracks(selection: PlaybackSession.Selection) {
+        player.state
+            .map { if (it.isLoaded) choiceOf(it.tracks) else null }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .collect { choice ->
+                carriedTracks = choice
+                runCatching { io { core.rememberTracks(selection.details.item.id, choice) } }
+            }
+    }
+
     /**
      * Finds the next episode's source while this one plays, as Stremio does: asks the addon
      * of the source playing for the next episode's sources and keeps the first of the same
      * binge group, so moving on needs no choice ([PlaybackSession.nextUp]). Without a group, or
      * a match, the next episode's sources show instead.
      */
-    private suspend fun findNextSource() {
+    private suspend fun findNextSource(
+        selection: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
         val next = selection.nextEpisode ?: return
         val group = source.bingeGroup ?: return
         val match = core.sourceFinder().find(selection.kind, next.id, SourceWanted(source.addonId, bingeGroup = group))
@@ -179,12 +277,94 @@ class PlayerViewModel<out P : VideoPlayer>(
     }
 
     /**
+     * Moves on to [episode] in this player. Its source is the one already found for the next
+     * episode, or else the first of the same binge group from the addon of the source playing,
+     * looked up while the loading screen shows. [onNotFound] is called when there is none to
+     * look for or none was found in a few seconds: the episode's sources show instead.
+     */
+    fun openEpisode(
+        episode: Episode,
+        onNotFound: () -> Unit,
+    ) {
+        val target = selection.copy(episode = episode)
+        if (target.videoId == selection.videoId) return
+        val ready = PlaybackSession.nextUp?.takeIf { it.episodeId == episode.id }?.source
+        if (ready != null) {
+            switchTo(target, ready)
+            return
+        }
+        val playing = source
+        val group = playing.bingeGroup
+        if (group == null) {
+            onNotFound()
+            return
+        }
+        leaveVideo(target)
+        videoWork =
+            viewModelScope.launch {
+                val found =
+                    withTimeoutOrNull(EPISODE_LOOKUP_MS) {
+                        core.sourceFinder().find(
+                            target.kind,
+                            target.videoId,
+                            SourceWanted(playing.addonId, bingeGroup = group),
+                        )
+                    }
+                if (found != null) start(target, found) else onNotFound()
+            }
+    }
+
+    /** Plays [target] with [source] in place of the video playing. */
+    private fun switchTo(
+        target: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
+        leaveVideo(target)
+        start(target, source)
+    }
+
+    /**
+     * Stops the video playing at once and shows [target] loading: saves how far the viewer
+     * got (Continue watching moving on when it was finished), stops its work and its torrent.
+     */
+    private fun leaveVideo(target: PlaybackSession.Selection) {
+        progressNow()?.let { progress ->
+            val next = nextVideoAfter(selection)
+            AppGraph.scope.launch { runCatching { io { core.saveProgressWithNext(progress, next) } } }
+        }
+        videoWork?.cancel()
+        player.stop()
+        heldTorrent?.let(::releaseTorrent)
+        heldTorrent = null
+        mutablePreparing.value = true
+        mutablePrepareFailed.value = false
+        mutableTorrent.value = null
+        mutableSkips.value = Markers()
+        selection = target
+        PlaybackSession.select(target)
+    }
+
+    private fun start(
+        target: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
+        this.source = source
+        PlaybackSession.select(target)
+        PlaybackSession.source = source
+        PlaybackSession.alternatives = emptyList()
+        startVideo()
+    }
+
+    /**
      * Once the video starts, remembers the source however it was picked: it is offered first
      * among this video's sources next time, and "Resume" and Continue watching play it again
      * (ResumePlayback.kt). A source that never started is not worth resuming with. Only its
      * identity, binge group and addon are kept, never its address.
      */
-    private suspend fun rememberSource() {
+    private suspend fun rememberSource(
+        selection: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
         if (source.identity == null) return
         player.state.first { it.isLoaded }
         runCatching { io { core.rememberLastSource(selection.details.item.id, selection.videoId, source) } }
@@ -194,7 +374,7 @@ class PlayerViewModel<out P : VideoPlayer>(
      * Asks AniSkip once the file's length is known: AniSkip picks the timings submitted for a
      * file of the same length. Playback never waits for it, and a failure only means no buttons.
      */
-    private suspend fun findSkips() {
+    private suspend fun findSkips(selection: PlaybackSession.Selection) {
         val duration =
             player.state
                 .mapNotNull { state ->
@@ -215,7 +395,10 @@ class PlayerViewModel<out P : VideoPlayer>(
     }
 
     /** Adds the source's subtitles and the addons' ones in the device language and English. */
-    private suspend fun addSubtitles() {
+    private suspend fun addSubtitles(
+        selection: PlaybackSession.Selection,
+        source: StreamSource,
+    ) {
         val fromAddons = runCatching { core.subtitles(selection.kind, selection.videoId) }.getOrDefault(emptyList())
         val wanted = listOfNotNull(subtitleLanguage, "eng").distinct()
         (source.subtitles + fromAddons)
@@ -255,65 +438,92 @@ class PlayerViewModel<out P : VideoPlayer>(
     }
 
     /**
-     * The released episode after this one, for "Continue watching" to move on to once this
-     * one is finished; specials stay apart, as in [PlaybackSession.Selection.nextEpisode].
+     * The released episode after [selection]'s, for "Continue watching" to move on to once it
+     * is finished; specials stay apart, as in [PlaybackSession.Selection.nextEpisode].
      */
-    private fun nextVideo(): NextVideo? =
+    private fun nextVideoAfter(selection: PlaybackSession.Selection): NextVideo? =
         selection.nextEpisode
             ?.takeIf { it.isReleased(Instant.now()) }
             ?.let { NextVideo(videoId = it.id, season = it.season, episode = it.episode) }
 
-    fun saveProgress() {
+    /** How far into the video playing the viewer is, or null before it has loaded. */
+    private fun progressNow(): WatchProgress? {
         val state = player.state.value
-        val duration = state.durationSeconds ?: return
-        if (!state.isLoaded || duration <= 0) return
+        val duration = state.durationSeconds ?: return null
+        if (!state.isLoaded || duration <= 0) return null
         val item = selection.details.item
-        val progress =
-            WatchProgress(
-                id = item.id,
-                kind = item.kind,
-                name = item.name,
-                poster = item.poster,
-                background = item.background,
-                videoId = selection.videoId,
-                season = selection.episode?.season,
-                episode = selection.episode?.episode,
-                positionMs = (state.positionSeconds * 1000).toLong().coerceAtLeast(0).toULong(),
-                durationMs = (duration * 1000).toLong().toULong(),
-                updatedAt = 0,
-            )
-        viewModelScope.launch { runCatching { io { core.saveProgressWithNext(progress, nextVideo()) } } }
+        return WatchProgress(
+            id = item.id,
+            kind = item.kind,
+            name = item.name,
+            poster = item.poster,
+            background = item.background,
+            videoId = selection.videoId,
+            season = selection.episode?.season,
+            episode = selection.episode?.episode,
+            positionMs = (state.positionSeconds * 1000).toLong().coerceAtLeast(0).toULong(),
+            durationMs = (duration * 1000).toLong().toULong(),
+            updatedAt = 0,
+        )
+    }
+
+    fun saveProgress() {
+        val progress = progressNow() ?: return
+        val next = nextVideoAfter(selection)
+        viewModelScope.launch { runCatching { io { core.saveProgressWithNext(progress, next) } } }
     }
 
     override fun onCleared() {
-        val state = player.state.value
-        val duration = state.durationSeconds
-        if (state.isLoaded && duration != null && duration > 0) {
-            val item = selection.details.item
-            // The scope is already cancelled here, so write synchronously; it is one SQLite row.
-            runCatching {
-                core.saveProgressWithNext(
-                    WatchProgress(
-                        id = item.id,
-                        kind = item.kind,
-                        name = item.name,
-                        poster = item.poster,
-                        background = item.background,
-                        videoId = selection.videoId,
-                        season = selection.episode?.season,
-                        episode = selection.episode?.episode,
-                        positionMs = (state.positionSeconds * 1000).toLong().coerceAtLeast(0).toULong(),
-                        durationMs = (duration * 1000).toLong().toULong(),
-                        updatedAt = 0,
-                    ),
-                    nextVideo(),
-                )
-            }
+        // The scope is already cancelled here, so write synchronously; it is one SQLite row.
+        progressNow()?.let { progress ->
+            runCatching { core.saveProgressWithNext(progress, nextVideoAfter(selection)) }
         }
         player.release()
         // The screen is gone, so finish on the app's scope: stop the download and trim the cache.
-        source.infoHash?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
+        heldTorrent?.let(::releaseTorrent)
+        heldTorrent = null
+    }
+
+    /** Lets the torrent go: once no player uses it any more, it stops after a short while. */
+    private fun releaseTorrent(hash: String) {
+        if (!TorrentUsers.give(hash)) return
+        AppGraph.scope.launch {
+            delay(TORRENT_STOP_DELAY_MS)
+            if (!TorrentUsers.inUse(hash)) runCatching { core.stopTorrent(hash) }
+        }
     }
 }
 
+/**
+ * How many players play each torrent. A player that goes stops its torrent only when no other
+ * took it meanwhile: resuming right after leaving, or the next episode of a season pack, plays
+ * the same torrent, which stopping would cut.
+ */
+internal object TorrentUsers {
+    private val counts = HashMap<String, Int>()
+
+    @Synchronized
+    fun take(hash: String) {
+        counts[hash] = (counts[hash] ?: 0) + 1
+    }
+
+    /** Lets [hash] go; true when no player plays it any more. */
+    @Synchronized
+    fun give(hash: String): Boolean {
+        val left = (counts[hash] ?: 1) - 1
+        if (left <= 0) counts.remove(hash) else counts[hash] = left
+        return left <= 0
+    }
+
+    @Synchronized
+    fun inUse(hash: String): Boolean = (counts[hash] ?: 0) > 0
+}
+
 private fun Locale.isO3LanguageOrNull(): String? = runCatching { isO3Language }.getOrNull()?.ifEmpty { null }
+
+/**
+ * The torrent this source plays from peers, or null when it plays from an address: a debrid
+ * source may name its torrent, but the core plays its address, so there are no peers to show
+ * or torrent to stop.
+ */
+internal fun StreamSource.torrentHash(): String? = infoHash.takeIf { url == null }

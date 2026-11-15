@@ -73,7 +73,7 @@ internal fun ExternalPlayerDialog(
         ).joinToString(" · ")
     val core = remember(context) { AppGraph.core(context) }
     LaunchedEffect(source) {
-        val hash = source.infoHash
+        val hash = source.torrentHash()
         ExternalPlayback.torrent?.takeIf { it != hash }?.let { previous ->
             ExternalPlayback.torrent = null
             AppGraph.scope.launch { runCatching { core.stopTorrent(previous) } }
@@ -102,7 +102,7 @@ internal fun ExternalPlayerDialog(
     // Only before the other app has it: the torrent started for nothing, so stop it, as the
     // player does when it closes.
     val cancel = {
-        source.infoHash?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
+        source.torrentHash()?.let { hash -> AppGraph.scope.launch { runCatching { core.stopTorrent(hash) } } }
         currentOnDone()
     }
     val buttonFocus = remember { FocusRequester() }

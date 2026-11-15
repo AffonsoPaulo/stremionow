@@ -93,3 +93,15 @@ enum class PlayerError {
     /** The player itself could not start, for example because libmpv is missing (desktop). */
     PlayerUnavailable,
 }
+
+/** A fresh state for the next video, keeping what the viewer set for the player itself. */
+fun PlaybackState.forNextVideo(): PlaybackState =
+    PlaybackState(
+        volume = volume,
+        isMuted = isMuted,
+        subtitleDelaySeconds = subtitleDelaySeconds,
+        subtitleScale = subtitleScale,
+        subtitlePosition = subtitlePosition,
+        speed = speed,
+        videoScale = videoScale,
+    )

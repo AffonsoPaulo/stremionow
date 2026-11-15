@@ -105,6 +105,13 @@ interface VideoPlayer {
     /** How the picture fills the screen. Players that cannot ignore it. */
     fun setVideoScale(scale: VideoScale) = Unit
 
+    /**
+     * Stops the video playing at once, picture and sound, keeping the player for the next
+     * [load]: moving on to another video in the same player. Volume, speed and the subtitle
+     * size and position stay.
+     */
+    fun stop() = Unit
+
     /** Stops playback and frees native resources. The player cannot be used afterwards. */
     fun release()
 }

@@ -34,6 +34,9 @@ class MpvPlayer private constructor(
 
     @Volatile private var fileLoaded = false
 
+    /** A [stop] is under way: its end of file is not a failure. */
+    @Volatile private var stopping = false
+
     /** Frame rate the container declares for the current file, when it does. */
     @Volatile private var containerFps: Double? = null
 
@@ -50,10 +53,20 @@ class MpvPlayer private constructor(
             fileLoaded = false
             pendingSubtitles.clear()
         }
-        mutableState.value = PlaybackState()
+        mutableState.update { it.forNextVideo() }
         containerFps = null
         mpv.setPropertyString("start", if (startSeconds > 0) formatSeconds(startSeconds) else "none")
         mpv.command(arrayOf("loadfile", url, "replace"))
+    }
+
+    override fun stop() {
+        if (released) return
+        // The end of the file that follows is this stop, not a file that failed to open.
+        stopping = true
+        synchronized(pendingSubtitles) { pendingSubtitles.clear() }
+        mutableState.update { it.forNextVideo() }
+        containerFps = null
+        mpv.command(arrayOf("stop"))
     }
 
     /**
@@ -231,6 +244,10 @@ class MpvPlayer private constructor(
             }
 
             MpvEvent.MPV_EVENT_END_FILE -> {
+                if (stopping) {
+                    stopping = false
+                    return
+                }
                 // An end without a successful load means the file could not be opened.
                 if (!fileLoaded) mutableState.update { it.copy(error = PlayerError.LoadFailed) }
             }

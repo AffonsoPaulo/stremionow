@@ -62,6 +62,19 @@ pub fn is_icon_image(bytes: &[u8]) -> bool {
         || (bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP")
 }
 
+/// What asking a site for its icon gave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IconLookup {
+    /// The icon, as image bytes.
+    Found(Vec<u8>),
+    /// The site has no icon the app can show: it answered "not found", or with something
+    /// that is not a bitmap image, at every place icons are kept (or it may not be asked).
+    Missing,
+    /// The site could not be asked (offline, a timeout, a server error), so whether it has
+    /// an icon is not known.
+    Unreachable,
+}
+
 /// Fetches service icons. Cheap to clone; clones share the connection pool.
 #[derive(Clone)]
 pub struct IconClient {
@@ -107,25 +120,39 @@ impl IconClient {
         Ok(Self { http })
     }
 
-    /// The icon of `host` (from [`icon_host`]), or None when the site has none the app can
-    /// show. Failures are not errors: the interface then shows the service's initial.
-    pub async fn fetch(&self, host: &str) -> Option<Vec<u8>> {
+    /// The icon of `host` (from [`icon_host`]). Failures are not errors: the interface then
+    /// shows the service's initial.
+    pub async fn fetch(&self, host: &str) -> IconLookup {
         if icon_host(&format!("https://{host}/")).as_deref() != Some(host) {
-            return None;
+            return IconLookup::Missing;
         }
         self.fetch_from(&format!("https://{host}")).await
     }
 
     /// Tries each icon path under `origin` (scheme and host) in turn.
-    async fn fetch_from(&self, origin: &str) -> Option<Vec<u8>> {
+    async fn fetch_from(&self, origin: &str) -> IconLookup {
+        let mut unreachable = false;
         for path in ICON_PATHS {
             match self.image(&format!("{origin}{path}")).await {
-                Ok(bytes) if is_icon_image(&bytes) => return Some(bytes),
+                Ok(bytes) if is_icon_image(&bytes) => return IconLookup::Found(bytes),
                 Ok(_) => log::debug!("a service icon was not an image the app can show"),
-                Err(error) => log::debug!("no service icon at a candidate path: {error}"),
+                // The site answered that there is nothing usable there, or sent the request
+                // somewhere icons are not fetched from (a redirect off HTTPS or to a local
+                // name stops at its 3xx answer).
+                Err(AddonError::Status(300..=399 | 404 | 410) | AddonError::TooLarge) => {
+                    log::debug!("no service icon at a candidate path");
+                }
+                Err(error) => {
+                    log::debug!("could not ask for a service icon: {error}");
+                    unreachable = true;
+                }
             }
         }
-        None
+        if unreachable {
+            IconLookup::Unreachable
+        } else {
+            IconLookup::Missing
+        }
     }
 
     async fn image(&self, url: &str) -> Result<Vec<u8>, AddonError> {
@@ -227,8 +254,32 @@ mod tests {
             .mount(&server)
             .await;
         assert_eq!(
-            client().fetch_from(&server.uri()).await.as_deref(),
-            Some(PNG)
+            client().fetch_from(&server.uri()).await,
+            IconLookup::Found(PNG.to_vec())
+        );
+    }
+
+    #[tokio::test]
+    async fn tells_a_missing_icon_from_a_site_that_cannot_be_asked() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/apple-touch-icon.png"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/favicon.ico"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        assert_eq!(
+            client().fetch_from(&server.uri()).await,
+            IconLookup::Unreachable
+        );
+        // Nothing listens on port 9 (discard) locally, so the connection is refused.
+        assert_eq!(
+            client().fetch_from("http://127.0.0.1:9").await,
+            IconLookup::Unreachable
         );
     }
 
@@ -247,14 +298,20 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(huge))
             .mount(&server)
             .await;
-        assert_eq!(client().fetch_from(&server.uri()).await, None);
+        assert_eq!(
+            client().fetch_from(&server.uri()).await,
+            IconLookup::Missing
+        );
     }
 
     #[tokio::test]
     async fn never_asks_hosts_that_are_not_public() {
         let client = IconClient::new(Duration::from_secs(1)).expect("client");
-        assert_eq!(client.fetch("127.0.0.1").await, None);
-        assert_eq!(client.fetch("nas.local").await, None);
-        assert_eq!(client.fetch("www.netflix.com/../x").await, None);
+        assert_eq!(client.fetch("127.0.0.1").await, IconLookup::Missing);
+        assert_eq!(client.fetch("nas.local").await, IconLookup::Missing);
+        assert_eq!(
+            client.fetch("www.netflix.com/../x").await,
+            IconLookup::Missing
+        );
     }
 }

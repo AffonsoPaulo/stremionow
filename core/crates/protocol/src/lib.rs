@@ -17,4 +17,4 @@ pub use resources::{
     CatalogResponse, Link, MetaDetail, MetaPreview, MetaResponse, Stream, StreamBehaviorHints,
     StreamResponse, Subtitle, SubtitlesResponse, Trailer, TrailerStream, Video,
 };
-pub use transport::{AddonUrl, Extra, TransportError};
+pub use transport::{AddonUrl, Extra, TransportError, has_public_host};

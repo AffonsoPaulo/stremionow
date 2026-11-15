@@ -20,20 +20,20 @@ class PosterRowSizingTest {
     }
 
     @Test
-    fun `eight whole cards and half a ninth fill the row`() {
+    fun `cards keep their size while the last one shows between a quarter and three quarters`() {
+        // 1870 of room: 8 cards of 175 and 48 (1784), and 86 of the ninth, half of it.
         val sizing = posterRowSizing(1918.dp, 48.dp)
-        // 48 + 8.5 cards + 8 gaps of 48 = 1918.
-        assertEquals(174.8f, sizing.cardWidth.value, 0.1f)
+        assertEquals(POINTER_POSTER_CARD_WIDTH, sizing.cardWidth)
         assertEquals(POSTER_SPACING, sizing.spacing)
-        assertEquals(0.5f, lastCardShown(sizing, 1918.dp, 48.dp), 0.01f)
     }
 
     @Test
-    fun `cards keep their bounds, still with half a card showing`() {
-        val narrow = posterRowSizing(1000.dp, 24.dp)
-        assertEquals(MIN_POSTER_CARD_WIDTH, narrow.cardWidth)
-        assertTrue(narrow.spacing >= MIN_POSTER_SPACING)
-        assertEquals(0.5f, lastCardShown(narrow, 1000.dp, 24.dp), 0.01f)
-        assertEquals(MAX_POSTER_CARD_WIDTH, posterRowSizing(3800.dp, 48.dp).cardWidth)
+    fun `a last card barely or almost wholly in view makes the cards fit`() {
+        for (width in listOf(1800, 1830, 2010, 1500, 1280, 2560)) {
+            val sizing = posterRowSizing(width.dp, 48.dp)
+            val shown = lastCardShown(sizing, width.dp, 48.dp)
+            assertTrue("$width: $shown", shown in 0.24f..0.76f)
+            assertTrue("$width: ${sizing.cardWidth}", sizing.cardWidth in MIN_POSTER_CARD_WIDTH..MAX_POSTER_CARD_WIDTH)
+        }
     }
 }

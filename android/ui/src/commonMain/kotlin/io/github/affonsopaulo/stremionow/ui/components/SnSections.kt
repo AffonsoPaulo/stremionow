@@ -161,9 +161,9 @@ data class PosterRowSizing(
 )
 
 /**
- * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, they follow the
- * window's width: eight whole cards and half of a ninth, the cut card telling there is more to
- * the side (see [posterRowSizing]). Elsewhere they keep [PosterCardWidth].
+ * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, they are larger
+ * and further apart, and the last one in view is cut, telling there is more to the side (see
+ * [posterRowSizing]). Elsewhere they keep [PosterCardWidth].
  */
 @Composable
 fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
@@ -178,41 +178,51 @@ fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
     }
 }
 
-/** Whole cards a row shows where a pointer drives the screen; half of the next one shows too. */
-internal const val POSTER_ROW_WHOLE_CARDS = 8
+/** A poster card's width where a pointer drives the screen, before fitting the window. */
+internal val POINTER_POSTER_CARD_WIDTH = 175.dp
 
 /** Room between poster cards where a pointer drives the screen. */
 internal val POSTER_SPACING = 48.dp
 
-/** Narrowest and widest a poster card gets. */
-internal val MIN_POSTER_CARD_WIDTH = 132.dp
-internal val MAX_POSTER_CARD_WIDTH = 240.dp
+/** Narrowest and widest a poster card gets while fitting the window. */
+internal val MIN_POSTER_CARD_WIDTH = 150.dp
+internal val MAX_POSTER_CARD_WIDTH = 200.dp
 
-/** Least room between poster cards, in windows too narrow or too wide for the usual layout. */
-internal val MIN_POSTER_SPACING = 28.dp
+/** How much of the last card in view shows, at least and at most: enough to tell it is cut. */
+internal const val MIN_LAST_CARD_SHOWN = 0.25f
+internal const val MAX_LAST_CARD_SHOWN = 0.75f
 
 /**
- * The cards of a row [rowWidth] wide: [POSTER_ROW_WHOLE_CARDS] whole cards and half of the next
- * after the page [gutter], [POSTER_SPACING] apart. Where that would make them narrower or wider
- * than their bounds, they keep the bound, and as many fit as can with half of the next showing,
- * the room left spread between them, never less than [MIN_POSTER_SPACING].
+ * The cards of a row [rowWidth] wide: [POINTER_POSTER_CARD_WIDTH] wide and [POSTER_SPACING]
+ * apart after the page [gutter], unless the last card in view would show less than a quarter
+ * or more than three quarters of itself; then the cards narrow or widen a little, within their
+ * bounds, until it shows a quarter or three quarters.
  */
 internal fun posterRowSizing(
     rowWidth: Dp,
     gutter: Dp,
 ): PosterRowSizing {
     val room = rowWidth - gutter
-    val wanted = (room - POSTER_SPACING * POSTER_ROW_WHOLE_CARDS) / (POSTER_ROW_WHOLE_CARDS + 0.5f)
-    if (wanted in MIN_POSTER_CARD_WIDTH..MAX_POSTER_CARD_WIDTH) return PosterRowSizing(wanted, POSTER_SPACING)
-    val card = wanted.coerceIn(MIN_POSTER_CARD_WIDTH, MAX_POSTER_CARD_WIDTH)
-    // The most whole cards, besides the half one, that leave the least room between them.
-    var whole = ((room - card / 2 + MIN_POSTER_SPACING) / (card + MIN_POSTER_SPACING)).toInt().coerceAtLeast(1)
-    var spacing = (room - card * (whole + 0.5f)) / whole
-    while (spacing < MIN_POSTER_SPACING && whole > 1) {
-        whole--
-        spacing = (room - card * (whole + 0.5f)) / whole
+    val step = POINTER_POSTER_CARD_WIDTH + POSTER_SPACING
+    val whole = (room / step).toInt()
+    val shown = (room - step * whole) / POINTER_POSTER_CARD_WIDTH
+    if (shown in MIN_LAST_CARD_SHOWN..MAX_LAST_CARD_SHOWN) {
+        return PosterRowSizing(POINTER_POSTER_CARD_WIDTH, POSTER_SPACING)
     }
-    return PosterRowSizing(card, spacing.coerceAtLeast(MIN_POSTER_SPACING))
+    // The width that makes the last card show a quarter or three quarters, for as many whole
+    // cards as now or one fewer, whichever is closest to the usual width.
+    val candidates =
+        listOf(whole, whole - 1).filter { it >= 1 }.flatMap { cards ->
+            listOf(MIN_LAST_CARD_SHOWN, MAX_LAST_CARD_SHOWN).map { part ->
+                (room - POSTER_SPACING * cards) / (cards + part)
+            }
+        }
+    val card =
+        candidates
+            .filter { it in MIN_POSTER_CARD_WIDTH..MAX_POSTER_CARD_WIDTH }
+            .minByOrNull { (it - POINTER_POSTER_CARD_WIDTH).value.let { gap -> gap * gap } }
+            ?: POINTER_POSTER_CARD_WIDTH
+    return PosterRowSizing(card, POSTER_SPACING)
 }
 
 /** A titled section: header, optional "See all" action and a poster row; see [SnPosterRow] for [slot]. */

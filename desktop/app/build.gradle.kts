@@ -2,6 +2,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import stremionow.desktop.buildlogic.DesktopNativesPlugin
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -183,35 +186,90 @@ tasks.register<Exec>("packageVelopack") {
     )
 }
 
-// Publishes the packages packageVelopack made as the GitHub release v<appVersion>, the release the
-// installed apps update from (AppUpdates.kt reads the latest one). Needs a token that can write
-// the repository's releases:
-//   GITHUB_TOKEN=$(gh auth token) ./gradlew :app:packageVelopack :app:publishVelopack
-tasks.register<Exec>("publishVelopack") {
-    description = "Publishes the Velopack packages as this version's GitHub release."
+// Attaches the Windows files packageVelopack made to the GitHub release v<appVersion>: the
+// installer, the portable zip and what installed apps update from (AppUpdates.kt reads the
+// latest published release). The Release workflow adds the Android APKs to the same release
+// when the tag is pushed; whichever runs first creates the draft, the other adds to it. Needs the
+// GitHub CLI signed in (`gh auth login`) and the commit pushed:
+//   ./gradlew :app:packageVelopack :app:publishVelopack -Pstremionow.packaging.javaHome=...
+tasks.register<PublishWindowsRelease>("publishVelopack") {
+    description = "Attaches the Windows installer and update packages to this version's GitHub release (a draft)."
     group = "compose desktop"
     mustRunAfter("packageVelopack")
     onlyIf { System.getProperty("os.name").lowercase().contains("windows") }
-    val output = layout.buildDirectory.dir("velopack")
-    workingDir = projectDir
-    doFirst {
-        val token = System.getenv("GITHUB_TOKEN") ?: throw GradleException("Set GITHUB_TOKEN to publish the release")
-        commandLine(
-            "dotnet",
-            "vpk",
-            "upload",
-            "github",
-            "--repoUrl",
-            "https://github.com/AffonsoPaulo/stremionow",
-            "--token",
-            token,
-            "--publish",
-            "--releaseName",
-            "StremioNow $appVersion",
-            "--tag",
-            "v$appVersion",
-            "--outputDir",
-            output.get().asFile.absolutePath,
-        )
-    }
+    packages.set(layout.buildDirectory.dir("velopack"))
+    version.set(appVersion)
+    repository.set(layout.projectDirectory)
 }
+
+abstract class PublishWindowsRelease
+    @Inject
+    constructor(
+        private val exec: ExecOperations,
+    ) : DefaultTask() {
+        @get:Internal abstract val packages: DirectoryProperty
+
+        @get:Input abstract val version: Property<String>
+
+        @get:Internal abstract val repository: DirectoryProperty
+
+        @TaskAction
+        fun publish() {
+            val tag = "v${version.get()}"
+            val folder = packages.get().asFile
+            val files =
+                listOf(
+                    "StremioNow-win-Setup.exe",
+                    "StremioNow-win-Portable.zip",
+                    "StremioNow-${version.get()}-full.nupkg",
+                    "releases.win.json",
+                ).map { File(folder, it) }
+            val missing = files.filterNot { it.isFile }
+            if (missing.isNotEmpty()) {
+                throw GradleException("Missing ${missing.joinToString { it.name }}: run packageVelopack first")
+            }
+            val paths = files.map { it.absolutePath }
+            val exists =
+                gh(listOf("release", "view", tag), ignoreFailure = true, quiet = true) == 0
+            if (exists) {
+                gh(listOf("release", "upload", tag, "--clobber") + paths)
+            } else {
+                val commit = ByteArrayOutputStream()
+                exec.exec {
+                    workingDir = repository.get().asFile
+                    commandLine("git", "rev-parse", "HEAD")
+                    standardOutput = commit
+                }
+                gh(
+                    listOf(
+                        "release",
+                        "create",
+                        tag,
+                        "--draft",
+                        "--target",
+                        commit.toString().trim(),
+                        "--title",
+                        "StremioNow $tag",
+                        "--generate-notes",
+                    ) + paths,
+                )
+            }
+            logger.lifecycle("Attached the Windows files to the draft release $tag; publish it on GitHub.")
+        }
+
+        private fun gh(
+            args: List<String>,
+            ignoreFailure: Boolean = false,
+            quiet: Boolean = false,
+        ): Int =
+            exec
+                .exec {
+                    workingDir = repository.get().asFile
+                    commandLine(listOf("gh") + args)
+                    isIgnoreExitValue = ignoreFailure
+                    if (quiet) {
+                        standardOutput = OutputStream.nullOutputStream()
+                        errorOutput = OutputStream.nullOutputStream()
+                    }
+                }.exitValue
+    }

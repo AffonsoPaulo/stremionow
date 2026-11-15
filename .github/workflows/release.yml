@@ -86,13 +86,19 @@ jobs:
           rm -f "$keystore"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 
-      - name: Create draft release
+      # The Windows files are attached from a Windows machine (desktop/app's publishVelopack), before
+      # or after this job: the first to run creates the draft, the other adds to it.
+      - name: Create or update the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --verify-tag \
-            --generate-notes \
-            --title "StremioNow ${GITHUB_REF_NAME}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "StremioNow ${GITHUB_REF_NAME}"
+          fi

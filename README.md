@@ -2,7 +2,7 @@
 
 A fast, native client for the Stremio addon ecosystem, built for Android phones, Android TV, Fire TV and the desktop (Windows, macOS, Linux).
 
-> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account. The desktop app shares their interface and plays through mpv; it is tested by hand on Windows, and builds, passes its tests and plays a test pattern in CI on macOS and Linux.
+> Status: early development. The Android phone and TV apps browse, play (web, debrid and torrent sources) and sync with a Stremio account. The desktop app shares their interface and plays through mpv; it has a Windows installer that keeps the app up to date, is tested by hand on Windows, and builds, passes its tests and plays a test pattern in CI on macOS and Linux.
 
 StremioNow does not host or provide any content. It plays what the addons you install point to. By default it installs the same addons as the official Stremio app: catalogs, metadata, subtitles and links to streaming services, but no source of copyrighted content.
 
@@ -16,6 +16,16 @@ StremioNow does not host or provide any content. It plays what the addons you in
 - **Skips what you've seen before**: intros, recaps and credits, found in the file's chapters and, for anime, on [AniSkip](https://aniskip.com), which you can turn off in Settings ([ADR 0009](docs/adr/0009-aniskip.md)).
 - **Your choice of account**: use your Stremio account to sync addons, library and progress, or keep everything on the device.
 - **One device torrents for the others**: turn on "Serve to other devices" on a computer, and a weak TV or phone on the same home network plays torrents through it. Pairing takes a six-digit code, and devices only talk to each other over encrypted, pinned connections ([ADR 0008](docs/adr/0008-serve-to-other-devices.md)).
+
+## Installing
+
+**Windows (10 and 11, 64-bit):** download [`StremioNow-win-Setup.exe`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win-Setup.exe) from the [latest release](https://github.com/AffonsoPaulo/stremionow/releases/latest) and open it. It installs StremioNow for your user, without administrator rights, adds it to the Start menu and the desktop, and opens it. The installer is not signed yet, so Windows SmartScreen may warn about it: choose **More info › Run anyway**. If you prefer not to install anything, the release also has `StremioNow-win-Portable.zip`, which runs from any folder.
+
+The installed app keeps itself up to date: every few hours it checks the latest release, downloads a newer version in the background and installs it the next time you quit StremioNow, or at once from **Settings › About › Restart and update**. To remove it, use **Settings › Apps** in Windows; your library and settings in `%APPDATA%\StremioNow` are kept.
+
+**Android phones, Android TV and Fire TV:** releases will carry signed APKs once their signing key is set up; until then, build them as described in [Building](#building).
+
+**macOS and Linux:** there is no package yet; run the desktop app from source (see [Building](#building)).
 
 ## Architecture
 
@@ -80,11 +90,21 @@ cd desktop
 ./gradlew run --args="--smoke-test" # start, play a test pattern through libmpv, exit 0 when it worked
 ```
 
+The Windows installer and its update packages are built with [Velopack](https://velopack.io), a .NET tool pinned in `desktop/dotnet-tools.json` (it needs the [.NET SDK](https://dotnet.microsoft.com/download) 8 or newer), from the app folder jpackage makes, so packaging needs a full JDK 25 rather than Android Studio's:
+
+```
+cd desktop
+dotnet tool restore
+./gradlew :app:packageVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
+```
+
+The installer lands in `desktop/app/build/velopack/StremioNow-win-Setup.exe`. Publishing a release is described in [`docs/RELEASING.md`](docs/RELEASING.md).
+
 It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux), and the Stremio session key in the system's secret store (DPAPI, the login keychain, or the Secret Service through libsecret; without one, the session lasts until the app closes).
 
 ## Privacy
 
-StremioNow has no server of its own. It talks only to the addons you install and to what they point to (artwork, debrid services, torrent peers), and, if you sign in, to your Stremio account. When you open Discover on the Addons screen, it downloads Stremio's lists of official and community addons from Cinemeta ([ADR 0010](docs/adr/0010-discover-addons.md)); installing one always asks first.
+StremioNow has no server of its own. It talks only to the addons you install and to what they point to (artwork, debrid services, torrent peers), and, if you sign in, to your Stremio account. When you open Discover on the Addons screen, it downloads Stremio's lists of official and community addons from Cinemeta ([ADR 0010](docs/adr/0010-discover-addons.md)); installing one always asks first. The Windows app installed with the installer also checks this repository's latest release on GitHub every six hours and downloads newer versions from it; it sends nothing beyond those downloads' requests, and copies built from source never check.
 
 **Crash reports** are opt-in and never sent on their own. When the app closes unexpectedly, it saves a report on the device: the app version, the operating system and its version, the device type (phone, tablet, TV, desktop), the processor architecture, the interface language, the error and where it happened, and the app's last 50 warnings. Before the report is saved, addresses lose everything but their host (debrid and addon keys live in the rest), and keys, tokens, email addresses, IP addresses and file paths in your home folder are removed. On the next launch the app asks whether to send it: **View report** shows exactly what it holds, and **Send report** opens a pre-filled issue on GitHub, which you review and submit from your own account (on a TV, a QR code opens it on your phone). **Don't send** deletes it. To stop saving reports altogether, choose **Never** in Settings › Privacy › Crash reports. Details are in [ADR 0007](docs/adr/0007-crash-reports.md).
 
@@ -102,4 +122,4 @@ StremioNow is free software, licensed under the [GNU General Public License v3.0
 
 ---
 
-**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial: os apps de celular e TV já navegam, reproduzem fontes web, de debrid e torrent e sincronizam com a conta do Stremio.
+**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial: os apps de celular e TV já navegam, reproduzem fontes web, de debrid e torrent e sincronizam com a conta do Stremio. No Windows, baixe o [`StremioNow-win-Setup.exe`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win-Setup.exe) da [última versão](https://github.com/AffonsoPaulo/stremionow/releases/latest) e abra: ele instala sem pedir administrador, e o app se atualiza sozinho. Se o Windows SmartScreen avisar, escolha **Mais informações › Executar assim mesmo**.

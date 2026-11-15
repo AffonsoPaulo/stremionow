@@ -65,6 +65,7 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.DeviceKind
 import io.github.affonsopaulo.stremionow.ui.data.DevicePlatform
 import io.github.affonsopaulo.stremionow.ui.data.DeviceSharing
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
@@ -193,9 +194,7 @@ class DevicesViewModel(
                     null
                 }
             val serving = on && problem == null
-            runCatching {
-                io { core.updateSettings(core.settings().copy(serveToDevices = serving, serveName = name)) }
-            }
+            runCatching { SettingsWriter.update(core) { it.copy(serveToDevices = serving, serveName = name) } }
             mutableState.update {
                 it.copy(
                     name = name,
@@ -224,7 +223,7 @@ class DevicesViewModel(
         if (name == state.value.name || state.value.serveBusy) return
         mutableState.update { it.copy(name = name, nameInput = name) }
         viewModelScope.launch {
-            runCatching { io { core.updateSettings(core.settings().copy(serveName = name)) } }
+            runCatching { SettingsWriter.update(core) { it.copy(serveName = name) } }
             if (state.value.serveOn) {
                 // Same identity, pairings and home network; only the name changes.
                 runCatching { DeviceSharing.startServing(app, core, name, turnedOn = false) }

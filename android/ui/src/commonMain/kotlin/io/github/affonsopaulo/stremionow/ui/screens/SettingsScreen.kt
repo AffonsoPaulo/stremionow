@@ -71,6 +71,7 @@ import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.crash.IssueLink
 import io.github.affonsopaulo.stremionow.ui.crash.TestCrashMenu
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.AppLanguage
 import io.github.affonsopaulo.stremionow.ui.l10n.InterfaceLanguages
@@ -115,7 +116,7 @@ class SettingsViewModel(
 
     init {
         viewModelScope.launch {
-            mutableSettings.value = runCatching { io { core.settings() } }.getOrNull()
+            mutableSettings.value = runCatching { SettingsWriter.read(core) }.getOrNull()
             mutableHdrTitles.value = runCatching { io { core.hdrTitleCount().toInt() } }.getOrDefault(0)
         }
     }
@@ -128,13 +129,14 @@ class SettingsViewModel(
 
     /**
      * Applies a change at once; there is no Save button to forget. The change is applied to
-     * the saved settings again, so what other pages changed meanwhile (Other devices) stays.
+     * the saved settings again, so what other pages changed meanwhile (Other devices) stays, and
+     * saves one after another in order (see [SettingsWriter]).
      */
     fun update(change: (AppSettings) -> AppSettings) {
         val current = settings.value ?: return
         mutableSettings.value = change(current)
         DebugLog.enabled = mutableSettings.value?.debugLogs == true
-        viewModelScope.launch { runCatching { io { core.updateSettings(change(core.settings())) } } }
+        SettingsWriter.post(core, change)
     }
 }
 

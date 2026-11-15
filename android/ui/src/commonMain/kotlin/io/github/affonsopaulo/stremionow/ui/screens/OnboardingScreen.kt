@@ -39,8 +39,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.SnWordmark
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
-import io.github.affonsopaulo.stremionow.ui.data.SecureStore
-import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
@@ -88,19 +87,9 @@ class OnboardingViewModel(
         subtitles: String,
         maxResolution: UInt,
     ) {
-        viewModelScope.launch {
-            runCatching {
-                io {
-                    val current = core.settings()
-                    core.updateSettings(
-                        current.copy(
-                            audioLanguage = audio,
-                            subtitleLanguage = subtitles,
-                            maxResolution = maxResolution,
-                        ),
-                    )
-                }
-            }
+        // Queued before finish's, so "onboarded" is never saved over by these.
+        SettingsWriter.post(core) {
+            it.copy(audioLanguage = audio, subtitleLanguage = subtitles, maxResolution = maxResolution)
         }
     }
 
@@ -133,7 +122,7 @@ class OnboardingViewModel(
 
     fun finish(onDone: () -> Unit) {
         viewModelScope.launch {
-            runCatching { io { core.updateSettings(core.settings().copy(onboarded = true)) } }
+            runCatching { SettingsWriter.update(core) { it.copy(onboarded = true) } }
             onDone()
         }
     }

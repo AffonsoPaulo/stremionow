@@ -393,95 +393,84 @@ impl StremioCore {
 
     /// Saves the user's preferences. Out-of-range values are brought back into range.
     pub fn update_settings(&self, settings: AppSettings) -> Result<(), CoreError> {
-        let store = self.store()?;
-        store.set_setting(
-            TORRENT_WIFI_ONLY,
-            if settings.torrent_wifi_only { "1" } else { "0" },
-        )?;
-        store.set_setting(
-            TORRENT_CACHE_MB,
-            &clamp_cache(settings.torrent_cache_mb).to_string(),
-        )?;
-        store.set_setting(AUDIO_LANGUAGE, &language_code(&settings.audio_language))?;
-        store.set_setting(
-            SUBTITLE_LANGUAGE,
-            &language_code(&settings.subtitle_language),
-        )?;
-        store.set_setting(
-            MAX_RESOLUTION,
-            &clamp_resolution(settings.max_resolution).to_string(),
-        )?;
-        store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
-        store.set_setting(ANISKIP, if settings.aniskip { "1" } else { "0" })?;
-        store.set_setting(DEBUG_LOGS, if settings.debug_logs { "1" } else { "0" })?;
-        store.set_setting(HDR, settings.hdr.as_str())?;
-        store.set_setting(
-            MATCH_REFRESH_RATE,
-            if settings.match_refresh_rate {
-                "1"
-            } else {
-                "0"
-            },
-        )?;
-        store.set_setting(
-            SERVE_TO_DEVICES,
-            if settings.serve_to_devices { "1" } else { "0" },
-        )?;
-        store.set_setting(SERVE_NAME, &serve_name(&settings.serve_name))?;
-        store.set_setting(STREAM_MEMORY, settings.stream_memory.as_str())?;
-        store.set_setting(
-            STREAM_MEMORY_AHEAD_MIB,
-            &clamp_range(settings.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE).to_string(),
-        )?;
-        store.set_setting(
-            STREAM_MEMORY_BEHIND_MIB,
-            &clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_SIZE_PERCENT,
-            &subtitle_size(settings.subtitle_size_percent).to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_POSITION,
-            &subtitle_position(settings.subtitle_position).to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_TEXT_COLOR,
-            &settings.subtitle_text_color.to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_BACKGROUND_COLOR,
-            &settings.subtitle_background_color.to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_OUTLINE_COLOR,
-            &settings.subtitle_outline_color.to_string(),
-        )?;
-        store.set_setting(
-            SUBTITLE_FILE_STYLING,
-            if settings.subtitle_file_styling {
-                "1"
-            } else {
-                "0"
-            },
-        )?;
-        store.set_setting(AUTOPLAY_NEXT, flag(settings.autoplay_next))?;
-        store.set_setting(
-            UP_NEXT_COUNTDOWN_SECONDS,
-            &up_next_countdown(settings.up_next_countdown_seconds).to_string(),
-        )?;
-        store.set_setting(
-            SEEK_STEP_SECONDS,
-            &seek_step(settings.seek_step_seconds).to_string(),
-        )?;
-        store.set_setting(
-            SEEK_SHORT_STEP_SECONDS,
-            &seek_step(settings.seek_short_step_seconds).to_string(),
-        )?;
-        store.set_setting(PLAYER_TYPE, settings.player_type.as_str())?;
-        store.set_setting(ESC_EXITS_FULL_SCREEN, flag(settings.esc_exits_full_screen))?;
-        store.set_setting(QUIT_ON_CLOSE, flag(settings.quit_on_close))?;
-        drop(store);
+        let entries: [(&str, String); 28] = [
+            (TORRENT_WIFI_ONLY, flag(settings.torrent_wifi_only).into()),
+            (
+                TORRENT_CACHE_MB,
+                clamp_cache(settings.torrent_cache_mb).to_string(),
+            ),
+            (AUDIO_LANGUAGE, language_code(&settings.audio_language)),
+            (
+                SUBTITLE_LANGUAGE,
+                language_code(&settings.subtitle_language),
+            ),
+            (
+                MAX_RESOLUTION,
+                clamp_resolution(settings.max_resolution).to_string(),
+            ),
+            (ONBOARDED, flag(settings.onboarded).into()),
+            (ANISKIP, flag(settings.aniskip).into()),
+            (DEBUG_LOGS, flag(settings.debug_logs).into()),
+            (HDR, settings.hdr.as_str().into()),
+            (MATCH_REFRESH_RATE, flag(settings.match_refresh_rate).into()),
+            (SERVE_TO_DEVICES, flag(settings.serve_to_devices).into()),
+            (SERVE_NAME, serve_name(&settings.serve_name)),
+            (STREAM_MEMORY, settings.stream_memory.as_str().into()),
+            (
+                STREAM_MEMORY_AHEAD_MIB,
+                clamp_range(settings.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE).to_string(),
+            ),
+            (
+                STREAM_MEMORY_BEHIND_MIB,
+                clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
+            ),
+            (
+                SUBTITLE_SIZE_PERCENT,
+                subtitle_size(settings.subtitle_size_percent).to_string(),
+            ),
+            (
+                SUBTITLE_POSITION,
+                subtitle_position(settings.subtitle_position).to_string(),
+            ),
+            (
+                SUBTITLE_TEXT_COLOR,
+                settings.subtitle_text_color.to_string(),
+            ),
+            (
+                SUBTITLE_BACKGROUND_COLOR,
+                settings.subtitle_background_color.to_string(),
+            ),
+            (
+                SUBTITLE_OUTLINE_COLOR,
+                settings.subtitle_outline_color.to_string(),
+            ),
+            (
+                SUBTITLE_FILE_STYLING,
+                flag(settings.subtitle_file_styling).into(),
+            ),
+            (AUTOPLAY_NEXT, flag(settings.autoplay_next).into()),
+            (
+                UP_NEXT_COUNTDOWN_SECONDS,
+                up_next_countdown(settings.up_next_countdown_seconds).to_string(),
+            ),
+            (
+                SEEK_STEP_SECONDS,
+                seek_step(settings.seek_step_seconds).to_string(),
+            ),
+            (
+                SEEK_SHORT_STEP_SECONDS,
+                seek_step(settings.seek_short_step_seconds).to_string(),
+            ),
+            (PLAYER_TYPE, settings.player_type.as_str().into()),
+            (
+                ESC_EXITS_FULL_SCREEN,
+                flag(settings.esc_exits_full_screen).into(),
+            ),
+            (QUIT_ON_CLOSE, flag(settings.quit_on_close).into()),
+        ];
+        // One transaction: two saves close together never interleave key by key, and a failure
+        // halfway keeps the earlier settings whole.
+        self.store()?.set_settings(&entries)?;
         // "Only on Wi-Fi" may have changed.
         self.apply_network_policy();
         Ok(())

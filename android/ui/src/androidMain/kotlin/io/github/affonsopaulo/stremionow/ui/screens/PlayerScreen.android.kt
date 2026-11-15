@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,8 +93,8 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
 
 /**
- * Full-screen player with HBO Max–style controls: title at the top, play and ten-second
- * skips in the middle, the timeline and the audio/subtitles, episodes, change-source and
+ * Full-screen player with HBO Max–style controls: title at the top, play and the skips back
+ * and forward (Settings' seek step) in the middle, the timeline and the audio/subtitles, episodes, change-source and
  * next-episode actions at the bottom. Controls fade out while playing and come back on any
  * tap or key press.
  */
@@ -101,7 +102,7 @@ import kotlinx.coroutines.delay
 actual fun PlayerScreen(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
-    onOpenEpisode: (Episode) -> Unit,
+    onOpenEpisode: (episode: Episode, bingeGroup: String?) -> Unit,
 ) {
     // What this player opened with. Moving on to the next episode clears the session's source
     // before the player has finished leaving; read live, that made the leaving player press
@@ -113,19 +114,44 @@ actual fun PlayerScreen(
         return
     }
     val context = LocalContext.current
+    // Named after the video the player opened with, and kept in the saved state: when the
+    // activity is recreated after the player moved on to another episode, the session names
+    // that episode, and a key made from it would start a second player beside the first.
+    val playerKey = rememberSaveable { "player-${selection.videoId}-${source.url.hashCode()}" }
     val viewModel =
-        viewModel(key = "player-${selection.videoId}-${source.url.hashCode()}") {
+        viewModel(key = playerKey) {
             val appContext = context.applicationContext
             val debuggable = appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
             PlayerViewModel(AppGraph.core(context), selection, source) { options ->
                 MpvPlayer.create(appContext, options.copy(verboseLogs = debuggable))
             }
         }
+    // Leaves once, whichever way: an episode's lookup that ends after Back or "Change source"
+    // must not navigate a second time, which would close the title's page too.
+    val leave = remember(viewModel) { LeaveOnce(viewModel::leave) }
+    val back = { leave.to(onBack) }
+    val changeSource = { leave.to(onChangeSource) }
+    // The video playing: another episode plays in this player, in place of the one it opened
+    // with; only when its source cannot be found does the title's page show its sources.
+    val playing = viewModel.selection
+    val openEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
+    // The next episode (its button, Up Next, the media session): the one left counts as watched.
+    val playNext: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode, asNext = true) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
     val state by viewModel.player.state.collectAsStateWithLifecycle()
     val preparing by viewModel.preparing.collectAsStateWithLifecycle()
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
     val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
+    val providerGaveUp by viewModel.providerGaveUp.collectAsStateWithLifecycle()
     val skips by viewModel.skips.collectAsStateWithLifecycle()
+    val providerDownloading by viewModel.providerDownloading.collectAsStateWithLifecycle()
+    val incomplete by viewModel.incomplete.collectAsStateWithLifecycle()
+    val progressCounts by viewModel.progressCounts.collectAsStateWithLifecycle()
+    // How far the skip buttons and the remote's fast-forward and rewind keys move.
+    val seekStep = viewModel.seekSteps.step.toDouble()
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf<Panel?>(null) }
@@ -138,13 +164,14 @@ actual fun PlayerScreen(
     ImmersivePlayback()
     PlayerMediaSession(
         player = viewModel.player,
-        title = selection.details.item.name,
-        subtitle = selection.episode?.title,
+        title = playing.details.item.name,
+        subtitle = playing.episode?.title,
         positionSeconds = state.positionSeconds,
         durationSeconds = state.durationSeconds,
         paused = state.isPaused,
-        hasNext = selection.nextEpisode != null,
-        onNext = { selection.nextEpisode?.let(onOpenEpisode) },
+        hasNext = playing.nextEpisode != null,
+        onNext = { playing.nextEpisode?.let(playNext) },
+        seekStepSeconds = seekStep,
     )
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         viewModel.player.pause()
@@ -157,7 +184,11 @@ actual fun PlayerScreen(
         }
     }
     BackHandler(enabled = panel != null) { panel = null }
-    val next = selection.nextEpisode
+    // The system's Back goes through the same single leave as the player's own button.
+    BackHandler(enabled = panel == null) { back() }
+    // A panel open on the episode left closes with it.
+    LaunchedEffect(playing.videoId) { panel = null }
+    val next = playing.nextEpisode
 
     val rootFocus = remember { FocusRequester() }
     // Whenever nothing in the player has the focus (at first, or after the focused control or
@@ -194,12 +225,12 @@ actual fun PlayerScreen(
                     }
 
                     Key.MediaFastForward -> {
-                        viewModel.player.seekBy(10.0)
+                        viewModel.player.seekBy(seekStep)
                         true
                     }
 
                     Key.MediaRewind -> {
-                        viewModel.player.seekBy(-10.0)
+                        viewModel.player.seekBy(-seekStep)
                         true
                     }
 
@@ -223,11 +254,13 @@ actual fun PlayerScreen(
         PlayerSurface(viewModel.player, Modifier.fillMaxSize())
 
         if (!prepareFailed && state.error == null) {
-            if (preparing || !state.isLoaded) {
+            if (providerDownloading) {
+                // Its screen shows above the controls, further down.
+            } else if (preparing || !state.isLoaded) {
                 // Until the first frame: the title's logo fills while the source gets ready.
                 SnLogoLoader(
-                    logo = selection.details.item.logo,
-                    title = selection.details.item.name,
+                    logo = playing.details.item.logo,
+                    title = playing.details.item.name,
                     progress = null,
                     status = torrent?.let { torrentStatusText(it) },
                     label = stringResource(Res.string.player_preparing),
@@ -240,11 +273,12 @@ actual fun PlayerScreen(
 
         AnimatedVisibility(controlsVisible && state.error == null, enter = fadeIn(), exit = fadeOut()) {
             Controls(
-                selection = selection,
+                selection = playing,
                 state = state,
                 scrubSeconds = scrubSeconds,
                 hasNext = next != null,
-                onBack = onBack,
+                seekStep = viewModel.seekSteps.step,
+                onBack = back,
                 onTogglePause = {
                     viewModel.player.togglePause()
                     poke()
@@ -263,20 +297,51 @@ actual fun PlayerScreen(
                 },
                 onTracks = { panel = Panel.Tracks },
                 onEpisodes = { panel = Panel.Episodes },
-                onChangeSource = onChangeSource,
-                onNext = { next?.let(onOpenEpisode) },
+                onChangeSource = changeSource,
+                onNext = { next?.let(playNext) },
+            )
+        }
+
+        // Above the controls, so their shading does not dim its button.
+        if (providerDownloading && !prepareFailed && state.error == null) {
+            ProviderDownloading(
+                logo = playing.details.item.logo,
+                title = playing.details.item.name,
+                onChangeSource = changeSource,
+                modifier = Modifier.align(Alignment.Center),
             )
         }
 
         if (state.error != null || prepareFailed) {
-            PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+            PlaybackError(
+                onChangeSource = changeSource,
+                onBack = back,
+                modifier = Modifier.align(Alignment.Center),
+                providerGaveUp = providerGaveUp,
+            )
+        } else if (incomplete != null) {
+            IncompleteVideoPrompt(
+                durationSeconds = incomplete ?: 0.0,
+                onDiscard = { viewModel.answerIncomplete(save = false) },
+                onSave = { viewModel.answerIncomplete(save = true) },
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .safeDrawingPadding()
+                        .padding(SnSpacing.space8)
+                        .padding(bottom = promptLift),
+            )
         } else if (state.isLoaded) {
             PlaybackPrompts(
                 state = state,
                 skips = skips,
-                next = next,
+                // A video whose progress does not count (much shorter than expected) leads on to nothing.
+                next = next.takeIf { progressCounts },
+                showSkip = controlsVisible,
+                onSkipBegins = poke,
                 onSeekTo = viewModel.player::seekTo,
-                onOpenEpisode = onOpenEpisode,
+                onOpenEpisode = playNext,
+                upNext = viewModel.upNext,
                 modifier =
                     Modifier
                         .align(Alignment.BottomEnd)
@@ -295,19 +360,20 @@ actual fun PlayerScreen(
                 SidePanel(stringResource(Res.string.player_tracks), onClose = { panel = null }) {
                     TracksList(
                         tracks = state.tracks,
-                        onSelectAudio = viewModel.player::selectAudio,
-                        onSelectSubtitle = viewModel.player::selectSubtitle,
+                        onSelectAudio = viewModel::selectAudio,
+                        onSelectSubtitle = viewModel::selectSubtitle,
                     )
                 }
             }
 
             Panel.Episodes -> {
                 SidePanel(stringResource(Res.string.player_episodes), onClose = { panel = null }) {
-                    EpisodesList(selection, onOpenEpisode)
+                    EpisodesList(playing, openEpisode)
                 }
             }
 
-            null -> {}
+            // Speed and picture are the desktop's for now.
+            Panel.Playback, null -> {}
         }
     }
 }
@@ -343,6 +409,8 @@ private fun Controls(
     state: PlaybackState,
     scrubSeconds: Double?,
     hasNext: Boolean,
+    /** Seconds the skip buttons move. */
+    seekStep: Int,
     onBack: () -> Unit,
     onTogglePause: () -> Unit,
     onSeekBy: (Double) -> Unit,
@@ -399,7 +467,11 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space10),
         ) {
-            SnIconButton(SnIcons.Back10, stringResource(Res.string.player_back10), { onSeekBy(-10.0) })
+            SnIconButton(
+                SnIcons.Back10,
+                stringResource(Res.string.player_back_seconds, seekStep),
+                { onSeekBy(-seekStep.toDouble()) },
+            )
             val playLabel = stringResource(if (state.isPaused) Res.string.player_play else Res.string.player_pause)
             Box(
                 Modifier
@@ -416,7 +488,11 @@ private fun Controls(
                     colorFilter = ColorFilter.tint(SnColors.fg),
                 )
             }
-            SnIconButton(SnIcons.Forward10, stringResource(Res.string.player_forward10), { onSeekBy(10.0) })
+            SnIconButton(
+                SnIcons.Forward10,
+                stringResource(Res.string.player_forward_seconds, seekStep),
+                { onSeekBy(seekStep.toDouble()) },
+            )
         }
 
         Column(

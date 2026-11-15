@@ -15,12 +15,26 @@ data class PlayerOptions(
     val streamMemory: StreamMemory? = null,
     /** Exact sizes of the stream memory on the desktop (the user's "Custom"); they win over [streamMemory]. */
     val streamMemorySizes: StreamMemorySizes? = null,
+    /** How subtitles look, from Settings; the player's own buttons change size and place afterwards. */
+    val subtitleStyle: SubtitleStyle = SubtitleStyle(),
     /**
      * Detailed mpv logs. Keep it off in release builds: mpv logs the addresses it opens, and
      * debrid addresses carry the user's API key.
      */
     val verboseLogs: Boolean = false,
 )
+
+/** How the picture fills a screen of another shape. */
+enum class VideoScale {
+    /** The whole picture, with bars where the shapes differ (the default). */
+    Fit,
+
+    /** Fills the screen, cropping the picture's edges. */
+    Fill,
+
+    /** Fills the screen, distorting the picture. */
+    Stretch,
+}
 
 /**
  * What the shared player screen needs from a video player. Each platform implements it with
@@ -66,6 +80,37 @@ interface VideoPlayer {
 
     /** Selects a subtitle track, or turns subtitles off with null. */
     fun selectSubtitle(trackId: Int?)
+
+    /** Sets the volume, from 0 to 100. Players that cannot ignore it. */
+    fun setVolume(percent: Int) = Unit
+
+    /** Mutes or unmutes the sound, keeping the volume. Players that cannot ignore it. */
+    fun setMuted(muted: Boolean) = Unit
+
+    /** Shifts subtitles in time; positive values show them later. Players that cannot ignore it. */
+    fun setSubtitleDelay(seconds: Double) = Unit
+
+    /** Scales subtitles, 1 being their normal size. Players that cannot ignore it. */
+    fun setSubtitleScale(scale: Double) = Unit
+
+    /**
+     * Places subtitles vertically, as a percentage of the picture's height from its top: 100 is
+     * the bottom, where they normally are; lower values raise them. Players that cannot ignore it.
+     */
+    fun setSubtitlePosition(percent: Int) = Unit
+
+    /** Plays at [speed] times the normal rate. Players that cannot ignore it. */
+    fun setSpeed(speed: Double) = Unit
+
+    /** How the picture fills the screen. Players that cannot ignore it. */
+    fun setVideoScale(scale: VideoScale) = Unit
+
+    /**
+     * Stops the video playing at once, picture and sound, keeping the player for the next
+     * [load]: moving on to another video in the same player. Volume, speed and the subtitle
+     * size and position stay.
+     */
+    fun stop() = Unit
 
     /** Stops playback and frees native resources. The player cannot be used afterwards. */
     fun release()

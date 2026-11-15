@@ -38,7 +38,7 @@ class SettingsRoutesTest {
     fun displayShowsOnlyWhereTheAppCanSwitchTheDisplay() {
         assertTrue(SettingsPage.Display in SettingsPage.shown(displaySwitching = true))
         assertFalse(SettingsPage.Display in SettingsPage.shown(displaySwitching = false))
-        // Addons comes first and Playback right after it, where the avatar's Settings lands.
-        assertEquals(listOf(SettingsPage.Addons, SettingsPage.Playback), SettingsPage.shown(false).take(2))
+        // Addons comes first and General right after it, where the avatar's Settings lands.
+        assertEquals(listOf(SettingsPage.Addons, SettingsPage.General), SettingsPage.shown(false).take(2))
     }
 }

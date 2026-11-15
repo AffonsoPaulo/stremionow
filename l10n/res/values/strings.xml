@@ -44,6 +44,11 @@
 
   <!-- Remaining time on a card. %1$s is a duration already formatted for the locale, for example "18 min". -->
   <string name="time_left">%1$s left</string>
+  <!-- Remaining time on a card, in minutes. %1$d is the number of minutes. -->
+  <plurals name="time_left_minutes">
+    <item quantity="one">%1$d min left</item>
+    <item quantity="other">%1$d min left</item>
+  </plurals>
 
   <!-- Source picker summary: %1$s is sources_count, %2$s is sources_addons, for example "12 sources from 3 addons". -->
   <string name="sources_summary">%1$s from %2$s</string>
@@ -85,6 +90,11 @@
   <string name="explore_genre_all">All</string>
   <string name="explore_loading_more">Loading more…</string>
   <string name="explore_empty_body">This catalog has nothing to show for this filter.</string>
+  <!-- A genre page whose genre none of the catalogs can filter by. %1$s is the genre. -->
+  <string name="explore_genre_missing_title">No catalog for %1$s</string>
+  <string name="explore_genre_missing_body">None of your addons\' catalogs can list titles by this genre.</string>
+  <!-- Button on that page that shows the first catalog without a genre. -->
+  <string name="explore_genre_missing_action">Show all titles</string>
 
   <!-- Search screen. -->
   <string name="search_field_label">Search movies and series</string>
@@ -107,6 +117,8 @@
   <string name="details_season">Season %1$d</string>
   <!-- Season 0, which holds specials. -->
   <string name="details_specials">Specials</string>
+  <!-- Season selector for the episodes the addon gives no season number. -->
+  <string name="details_no_season">Episodes</string>
   <string name="details_overview">Overview</string>
   <string name="details_cast">Cast</string>
   <string name="details_directors">Direction</string>
@@ -151,6 +163,9 @@
   <string name="watched_season_unmark">Mark season %1$d as unwatched</string>
   <string name="watched_specials_mark">Mark the specials as watched</string>
   <string name="watched_specials_unmark">Mark the specials as unwatched</string>
+  <!-- For the episodes the addon gives no season number. -->
+  <string name="watched_no_season_mark">Mark the episodes without a season as watched</string>
+  <string name="watched_no_season_unmark">Mark the episodes without a season as unwatched</string>
   <string name="watched_series_mark">Mark the whole series as watched</string>
   <string name="watched_series_unmark">Mark the whole series as unwatched</string>
   <!-- Badge on an episode the user has watched. -->
@@ -347,7 +362,13 @@
   <!-- On sources that open in another app, such as a streaming service or YouTube. -->
   <string name="sources_opens_outside">Opens outside the app</string>
   <string name="sources_empty_title">No sources found</string>
-  <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <string name="sources_empty_body">None of your addons has a source for this. Another stream addon may have one.</string>
+  <!-- No addon the user has gives sources for this kind of title. -->
+  <string name="sources_no_addons_title">No addons for sources</string>
+  <string name="sources_no_addons_body">None of your addons gives sources for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <!-- Every addon asked failed to answer. -->
+  <string name="sources_failed_title">Couldn\'t reach your addons</string>
+  <string name="sources_failed_body">None of your addons answered. Check your connection and try again.</string>
   <!-- Button at the start of an episode's sources that returns to the list of episodes. -->
   <string name="sources_back_to_episodes">Back to episodes</string>
   <!-- Field over a video's sources that narrows them to those whose name has the words typed. -->
@@ -407,8 +428,9 @@
   </plurals>
   <string name="player_play">Play</string>
   <string name="player_pause">Pause</string>
-  <string name="player_back10">Back 10 seconds</string>
-  <string name="player_forward10">Forward 10 seconds</string>
+  <!-- The skip buttons. %1$d is the seek step from Settings, 3 seconds or more. -->
+  <string name="player_back_seconds">Back %1$d seconds</string>
+  <string name="player_forward_seconds">Forward %1$d seconds</string>
   <string name="player_timeline">Playback position</string>
   <string name="player_tracks">Audio and subtitles</string>
   <string name="player_audio">Audio</string>
@@ -438,6 +460,52 @@
   <string name="player_key_full_screen">F</string>
   <!-- The letter printed on the key that plays the next episode (N); keep it unless keyboards in your language label that key differently. -->
   <string name="player_key_next">N</string>
+  <!-- The letter printed on the key that opens the episodes (E); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_episodes">E</string>
+  <string name="player_volume">Volume</string>
+  <string name="player_watch_credits">Watch credits</string>
+  <string name="player_starts_in">Starts in %1$d s</string>
+  <string name="player_closes_in">Closes in %1$d s</string>
+  <string name="player_hdr_not_now">Not now</string>
+  <string name="player_incomplete_title">This video looks incomplete</string>
+  <string name="player_incomplete_body">It is only %1$s long, much less than expected: it may be a notice from the provider rather than the video. Save its progress anyway?</string>
+  <string name="player_incomplete_discard">Don\'t save</string>
+  <string name="player_incomplete_save">Save progress</string>
+  <string name="player_incomplete_default_in">Not saved in %1$d s</string>
+  <string name="player_provider_downloading">The provider is downloading this video</string>
+  <string name="player_provider_downloading_body">It starts by itself once ready, which can take a few minutes.</string>
+  <!-- Instead of the usual error text, when the debrid service never got the video ready or stopped answering. -->
+  <string name="player_provider_gave_up">The provider still hasn\'t got this video ready, or stopped answering. Try another source.</string>
+  <string name="player_choose_other_source">Choose another source</string>
+  <string name="settings_debug_logs">Debug log</string>
+  <string name="settings_debug_logs_body">Writes what the app does while finding and preparing sources to its log, to find out why one does not play. Never addresses or keys.</string>
+  <string name="player_watching_now">Watching now</string>
+  <string name="player_season_menu">Season</string>
+  <string name="player_close_episodes">Close episodes</string>
+  <string name="player_playback">Playback</string>
+  <string name="player_speed">Speed</string>
+  <string name="player_picture">Picture</string>
+  <string name="player_picture_fit">Fit</string>
+  <string name="player_picture_fit_body">The whole picture, with bars where it doesn\'t fill the screen</string>
+  <string name="player_picture_fill">Fill</string>
+  <string name="player_picture_fill_body">No bars: the edges of the picture are cut off</string>
+  <string name="player_picture_stretch">Stretch</string>
+  <string name="player_picture_stretch_body">No bars: the picture is stretched to the screen</string>
+  <string name="player_sub_sync">Subtitle sync</string>
+  <string name="player_sub_earlier">Show subtitles 0.1 s earlier</string>
+  <string name="player_sub_later">Show subtitles 0.1 s later</string>
+  <string name="player_sub_smaller">Smaller subtitles</string>
+  <string name="player_sub_larger">Larger subtitles</string>
+  <string name="player_sub_size">Size</string>
+  <string name="player_sub_position">Position</string>
+  <string name="player_sub_up">Raise subtitles</string>
+  <string name="player_sub_down">Lower subtitles</string>
+  <string name="player_track_embedded">In the file</string>
+  <string name="player_track_external">Added</string>
+  <!-- The letter printed on the key that mutes the sound (M); keep it unless keyboards in your language label that key differently. -->
+  <string name="player_key_mute">M</string>
+  <string name="player_mute">Mute</string>
+  <string name="player_unmute">Unmute</string>
   <!-- Desktop player: small prompt in the corner when an HDR video starts on a screen that supports HDR but has it off. It fades away after a few seconds. -->
   <string name="player_hdr_title">Turn on HDR?</string>
   <string name="player_hdr_body">The screen may go dark for a moment.</string>
@@ -482,6 +550,8 @@
 
   <!-- Torrent playback. -->
   <string name="player_preparing">Getting the source ready</string>
+  <string name="player_resuming">Finding the source you chose before</string>
+  <string name="player_waiting">Loading the video</string>
   <string name="torrent_finding_peers">Looking for peers…</string>
   <string name="torrent_checking">Checking downloaded data…</string>
   <!-- Torrent status while starting. %1$d is the number of peers, %2$s the download speed, for example "2.4 MB". -->
@@ -518,6 +588,10 @@
   <string name="onboarding_debrid_failed">Couldn\'t connect. Check the key and try again.</string>
   <string name="onboarding_skip">Skip</string>
   <string name="onboarding_connect">Connect</string>
+  <string name="settings_general">General</string>
+  <string name="settings_language">App language</string>
+  <string name="settings_language_body">The language of the app\'s own text. Titles and overviews come from addons and keep their language.</string>
+  <string name="settings_language_system">System default</string>
   <string name="settings_playback">Playback</string>
 
   <!-- Signed in to a Stremio account. -->
@@ -525,6 +599,10 @@
   <string name="profile_sign_out">Sign out</string>
   <string name="profile_sign_out_title">Sign out of Stremio?</string>
   <string name="profile_sign_out_body">Your addons, list and progress stay on this device, but stop syncing.</string>
+  <string name="account_session_not_remembered_title">Signed in for now</string>
+  <string name="account_session_not_remembered_body">This device\'s secure storage couldn\'t keep your session, so you\'ll need to sign in again the next time you open the app.</string>
+  <string name="account_session_not_cleared_title">Session still saved</string>
+  <string name="account_session_not_cleared_body">You\'re signed out, but this device\'s secure storage couldn\'t remove the saved session, so the app may sign you in again the next time it opens.</string>
 
   <string name="player_skip_intro">Skip intro</string>
   <!-- Player button shown during a summary of earlier episodes; it jumps to its end. -->
@@ -677,6 +755,74 @@
   <string name="settings_about_source">Source code</string>
   <!-- About: opens the form to report a problem. -->
   <string name="settings_about_report">Report a problem</string>
+  <!-- About, on Windows: a newer version was downloaded. %1$s is its number, for example "0.2.0". -->
+  <string name="settings_update_ready">Version %1$s is ready</string>
+  <string name="settings_update_ready_body">It installs the next time you quit StremioNow.</string>
+  <!-- About: installs the downloaded version now; the app closes and opens again. -->
+  <string name="settings_update_restart">Restart and update</string>
+
+  <!-- Settings › Playback: how subtitles look, with a preview over a still picture. -->
+  <string name="settings_sub_style">Subtitle style</string>
+  <string name="settings_sub_style_body">Applies from the next video. The player\'s own buttons still change the size and position while you watch.</string>
+  <!-- The sample line of subtitle in the preview. -->
+  <string name="settings_sub_preview">This is how subtitles will look.</string>
+  <string name="settings_sub_text_color">Text color</string>
+  <!-- The box drawn behind the subtitle text. -->
+  <string name="settings_sub_background_color">Background</string>
+  <string name="settings_sub_outline_color">Outline</string>
+  <!-- ASS subtitles, common in anime, carry their own fonts, colors and positions. -->
+  <string name="settings_sub_file_styling">Use the subtitle file\'s own styling</string>
+  <string name="settings_sub_file_styling_body">Styled subtitles, common in anime, keep their own fonts, colors and positions. When off, the colors and position above apply to them too.</string>
+  <!-- Colors offered for subtitles. -->
+  <string name="settings_color_white">White</string>
+  <string name="settings_color_yellow">Yellow</string>
+  <string name="settings_color_cyan">Cyan</string>
+  <string name="settings_color_green">Green</string>
+  <string name="settings_color_black">Black</string>
+  <string name="settings_color_translucent_black">Translucent black</string>
+  <!-- No background box, or no outline. -->
+  <string name="settings_color_none">None</string>
+
+  <!-- Settings › General (desktop): how the windows behave. -->
+  <string name="settings_esc_full_screen">Esc leaves full screen</string>
+  <string name="settings_esc_full_screen_body">In the player, Esc first leaves full screen. When off, Esc goes straight back, as when the player isn\'t full screen.</string>
+  <string name="settings_quit_on_close">Closing the window quits the app</string>
+  <string name="settings_quit_on_close_body">When off, StremioNow keeps running in the system tray, so other devices it serves keep playing. Open it again or quit from the tray icon.</string>
+  <!-- The menu of the app's icon in the system tray. -->
+  <string name="tray_open">Open StremioNow</string>
+  <string name="tray_quit">Quit</string>
+
+  <!-- Desktop: system dialog shown when the app cannot start (a file it ships with is missing or damaged). -->
+  <string name="startup_error_title">StremioNow couldn\'t start</string>
+  <string name="startup_error_body">Part of the app is missing or damaged. Installing StremioNow again usually fixes this.</string>
+  <!-- Shown instead of the app when its data folder cannot be opened: a system dialog on the desktop, a screen on phones and TVs. The folder's path is shown under the body. -->
+  <string name="core_unavailable_title">StremioNow can\'t open its data</string>
+  <string name="core_unavailable_body">Check that this folder exists, that it can be written to and that the disk has free space, then open the app again.</string>
+
+  <!-- Settings › Playback (Android): which app plays sources. -->
+  <string name="settings_play_in">Play in</string>
+  <string name="settings_play_in_body">Another app, such as VLC, MX Player or Just Player, can play the sources instead; you pick it each time. StremioNow can\'t follow your progress there, so Continue watching and watched episodes don\'t update.</string>
+  <string name="settings_play_in_app">StremioNow</string>
+  <string name="settings_play_in_other_app">Another app</string>
+  <!-- While a source gets ready to open in another app. -->
+  <string name="external_title">Opening in another app</string>
+  <!-- Title of the system's list of apps that can play the video. -->
+  <string name="external_chooser">Play with</string>
+  <string name="external_failed">Couldn\'t get this source ready. Try another one.</string>
+  <string name="external_no_app">No app on this device can play videos. Install one, such as VLC, or play in StremioNow.</string>
+
+  <!-- Settings › Playback: moving on to the next episode. The card is the one shown near the end of an episode. -->
+  <string name="settings_autoplay_next">Play the next episode automatically</string>
+  <string name="settings_autoplay_next_body">The next episode starts by itself near the end of this one. When off, the next episode\'s card still shows, without counting down.</string>
+  <string name="settings_up_next_countdown">Next episode countdown</string>
+  <string name="settings_up_next_countdown_body">How long the next episode\'s card counts down before it starts. When off, the next episode starts as soon as this one ends.</string>
+
+  <!-- Settings › Playback: how far the player skips back and forward per press. -->
+  <string name="settings_seek">Skip back and forward</string>
+  <string name="settings_seek_body">How far the skip buttons and the remote\'s fast-forward and rewind keys move.</string>
+  <string name="settings_seek_body_desktop">How far the arrow keys and the skip buttons move.</string>
+  <!-- Desktop: the shorter step, with Shift held. -->
+  <string name="settings_seek_short">With Shift and the arrow keys</string>
 
   <!-- Settings › Playback: how much of the video is kept in memory for skipping. Not the torrent cache, which is disk space. -->
   <string name="settings_memory">Memory for the video</string>

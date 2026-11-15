@@ -11,6 +11,7 @@ const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
 const ANISKIP: &str = "aniskip";
+const DEBUG_LOGS: &str = "debug_logs";
 const HDR: &str = "hdr";
 const MATCH_REFRESH_RATE: &str = "match_refresh_rate";
 /// Titles the user turned HDR on for ("Only for this title"), one setting each: the prefix and the meta id.
@@ -22,6 +23,42 @@ const SERVE_NAME: &str = "serve_name";
 const STREAM_MEMORY: &str = "stream_memory";
 const STREAM_MEMORY_AHEAD_MIB: &str = "stream_memory_ahead_mib";
 const STREAM_MEMORY_BEHIND_MIB: &str = "stream_memory_behind_mib";
+const SUBTITLE_SIZE_PERCENT: &str = "subtitle_size_percent";
+const SUBTITLE_POSITION: &str = "subtitle_position";
+const SUBTITLE_TEXT_COLOR: &str = "subtitle_text_color";
+const SUBTITLE_BACKGROUND_COLOR: &str = "subtitle_background_color";
+const SUBTITLE_OUTLINE_COLOR: &str = "subtitle_outline_color";
+const SUBTITLE_FILE_STYLING: &str = "subtitle_file_styling";
+
+/// Subtitle sizes, in percent of the normal size, and the step between them: the same as the
+/// player's size buttons, which change the size for the session only.
+pub const SUBTITLE_SIZE_RANGE: (u32, u32) = (50, 200);
+const SUBTITLE_SIZE_STEP: u32 = 10;
+/// Subtitle places, in percent of the picture's height from its top (100 is the bottom, where
+/// subtitles normally are), and the step between them: the same as the player's buttons.
+pub const SUBTITLE_POSITION_RANGE: (u32, u32) = (30, 100);
+const SUBTITLE_POSITION_STEP: u32 = 5;
+/// Stremio's subtitle colours, as ARGB: white text, no background and a black outline.
+const DEFAULT_SUBTITLE_TEXT_COLOR: u32 = 0xFFFF_FFFF;
+const DEFAULT_SUBTITLE_BACKGROUND_COLOR: u32 = 0x0000_0000;
+const DEFAULT_SUBTITLE_OUTLINE_COLOR: u32 = 0xFF00_0000;
+const AUTOPLAY_NEXT: &str = "autoplay_next";
+const UP_NEXT_COUNTDOWN_SECONDS: &str = "up_next_countdown_seconds";
+
+/// The Up Next countdown, in seconds, when there is one: Stremio offers the same range.
+pub const UP_NEXT_COUNTDOWN_RANGE: (u32, u32) = (5, 90);
+/// Ten seconds, as before the setting: Stremio's 35 leave the card up for most of the credits,
+/// which already show it as they start.
+const DEFAULT_UP_NEXT_COUNTDOWN_SECONDS: u32 = 10;
+const SEEK_STEP_SECONDS: &str = "seek_step_seconds";
+const SEEK_SHORT_STEP_SECONDS: &str = "seek_short_step_seconds";
+const PLAYER_TYPE: &str = "player_type";
+const ESC_EXITS_FULL_SCREEN: &str = "esc_exits_full_screen";
+const QUIT_ON_CLOSE: &str = "quit_on_close";
+
+/// Seek steps the user can pick, in seconds (Stremio offers 3 to 30 too; its defaults, 10 and
+/// 3, are ours).
+pub const SEEK_STEP_CHOICES: [u32; 6] = [3, 5, 10, 15, 20, 30];
 
 /// Custom stream memory read ahead, in MiB: the player's `StreamMemorySizes` takes the same
 /// range. Below it, a few seconds of a 4K film; above it, more memory than any level uses.
@@ -104,6 +141,33 @@ impl StreamMemoryChoice {
     }
 }
 
+/// Which app plays the sources that play in the app (Stremio's `playerType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum PlayerType {
+    /// The app's own player.
+    #[default]
+    Internal,
+    /// Another app on the device that plays video, chosen each time (Android). The app
+    /// hands it the local server's address and cannot follow the progress there.
+    External,
+}
+
+impl PlayerType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::External => "external",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "external" => Self::External,
+            _ => Self::Internal,
+        }
+    }
+}
+
 /// Preferences the user can change in Settings.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AppSettings {
@@ -122,6 +186,9 @@ pub struct AppSettings {
     /// Ask AniSkip for the openings and endings of anime episodes. This sends the anime's id
     /// and the episode number to AniSkip (and Kitsu or AniList ids to an id mapping service).
     pub aniskip: bool,
+    /// Write what the app does while finding and preparing sources to its log, to find out
+    /// why one does not play (off by default). Never addresses or keys.
+    pub debug_logs: bool,
     /// Turning on HDR for HDR videos, on displays that support it (desktop).
     pub hdr: DisplaySwitch,
     /// Matching the display's refresh rate to the video's frame rate (desktop; off by default).
@@ -137,6 +204,41 @@ pub struct AppSettings {
     pub stream_memory_ahead_mib: u32,
     /// Kept behind with [`StreamMemoryChoice::Custom`], in MiB, within [`STREAM_BEHIND_MIB_RANGE`].
     pub stream_memory_behind_mib: u32,
+    /// Subtitle size, in percent of the normal size, within [`SUBTITLE_SIZE_RANGE`] on 10 %
+    /// steps. The player's buttons change it for the session only.
+    pub subtitle_size_percent: u32,
+    /// Where subtitles sit, in percent of the picture's height from its top, within
+    /// [`SUBTITLE_POSITION_RANGE`] on 5 % steps: 100 is the bottom, lower raises them.
+    pub subtitle_position: u32,
+    /// Subtitle text colour, as ARGB (`0xAARRGGBB`).
+    pub subtitle_text_color: u32,
+    /// The box behind subtitle text, as ARGB; fully transparent draws none.
+    pub subtitle_background_color: u32,
+    /// The outline around subtitle text, as ARGB; fully transparent draws none.
+    pub subtitle_outline_color: u32,
+    /// Styled subtitles (ASS) keep the file's own fonts, colours and places; off, the colours
+    /// and place above apply to them too, as with plain ones.
+    pub subtitle_file_styling: bool,
+    /// Moves on to the next episode by itself (Stremio's "binge watching"): when the Up Next
+    /// card's countdown ends, or at the end of the episode when the card has none. Off, the card
+    /// still offers the next episode, without counting down.
+    pub autoplay_next: bool,
+    /// How long the Up Next card counts down, in seconds: 0 for no countdown, otherwise within
+    /// [`UP_NEXT_COUNTDOWN_RANGE`].
+    pub up_next_countdown_seconds: u32,
+    /// How far the arrow keys, the skip buttons and a remote's fast-forward and rewind keys
+    /// move, in seconds: one of [`SEEK_STEP_CHOICES`].
+    pub seek_step_seconds: u32,
+    /// The shorter step of Shift and the arrow keys (desktop), in seconds: one of
+    /// [`SEEK_STEP_CHOICES`].
+    pub seek_short_step_seconds: u32,
+    /// Which app plays sources: the app's own player, or another one (Android only).
+    pub player_type: PlayerType,
+    /// Esc leaves the player's full screen first (desktop); off, it goes back at once.
+    pub esc_exits_full_screen: bool,
+    /// Closing the app's window quits the app (desktop); off, it keeps running out of sight,
+    /// for serving other devices, and comes back from the system tray.
+    pub quit_on_close: bool,
 }
 
 impl Default for AppSettings {
@@ -149,6 +251,7 @@ impl Default for AppSettings {
             max_resolution: 0,
             onboarded: false,
             aniskip: true,
+            debug_logs: false,
             hdr: DisplaySwitch::Ask,
             match_refresh_rate: false,
             serve_to_devices: false,
@@ -156,6 +259,19 @@ impl Default for AppSettings {
             stream_memory: StreamMemoryChoice::Automatic,
             stream_memory_ahead_mib: DEFAULT_STREAM_MIB,
             stream_memory_behind_mib: DEFAULT_STREAM_MIB,
+            subtitle_size_percent: 100,
+            subtitle_position: 100,
+            subtitle_text_color: DEFAULT_SUBTITLE_TEXT_COLOR,
+            subtitle_background_color: DEFAULT_SUBTITLE_BACKGROUND_COLOR,
+            subtitle_outline_color: DEFAULT_SUBTITLE_OUTLINE_COLOR,
+            subtitle_file_styling: false,
+            autoplay_next: true,
+            up_next_countdown_seconds: DEFAULT_UP_NEXT_COUNTDOWN_SECONDS,
+            seek_step_seconds: 10,
+            seek_short_step_seconds: 3,
+            player_type: PlayerType::Internal,
+            esc_exits_full_screen: true,
+            quit_on_close: true,
         }
     }
 }
@@ -188,6 +304,9 @@ impl StremioCore {
             aniskip: store
                 .setting(ANISKIP)?
                 .map_or(defaults.aniskip, |value| value == "1"),
+            debug_logs: store
+                .setting(DEBUG_LOGS)?
+                .map_or(defaults.debug_logs, |value| value == "1"),
             hdr: store
                 .setting(HDR)?
                 .map_or(defaults.hdr, |value| DisplaySwitch::parse(&value)),
@@ -217,57 +336,144 @@ impl StremioCore {
                 .map_or(defaults.stream_memory_behind_mib, |mib| {
                     clamp_range(mib, STREAM_BEHIND_MIB_RANGE)
                 }),
+            subtitle_size_percent: store
+                .setting(SUBTITLE_SIZE_PERCENT)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.subtitle_size_percent, subtitle_size),
+            subtitle_position: store
+                .setting(SUBTITLE_POSITION)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.subtitle_position, subtitle_position),
+            subtitle_text_color: store
+                .setting(SUBTITLE_TEXT_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_text_color),
+            subtitle_background_color: store
+                .setting(SUBTITLE_BACKGROUND_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_background_color),
+            subtitle_outline_color: store
+                .setting(SUBTITLE_OUTLINE_COLOR)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(defaults.subtitle_outline_color),
+            subtitle_file_styling: store
+                .setting(SUBTITLE_FILE_STYLING)?
+                .map_or(defaults.subtitle_file_styling, |value| value == "1"),
+            autoplay_next: store
+                .setting(AUTOPLAY_NEXT)?
+                .map_or(defaults.autoplay_next, |value| value == "1"),
+            up_next_countdown_seconds: store
+                .setting(UP_NEXT_COUNTDOWN_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.up_next_countdown_seconds, up_next_countdown),
+            seek_step_seconds: store
+                .setting(SEEK_STEP_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.seek_step_seconds, seek_step),
+            seek_short_step_seconds: store
+                .setting(SEEK_SHORT_STEP_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.seek_short_step_seconds, seek_step),
+            player_type: store
+                .setting(PLAYER_TYPE)?
+                .map_or(defaults.player_type, |value| PlayerType::parse(&value)),
+            esc_exits_full_screen: store
+                .setting(ESC_EXITS_FULL_SCREEN)?
+                .map_or(defaults.esc_exits_full_screen, |value| value == "1"),
+            quit_on_close: store
+                .setting(QUIT_ON_CLOSE)?
+                .map_or(defaults.quit_on_close, |value| value == "1"),
         })
+    }
+
+    /// The seek steps offered in Settings, in seconds.
+    pub fn seek_step_choices(&self) -> Vec<u32> {
+        SEEK_STEP_CHOICES.to_vec()
     }
 
     /// Saves the user's preferences. Out-of-range values are brought back into range.
     pub fn update_settings(&self, settings: AppSettings) -> Result<(), CoreError> {
-        let store = self.store()?;
-        store.set_setting(
-            TORRENT_WIFI_ONLY,
-            if settings.torrent_wifi_only { "1" } else { "0" },
-        )?;
-        store.set_setting(
-            TORRENT_CACHE_MB,
-            &clamp_cache(settings.torrent_cache_mb).to_string(),
-        )?;
-        store.set_setting(AUDIO_LANGUAGE, &language_code(&settings.audio_language))?;
-        store.set_setting(
-            SUBTITLE_LANGUAGE,
-            &language_code(&settings.subtitle_language),
-        )?;
-        store.set_setting(
-            MAX_RESOLUTION,
-            &clamp_resolution(settings.max_resolution).to_string(),
-        )?;
-        store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
-        store.set_setting(ANISKIP, if settings.aniskip { "1" } else { "0" })?;
-        store.set_setting(HDR, settings.hdr.as_str())?;
-        store.set_setting(
-            MATCH_REFRESH_RATE,
-            if settings.match_refresh_rate {
-                "1"
-            } else {
-                "0"
-            },
-        )?;
-        store.set_setting(
-            SERVE_TO_DEVICES,
-            if settings.serve_to_devices { "1" } else { "0" },
-        )?;
-        store.set_setting(SERVE_NAME, &serve_name(&settings.serve_name))?;
-        store.set_setting(STREAM_MEMORY, settings.stream_memory.as_str())?;
-        store.set_setting(
-            STREAM_MEMORY_AHEAD_MIB,
-            &clamp_range(settings.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE).to_string(),
-        )?;
-        store.set_setting(
-            STREAM_MEMORY_BEHIND_MIB,
-            &clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
-        )?;
-        drop(store);
-        // "Only on Wi-Fi" may have changed.
+        let entries: [(&str, String); 28] = [
+            (TORRENT_WIFI_ONLY, flag(settings.torrent_wifi_only).into()),
+            (
+                TORRENT_CACHE_MB,
+                clamp_cache(settings.torrent_cache_mb).to_string(),
+            ),
+            (AUDIO_LANGUAGE, language_code(&settings.audio_language)),
+            (
+                SUBTITLE_LANGUAGE,
+                language_code(&settings.subtitle_language),
+            ),
+            (
+                MAX_RESOLUTION,
+                clamp_resolution(settings.max_resolution).to_string(),
+            ),
+            (ONBOARDED, flag(settings.onboarded).into()),
+            (ANISKIP, flag(settings.aniskip).into()),
+            (DEBUG_LOGS, flag(settings.debug_logs).into()),
+            (HDR, settings.hdr.as_str().into()),
+            (MATCH_REFRESH_RATE, flag(settings.match_refresh_rate).into()),
+            (SERVE_TO_DEVICES, flag(settings.serve_to_devices).into()),
+            (SERVE_NAME, serve_name(&settings.serve_name)),
+            (STREAM_MEMORY, settings.stream_memory.as_str().into()),
+            (
+                STREAM_MEMORY_AHEAD_MIB,
+                clamp_range(settings.stream_memory_ahead_mib, STREAM_AHEAD_MIB_RANGE).to_string(),
+            ),
+            (
+                STREAM_MEMORY_BEHIND_MIB,
+                clamp_range(settings.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE).to_string(),
+            ),
+            (
+                SUBTITLE_SIZE_PERCENT,
+                subtitle_size(settings.subtitle_size_percent).to_string(),
+            ),
+            (
+                SUBTITLE_POSITION,
+                subtitle_position(settings.subtitle_position).to_string(),
+            ),
+            (
+                SUBTITLE_TEXT_COLOR,
+                settings.subtitle_text_color.to_string(),
+            ),
+            (
+                SUBTITLE_BACKGROUND_COLOR,
+                settings.subtitle_background_color.to_string(),
+            ),
+            (
+                SUBTITLE_OUTLINE_COLOR,
+                settings.subtitle_outline_color.to_string(),
+            ),
+            (
+                SUBTITLE_FILE_STYLING,
+                flag(settings.subtitle_file_styling).into(),
+            ),
+            (AUTOPLAY_NEXT, flag(settings.autoplay_next).into()),
+            (
+                UP_NEXT_COUNTDOWN_SECONDS,
+                up_next_countdown(settings.up_next_countdown_seconds).to_string(),
+            ),
+            (
+                SEEK_STEP_SECONDS,
+                seek_step(settings.seek_step_seconds).to_string(),
+            ),
+            (
+                SEEK_SHORT_STEP_SECONDS,
+                seek_step(settings.seek_short_step_seconds).to_string(),
+            ),
+            (PLAYER_TYPE, settings.player_type.as_str().into()),
+            (
+                ESC_EXITS_FULL_SCREEN,
+                flag(settings.esc_exits_full_screen).into(),
+            ),
+            (QUIT_ON_CLOSE, flag(settings.quit_on_close).into()),
+        ];
+        // One transaction: two saves close together never interleave key by key, and a failure
+        // halfway keeps the earlier settings whole.
+        self.store()?.set_settings(&entries)?;
+        // "Only on Wi-Fi" and the cache size may have changed.
         self.apply_network_policy();
+        self.apply_cache_limit();
         Ok(())
     }
 
@@ -314,12 +520,20 @@ fn hdr_title_key(meta_id: &str) -> Option<String> {
 }
 
 /// Keeps a language code to two or three ASCII letters, lowercased; anything else is empty.
-fn language_code(value: &str) -> String {
+/// Java and older Android versions still give the withdrawn codes for Hebrew (`iw`),
+/// Indonesian (`in`) and Yiddish (`ji`), which addons and the ranking never use, so those
+/// become today's codes.
+pub(crate) fn language_code(value: &str) -> String {
     let value = value.trim();
-    if (2..=3).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphabetic()) {
-        value.to_ascii_lowercase()
-    } else {
-        String::new()
+    if !((2..=3).contains(&value.len()) && value.chars().all(|c| c.is_ascii_alphabetic())) {
+        return String::new();
+    }
+    let value = value.to_ascii_lowercase();
+    match value.as_str() {
+        "iw" => "he".into(),
+        "in" => "id".into(),
+        "ji" => "yi".into(),
+        _ => value,
     }
 }
 
@@ -348,6 +562,45 @@ fn clamp_range(value: u32, (min, max): (u32, u32)) -> u32 {
     value.clamp(min, max)
 }
 
+/// Keeps `value` within the inclusive `(min, max)` range, on the nearest multiple of `step`
+/// counted from `min`.
+fn snap_to_step(value: u32, (min, max): (u32, u32), step: u32) -> u32 {
+    let steps = (value.clamp(min, max) - min + step / 2) / step;
+    (min + steps * step).min(max)
+}
+
+/// A subtitle size the player's buttons could reach.
+fn subtitle_size(percent: u32) -> u32 {
+    snap_to_step(percent, SUBTITLE_SIZE_RANGE, SUBTITLE_SIZE_STEP)
+}
+
+/// A subtitle place the player's buttons could reach.
+fn subtitle_position(percent: u32) -> u32 {
+    snap_to_step(percent, SUBTITLE_POSITION_RANGE, SUBTITLE_POSITION_STEP)
+}
+
+/// No countdown stays none; any other length is kept within the range.
+fn up_next_countdown(seconds: u32) -> u32 {
+    if seconds == 0 {
+        0
+    } else {
+        clamp_range(seconds, UP_NEXT_COUNTDOWN_RANGE)
+    }
+}
+
+/// The offered seek step nearest to `seconds`, the shorter one on a tie.
+fn seek_step(seconds: u32) -> u32 {
+    SEEK_STEP_CHOICES
+        .into_iter()
+        .min_by_key(|choice| choice.abs_diff(seconds))
+        .unwrap_or(SEEK_STEP_CHOICES[2])
+}
+
+/// A yes/no setting as stored.
+fn flag(on: bool) -> &'static str {
+    if on { "1" } else { "0" }
+}
+
 /// Keeps a cache size within the offered range.
 fn clamp_cache(megabytes: u32) -> u32 {
     let (min, max) = (TORRENT_CACHE_CHOICES_MB[0], TORRENT_CACHE_CHOICES_MB[4]);
@@ -357,6 +610,22 @@ fn clamp_cache(megabytes: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_codes_are_cleaned_and_brought_up_to_date() {
+        for (given, kept) in [
+            ("PT", "pt"),
+            (" fil ", "fil"),
+            ("iw", "he"),
+            ("IN", "id"),
+            ("ji", "yi"),
+            ("pt-BR", ""),
+            ("e", ""),
+            ("../etc", ""),
+        ] {
+            assert_eq!(language_code(given), kept, "{given}");
+        }
+    }
 
     #[test]
     fn settings_round_trip_with_defaults_and_limits() {
@@ -372,6 +641,7 @@ mod tests {
             max_resolution: 1081,
             onboarded: true,
             aniskip: false,
+            debug_logs: true,
             hdr: DisplaySwitch::Never,
             match_refresh_rate: true,
             serve_to_devices: true,
@@ -379,6 +649,19 @@ mod tests {
             stream_memory: StreamMemoryChoice::Custom,
             stream_memory_ahead_mib: 4,
             stream_memory_behind_mib: 99_999,
+            subtitle_size_percent: 500,
+            subtitle_position: 0,
+            subtitle_text_color: 0xFFFF_E600,
+            subtitle_background_color: 0x8000_0000,
+            subtitle_outline_color: 0,
+            subtitle_file_styling: true,
+            autoplay_next: false,
+            up_next_countdown_seconds: 300,
+            seek_step_seconds: 0,
+            seek_short_step_seconds: 1000,
+            player_type: PlayerType::External,
+            esc_exits_full_screen: false,
+            quit_on_close: false,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -405,6 +688,150 @@ mod tests {
             saved.stream_memory_behind_mib, STREAM_BEHIND_MIB_RANGE.1,
             "too much is lowered"
         );
+        assert_eq!(saved.subtitle_size_percent, SUBTITLE_SIZE_RANGE.1);
+        assert_eq!(saved.subtitle_position, SUBTITLE_POSITION_RANGE.0);
+        assert_eq!(saved.subtitle_text_color, 0xFFFF_E600);
+        assert_eq!(saved.subtitle_background_color, 0x8000_0000);
+        assert_eq!(saved.subtitle_outline_color, 0);
+        assert!(saved.subtitle_file_styling);
+        assert!(!saved.autoplay_next);
+        assert_eq!(saved.up_next_countdown_seconds, UP_NEXT_COUNTDOWN_RANGE.1);
+        assert_eq!(saved.seek_step_seconds, 3, "the nearest choice");
+        assert_eq!(saved.seek_short_step_seconds, 30);
+        assert_eq!(saved.player_type, PlayerType::External);
+        assert!(!saved.esc_exits_full_screen);
+        assert!(!saved.quit_on_close);
+    }
+
+    #[test]
+    fn the_window_behaves_as_stremios_until_changed() {
+        let defaults = AppSettings::default();
+        assert!(defaults.esc_exits_full_screen);
+        assert!(defaults.quit_on_close);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert!(
+            core.settings().expect("reads").quit_on_close,
+            "never set means on"
+        );
+        core.update_settings(AppSettings {
+            quit_on_close: false,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert!(!saved.quit_on_close);
+        assert!(saved.esc_exits_full_screen);
+    }
+
+    #[test]
+    fn the_app_plays_until_told_otherwise() {
+        assert_eq!(AppSettings::default().player_type, PlayerType::Internal);
+        assert_eq!(PlayerType::parse("external"), PlayerType::External);
+        assert_eq!(
+            PlayerType::parse("vlc"),
+            PlayerType::Internal,
+            "unknown means the app"
+        );
+        for choice in [PlayerType::External, PlayerType::Internal] {
+            assert_eq!(PlayerType::parse(choice.as_str()), choice);
+        }
+    }
+
+    #[test]
+    fn seek_steps_default_and_land_on_a_choice() {
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.seek_step_seconds, 10, "Stremio's");
+        assert_eq!(defaults.seek_short_step_seconds, 3, "Stremio's");
+        assert!(SEEK_STEP_CHOICES.contains(&defaults.seek_step_seconds));
+        assert!(SEEK_STEP_CHOICES.contains(&defaults.seek_short_step_seconds));
+        assert_eq!(seek_step(4), 3, "a tie takes the shorter step");
+        assert_eq!(seek_step(12), 10);
+        assert_eq!(seek_step(13), 15);
+        assert_eq!(seek_step(25), 20);
+        for choice in SEEK_STEP_CHOICES {
+            assert_eq!(seek_step(choice), choice);
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert_eq!(core.seek_step_choices(), SEEK_STEP_CHOICES.to_vec());
+        core.update_settings(AppSettings {
+            seek_step_seconds: 30,
+            seek_short_step_seconds: 5,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.seek_step_seconds, 30);
+        assert_eq!(saved.seek_short_step_seconds, 5);
+    }
+
+    #[test]
+    fn next_episode_defaults_and_countdown_limits() {
+        let defaults = AppSettings::default();
+        assert!(defaults.autoplay_next, "Stremio's binge watching is on");
+        assert_eq!(defaults.up_next_countdown_seconds, 10);
+        assert_eq!(up_next_countdown(0), 0, "no countdown stays none");
+        assert_eq!(up_next_countdown(1), UP_NEXT_COUNTDOWN_RANGE.0);
+        assert_eq!(up_next_countdown(35), 35);
+        assert_eq!(up_next_countdown(91), UP_NEXT_COUNTDOWN_RANGE.1);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        core.update_settings(AppSettings {
+            up_next_countdown_seconds: 0,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.up_next_countdown_seconds, 0);
+        assert!(saved.autoplay_next);
+    }
+
+    #[test]
+    fn subtitle_style_defaults_steps_and_junk() {
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.subtitle_size_percent, 100);
+        assert_eq!(defaults.subtitle_position, 100, "at the bottom");
+        assert_eq!(defaults.subtitle_text_color, 0xFFFF_FFFF, "white");
+        assert_eq!(defaults.subtitle_background_color, 0, "no box");
+        assert_eq!(defaults.subtitle_outline_color, 0xFF00_0000, "black");
+        assert!(!defaults.subtitle_file_styling, "Stremio's default");
+
+        // Sizes and places land on the player's steps.
+        assert_eq!(subtitle_size(124), 120);
+        assert_eq!(subtitle_size(125), 130);
+        assert_eq!(subtitle_size(10), 50);
+        assert_eq!(subtitle_position(82), 80);
+        assert_eq!(subtitle_position(83), 85);
+        assert_eq!(subtitle_position(101), 100);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        core.update_settings(AppSettings {
+            subtitle_size_percent: 137,
+            subtitle_position: 52,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.subtitle_size_percent, 140);
+        assert_eq!(saved.subtitle_position, 50);
+
+        // Values that are not numbers fall back to the defaults.
+        let store = core.store().expect("store");
+        store
+            .set_setting(SUBTITLE_TEXT_COLOR, "red")
+            .expect("writes");
+        store
+            .set_setting(SUBTITLE_SIZE_PERCENT, "-3")
+            .expect("writes");
+        drop(store);
+        let read = core.settings().expect("reads");
+        assert_eq!(read.subtitle_text_color, defaults.subtitle_text_color);
+        assert_eq!(read.subtitle_size_percent, defaults.subtitle_size_percent);
     }
 
     #[test]

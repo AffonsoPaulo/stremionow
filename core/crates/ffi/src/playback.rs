@@ -12,7 +12,7 @@ use stremionow_ranking::{Preferences, Resolution, SourceText, badges, format_siz
 
 use crate::core::{StremioCore, now_millis};
 use crate::records::{AddonInfo, CoreError};
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, language_code};
 
 /// Progress below this is not worth a "Continue watching" entry.
 const MIN_PROGRESS_MS: u64 = 30_000;
@@ -25,6 +25,13 @@ const CONTINUE_WATCHING_LIMIT: usize = 20;
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct StreamSource {
     pub addon_name: String,
+    /// The manifest id of the addon that offered it, which survives reinstalling and
+    /// reconfiguring the addon, to ask the same addon again (see `source_memory.rs`).
+    pub addon_id: String,
+    /// Which installed addon offered it: a digest of its address (see [`addon_key`]). Two
+    /// installs of one addon, such as Torrentio with and without a debrid service, share the
+    /// manifest id; this tells them apart.
+    pub addon_key: String,
     /// Short label from the addon, often its name and the quality (`Torrentio\n4k`).
     pub name: String,
     /// Longer description: release name, size, seeders, languages.
@@ -57,7 +64,8 @@ pub struct StreamSource {
     /// the torrent's info hash and file, or with a digest of the address (debrid addresses
     /// carry the user's key, which is never kept). None for links that open outside the app.
     pub identity: Option<String>,
-    /// ISO 639-1 codes of the languages the text mentions, audio or subtitles, in order.
+    /// ISO 639-1 codes of the audio languages the text mentions, in order (`fil` for
+    /// Filipino). Languages it names only as subtitles (`Sub.Ita`, `VOSTFR`) are left out.
     pub languages: Vec<String>,
     /// HDR formats, such as `DV` or `HDR10+`; empty when the text names none.
     pub hdr: Vec<String>,
@@ -102,6 +110,27 @@ pub struct WatchProgress {
     pub updated_at: i64,
 }
 
+/// What [`StremioCore::source_ready`] found: whether the source is ready, whether it failed for
+/// good, and the size of the file its address leads to, when the server tells (for the debug
+/// log).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SourceCheck {
+    pub ready: bool,
+    pub size_bytes: Option<u64>,
+    /// Waiting will not help: the address answers that there is no such file (an HTTP client
+    /// error other than a timeout or too many requests), or it leads into the home network
+    /// from an addon that is not there. Stop asking and show the source as failed.
+    pub failed: bool,
+}
+
+/// The episode after the one playing, for "Continue watching" to move on to it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NextVideo {
+    pub video_id: String,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl StremioCore {
     /// Enabled addons that can offer sources for this video, in priority order. Ask each one
@@ -134,13 +163,34 @@ impl StremioCore {
             .collect())
     }
 
-    /// Orders sources best first for the user's preferences.
-    pub fn rank_streams(&self, sources: Vec<StreamSource>) -> Vec<StreamSource> {
-        let preferences = self
-            .settings()
-            .map(|settings| ranking_preferences(&settings))
-            .unwrap_or_default();
-        rank(sources, &preferences)
+    /// Whether a source that was not in its debrid service's cache is ready to play: its
+    /// address now leads to the file rather than to the addon's short "being downloaded" clip,
+    /// told by size (see [`READY_MIN_BYTES`]). Asking also has the service start the download,
+    /// as playing would. A source without an address, or whose size the server does not tell,
+    /// counts as ready. Errors are worth asking again; a definite failure is in
+    /// [`SourceCheck::failed`].
+    pub async fn source_ready(&self, source: StreamSource) -> Result<SourceCheck, CoreError> {
+        let Some(url) = source.url else {
+            return Ok(SourceCheck {
+                ready: true,
+                size_bytes: None,
+                failed: false,
+            });
+        };
+        let private_allowed = self.private_addon(&source.addon_key);
+        check_source(&self.client, &url, source.size_bytes, private_allowed).await
+    }
+
+    /// Orders sources best first for the user's preferences. `device_language` is the
+    /// language the device or system is set to (an ISO 639 code such as `pt`, or empty), which
+    /// stands in for the audio language while the user has not chosen one.
+    pub fn rank_streams(
+        &self,
+        sources: Vec<StreamSource>,
+        device_language: String,
+    ) -> Vec<StreamSource> {
+        let settings = self.settings().unwrap_or_default();
+        rank(sources, &ranking_preferences(&settings, &device_language))
     }
 
     /// Subtitles for a video from every subtitle addon. Addons that fail are skipped.
@@ -179,6 +229,18 @@ impl StremioCore {
     /// (Stremio's `timesWatched`): finishing a video that was in progress, or one not watched
     /// before. Reports that keep coming after the end do not count again.
     pub fn save_progress(&self, progress: WatchProgress) -> Result<(), CoreError> {
+        self.save_progress_with_next(progress, None)
+    }
+
+    /// As [`StremioCore::save_progress`], and when the video is finished with a `next` one
+    /// released, the title stays in "Continue watching" on the next video, at its start, as
+    /// stremio-core's `advance_to_video` does: a time offset of 1 ms and the finished
+    /// video's length, so the official apps list it there too.
+    pub fn save_progress_with_next(
+        &self,
+        progress: WatchProgress,
+        next: Option<NextVideo>,
+    ) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
         let same_video = store
@@ -194,7 +256,22 @@ impl StremioCore {
                 store.note_watching(&progress.id, now)?;
             }
             store.mark_watched(&progress.id, &progress.video_id, now)?;
-            store.remove_progress(&progress.id)?;
+            match next {
+                Some(next) => store.save_progress(&ProgressEntry {
+                    id: progress.id,
+                    kind: progress.kind,
+                    name: progress.name,
+                    poster: progress.poster,
+                    background: progress.background,
+                    video_id: next.video_id,
+                    season: next.season,
+                    episode: next.episode,
+                    position_ms: 1,
+                    duration_ms: i64::try_from(progress.duration_ms).unwrap_or(i64::MAX),
+                    updated_at: now,
+                })?,
+                None => store.remove_progress(&progress.id)?,
+            }
             return Ok(());
         }
         if progress.position_ms < MIN_PROGRESS_MS && !same_video {
@@ -256,6 +333,20 @@ impl StremioCore {
         video_ids: Vec<String>,
         watched: bool,
     ) -> Result<(), CoreError> {
+        self.set_watched_with_next(id, video_ids, watched, None)
+    }
+
+    /// As [`StremioCore::set_watched`], and when the video in "Continue watching" is among
+    /// those marked watched, the title moves on to `next` there, at its start, instead of
+    /// leaving, as stremio-core's `reconcile_series_resume_after_watched_change` does: `next` is
+    /// the first released episode after it that is not watched, or none when nothing is left.
+    pub fn set_watched_with_next(
+        &self,
+        id: String,
+        video_ids: Vec<String>,
+        watched: bool,
+        next: Option<NextVideo>,
+    ) -> Result<(), CoreError> {
         let store = self.store()?;
         let now = now_millis();
         let video_ids: Vec<String> = video_ids.into_iter().take(MAX_MARKED_VIDEOS).collect();
@@ -272,12 +363,22 @@ impl StremioCore {
                 store.unmark_watched(&id, video_id)?;
             }
         }
-        if watched
-            && store
-                .progress(&id)?
-                .is_some_and(|saved| video_ids.contains(&saved.video_id))
+        if let Some(saved) = store
+            .progress(&id)?
+            .filter(|saved| watched && video_ids.contains(&saved.video_id))
         {
-            store.remove_progress(&id)?;
+            // A next video that was just marked too is not one to continue with.
+            match next.filter(|next| !video_ids.contains(&next.video_id)) {
+                Some(next) => store.save_progress(&ProgressEntry {
+                    video_id: next.video_id,
+                    season: next.season,
+                    episode: next.episode,
+                    position_ms: 1,
+                    updated_at: now,
+                    ..saved
+                })?,
+                None => store.remove_progress(&id)?,
+            }
         }
         if unmarked_movie || (unmarked_any && store.watched_videos(&id)?.is_empty()) {
             store.reset_times_watched(&id, now)?;
@@ -328,13 +429,19 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
     if url.is_none() && info_hash.is_none() && external_url.is_none() && yt_id.is_none() {
         return None;
     }
-    let description = [stream.title, stream.description]
-        .into_iter()
-        .flatten()
-        .find(|text| !text.trim().is_empty())
-        .unwrap_or_default();
+    // Addons put the release name, size and languages in `title`, `description` or both;
+    // keeping only the first would lose what the other says. The same text twice is kept once.
+    let mut texts: Vec<String> = Vec::new();
+    for text in [stream.title, stream.description].into_iter().flatten() {
+        if !text.trim().is_empty() && !texts.iter().any(|known| known.trim() == text.trim()) {
+            texts.push(text);
+        }
+    }
+    let description = texts.join("\n");
     let mut source = StreamSource {
         addon_name: addon.manifest.name.clone(),
+        addon_id: addon.manifest.id.clone(),
+        addon_key: addon_key(addon.url.manifest_url()),
         name: stream.name.unwrap_or_else(|| addon.manifest.name.clone()),
         description,
         url,
@@ -400,11 +507,81 @@ fn labels<T: Copy>(values: &[T], label: impl Fn(T) -> &'static str) -> Vec<Strin
 }
 
 /// Longest addon id kept in an identity; manifest ids are short (`com.stremio.torrentio`).
-const MAX_ADDON_ID_LEN: usize = 200;
+pub(crate) const MAX_ADDON_ID_LEN: usize = 200;
 
 /// What recognizes a source the app plays in a later search: the addon's id with the info
 /// hash and file of a torrent, or with a SHA-256 digest of a web address. The address itself
 /// is never kept, since debrid addresses carry the user's key. None for links out.
+///
+/// A debrid address that names its torrent (`debrid|hash|file`) is told apart from the torrent
+/// itself (`bt|hash|file`): addons offer both for the same file, and the one played over the
+/// debrid service must not be found again as the torrent, which plays from peers.
+/// A name for an installed addon that tells two installs of it apart and survives restarts:
+/// the start of a SHA-256 digest of its manifest address. The address itself is never kept or
+/// shown, since configured addons carry the user's keys in it, and a digest does not give it
+/// back.
+pub(crate) fn addon_key(manifest_url: &str) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, manifest_url.as_bytes());
+    digest.as_ref()[..ADDON_KEY_BYTES]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Bytes of the digest in [`addon_key`]: 128 bits, far more than addons anyone installs.
+const ADDON_KEY_BYTES: usize = 16;
+
+/// Size from which a source that was not in its debrid service's cache counts as ready. Until
+/// then, debrid addons send a short clip saying the file is being downloaded, a few MB; an
+/// episode or a film is hundreds of MB. A smaller file counts as ready too when it is at least
+/// half the size the addon announced, which a clip never is.
+const READY_MIN_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What [`StremioCore::source_ready`] answers for `url`; `expected` is the size the addon
+/// announced, if any.
+async fn check_source(
+    client: &stremionow_addons::AddonClient,
+    url: &str,
+    expected: Option<u64>,
+    private_allowed: bool,
+) -> Result<SourceCheck, CoreError> {
+    let failed = SourceCheck {
+        ready: false,
+        size_bytes: None,
+        failed: true,
+    };
+    // The request below is made by the addon client, which does not vet addresses as the
+    // relay does: an addon on the internet must not make the device probe its own network.
+    if !private_allowed {
+        let private = stremionow_torrent::reaches_private_network(url)
+            .await
+            .map_err(|error| CoreError::Playback {
+                reason: format!("cannot resolve the source: {error}"),
+            })?;
+        if private {
+            return Ok(failed);
+        }
+    }
+    let size = match client.file_size(url).await {
+        Ok(size) => size,
+        // 408 and 429 ask to try again later; other client errors will not change.
+        Err(stremionow_addons::AddonError::Status(status))
+            if (400..500).contains(&status) && status != 408 && status != 429 =>
+        {
+            return Ok(failed);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let ready = size.is_none_or(|size| {
+        size >= READY_MIN_BYTES || expected.is_some_and(|expected| size >= expected.div_ceil(2))
+    });
+    Ok(SourceCheck {
+        ready,
+        size_bytes: size,
+        failed: false,
+    })
+}
+
 fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
     let addon: String = addon_id
         .chars()
@@ -416,7 +593,11 @@ fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
             .file_idx
             .map(|idx| idx.to_string())
             .unwrap_or_default();
-        return Some(format!("{addon}|bt|{}|{file}", hash.to_ascii_lowercase()));
+        let kind = if source.url.is_some() { "debrid" } else { "bt" };
+        return Some(format!(
+            "{addon}|{kind}|{}|{file}",
+            hash.to_ascii_lowercase()
+        ));
     }
     let url = source.url.as_deref()?;
     let digest = ring::digest::digest(&ring::digest::SHA256, url.as_bytes());
@@ -450,8 +631,12 @@ fn is_info_hash(hash: &str) -> bool {
         || (hash.len() == 32 && hash.chars().all(|c| c.is_ascii_alphanumeric()))
 }
 
-/// The ranking preferences that follow from the user's settings.
-fn ranking_preferences(settings: &AppSettings) -> Preferences {
+/// The ranking preferences that follow from the user's settings. Without an audio language
+/// chosen, the device's language is preferred: most people want the audio they read in.
+fn ranking_preferences(settings: &AppSettings, device_language: &str) -> Preferences {
+    let audio = Some(settings.audio_language.clone())
+        .filter(|language| !language.is_empty())
+        .unwrap_or_else(|| language_code(device_language));
     Preferences {
         max_resolution: match settings.max_resolution {
             2160 => Some(Resolution::P2160),
@@ -459,11 +644,13 @@ fn ranking_preferences(settings: &AppSettings) -> Preferences {
             720 => Some(Resolution::P720),
             _ => None,
         },
-        preferred_languages: [&settings.audio_language]
+        preferred_languages: [audio]
             .into_iter()
             .filter(|language| !language.is_empty())
-            .cloned()
             .collect(),
+        // mpv decodes AV1 in software (dav1d) on the desktop, but on Android it would mostly
+        // be software decoding on a phone or TV box without an AV1 decoder, which stutters.
+        supports_av1: !cfg!(target_os = "android"),
         ..Preferences::default()
     }
 }
@@ -493,6 +680,86 @@ fn source_text(source: &StreamSource) -> SourceText<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marking_the_episode_in_progress_moves_continue_watching_on() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("opens");
+        let next = |video: &str, episode| NextVideo {
+            video_id: video.into(),
+            season: Some(1),
+            episode: Some(episode),
+        };
+        core.save_progress(progress("tt1:1:1", 300_000))
+            .expect("saves");
+        core.set_watched_with_next(
+            "tt1".into(),
+            vec!["tt1:1:1".into()],
+            true,
+            Some(next("tt1:1:2", 2)),
+        )
+        .expect("marks");
+        let saved = core.progress("tt1".into()).expect("reads").expect("kept");
+        assert_eq!(saved.video_id, "tt1:1:2");
+        assert_eq!(saved.position_ms, 1);
+        assert_eq!(saved.duration_ms, 1_000_000);
+
+        // Marking another episode leaves it where it is.
+        core.set_watched_with_next("tt1".into(), vec!["tt1:1:5".into()], true, None)
+            .expect("marks");
+        assert_eq!(
+            core.progress("tt1".into())
+                .expect("reads")
+                .expect("kept")
+                .video_id,
+            "tt1:1:2"
+        );
+
+        // A next video marked in the same go, or none left, takes the title out.
+        core.set_watched_with_next(
+            "tt1".into(),
+            vec!["tt1:1:2".into(), "tt1:1:3".into()],
+            true,
+            Some(next("tt1:1:3", 3)),
+        )
+        .expect("marks");
+        assert!(core.progress("tt1".into()).expect("reads").is_none());
+    }
+
+    #[test]
+    fn a_finished_episode_moves_continue_watching_to_the_next() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("opens");
+        let next = NextVideo {
+            video_id: "tt1:1:2".into(),
+            season: Some(1),
+            episode: Some(2),
+        };
+        core.save_progress_with_next(progress("tt1:1:1", 300_000), Some(next.clone()))
+            .expect("saves");
+        core.save_progress_with_next(progress("tt1:1:1", 960_000), Some(next.clone()))
+            .expect("saves");
+        let listed = core.continue_watching().expect("lists");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].video_id, "tt1:1:2");
+        assert_eq!(listed[0].episode, Some(2));
+        assert_eq!(listed[0].position_ms, 1);
+        assert_eq!(
+            core.watched_videos("tt1".into()).expect("reads"),
+            vec!["tt1:1:1".to_string()]
+        );
+        // Reports that keep coming from the end of the finished episode change nothing.
+        core.save_progress_with_next(progress("tt1:1:1", 990_000), Some(next))
+            .expect("saves");
+        assert_eq!(
+            core.continue_watching().expect("lists")[0].video_id,
+            "tt1:1:2"
+        );
+        // The last episode leaves the row.
+        core.save_progress(progress("tt1:1:2", 960_000))
+            .expect("saves");
+        assert!(core.continue_watching().expect("lists").is_empty());
+    }
 
     #[test]
     fn only_web_addresses_reach_the_player() {
@@ -689,6 +956,8 @@ mod tests {
     fn source(name: &str, url: Option<&str>, external: Option<&str>) -> StreamSource {
         StreamSource {
             addon_name: "A".into(),
+            addon_id: "a".into(),
+            addon_key: "k".into(),
             name: name.into(),
             description: String::new(),
             url: url.map(Into::into),
@@ -771,6 +1040,110 @@ mod tests {
     }
 
     #[test]
+    fn installs_of_one_addon_have_their_own_key() {
+        let debrid = addon_key("https://torrentio.strem.fun/torbox=SECRETKEY/manifest.json");
+        let plain = addon_key("https://torrentio.strem.fun/manifest.json");
+        assert_ne!(debrid, plain);
+        assert_eq!(
+            debrid,
+            addon_key("https://torrentio.strem.fun/torbox=SECRETKEY/manifest.json")
+        );
+        assert_eq!(debrid.len(), ADDON_KEY_BYTES * 2);
+        assert!(debrid.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!debrid.contains("SECRETKEY"));
+    }
+
+    #[tokio::test]
+    async fn a_source_is_ready_once_it_leads_to_more_than_a_clip() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/clip"))
+            .and(header("range", "bytes=0-0"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/4200000"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/episode"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/734003200"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/short"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/30000000"),
+            )
+            .mount(&server)
+            .await;
+        for (route, status) in [("/gone", 404), ("/busy", 429), ("/broken", 503)] {
+            Mock::given(method("GET"))
+                .and(path(route))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+        }
+        let client =
+            stremionow_addons::AddonClient::new(std::time::Duration::from_secs(5)).expect("client");
+        // The mock server is on loopback, as an addon on the home network would be.
+        let check = |route: &str, expected: Option<u64>| {
+            let url = format!("{}{route}", server.uri());
+            let client = client.clone();
+            async move { check_source(&client, &url, expected, true).await }
+        };
+        let clip = check("/clip", None).await.expect("asks");
+        assert!(!clip.ready && !clip.failed);
+        assert_eq!(clip.size_bytes, Some(4_200_000));
+        // A clip stays one even when the addon announced a film.
+        assert!(!check("/clip", Some(734_003_200)).await.expect("asks").ready);
+        assert!(check("/episode", None).await.expect("asks").ready);
+        // A real file under the size of a typical episode is ready once it is about as large
+        // as announced; without an announced size it cannot be told from a clip.
+        assert!(check("/short", Some(31_000_000)).await.expect("asks").ready);
+        assert!(
+            !check("/short", Some(200_000_000))
+                .await
+                .expect("asks")
+                .ready
+        );
+        assert!(!check("/short", None).await.expect("asks").ready);
+        // A missing file fails for good; being busy or broken may pass.
+        let gone = check("/gone", None).await.expect("asks");
+        assert!(gone.failed && !gone.ready);
+        assert!(check("/busy", None).await.is_err());
+        assert!(check("/broken", None).await.is_err());
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        let no_address = core.source_ready(source("A", None, None)).await;
+        let no_address = no_address.expect("no address");
+        assert!(no_address.ready && !no_address.failed);
+        // The source's addon is not installed on the home network, so the address there is
+        // refused without asking it.
+        let into_network = StreamSource {
+            url: Some(format!("{}/episode", server.uri())),
+            ..source("A", None, None)
+        };
+        let refused = core.source_ready(into_network).await.expect("asks");
+        assert!(refused.failed && !refused.ready);
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("recorded")
+                .iter()
+                .filter(|request| request.url.path() == "/episode")
+                .count(),
+            1,
+            "only the check with permission reached the server"
+        );
+    }
+
+    #[test]
     fn identities_never_carry_the_address() {
         let debrid = "https://debrid.example/resolve/SECRETKEY/0123/1/Movie.mkv";
         let link = source_from(serde_json::json!({ "url": debrid, "name": "[RD+] Addon" }));
@@ -792,6 +1165,14 @@ mod tests {
             torrent.identity.as_deref(),
             Some("a|bt|0123456789abcdef0123456789abcdef01234567|3")
         );
+        // The same file over a debrid service is another source than its torrent.
+        let debrid_torrent = source_from(serde_json::json!({
+            "url": debrid, "infoHash": "0123456789ABCDEF0123456789ABCDEF01234567", "fileIdx": 3
+        }));
+        assert_eq!(
+            debrid_torrent.identity.as_deref(),
+            Some("a|debrid|0123456789abcdef0123456789abcdef01234567|3")
+        );
         let outside =
             source_from(serde_json::json!({ "externalUrl": "https://service.example/t" }));
         assert_eq!(outside.identity, None);
@@ -804,7 +1185,7 @@ mod tests {
             "title": "Hokum.2026.2160p.BDRemux.HDR10.DTS-HD.MA.Eng.Sub.Ita",
             "infoHash": "0123456789abcdef0123456789abcdef01234567"
         }));
-        assert_eq!(source.languages, ["en", "it"]);
+        assert_eq!(source.languages, ["en"], "Italian is only the subtitles");
         assert_eq!(source.hdr, ["HDR10"]);
         assert_eq!(source.audio, ["DTS-HD MA"]);
         assert_eq!(source.release_quality.as_deref(), Some("Remux"));
@@ -827,11 +1208,14 @@ mod tests {
 
     #[test]
     fn settings_limit_resolution_and_prefer_language() {
-        let preferences = ranking_preferences(&AppSettings {
-            max_resolution: 1080,
-            audio_language: "pt".into(),
-            ..AppSettings::default()
-        });
+        let preferences = ranking_preferences(
+            &AppSettings {
+                max_resolution: 1080,
+                audio_language: "pt".into(),
+                ..AppSettings::default()
+            },
+            "en",
+        );
         let ranked = rank(
             vec![
                 source("4k", Some("https://cdn.example/4k.mkv"), None),
@@ -840,7 +1224,85 @@ mod tests {
             &preferences,
         );
         assert_eq!(ranked[0].name, "1080p", "sources above the limit sink");
-        assert_eq!(preferences.preferred_languages, ["pt"]);
+        assert_eq!(
+            preferences.preferred_languages,
+            ["pt"],
+            "the chosen language, not the device's"
+        );
+    }
+
+    #[test]
+    fn the_device_language_stands_in_for_an_unchosen_audio_language() {
+        let unset = AppSettings::default();
+        assert_eq!(
+            ranking_preferences(&unset, "it").preferred_languages,
+            ["it"]
+        );
+        assert_eq!(
+            ranking_preferences(&unset, "iw").preferred_languages,
+            ["he"],
+            "Java's old code for Hebrew"
+        );
+        assert!(
+            ranking_preferences(&unset, "")
+                .preferred_languages
+                .is_empty()
+        );
+        assert!(
+            ranking_preferences(&unset, "not a code")
+                .preferred_languages
+                .is_empty()
+        );
+        let ranked = rank(
+            vec![
+                source(
+                    "Movie.2023.2160p 🇬🇧",
+                    Some("https://cdn.example/en.mkv"),
+                    None,
+                ),
+                source(
+                    "Movie.2023.720p 🇮🇹",
+                    Some("https://cdn.example/it.mkv"),
+                    None,
+                ),
+            ],
+            &ranking_preferences(&unset, "it"),
+        );
+        assert_eq!(ranked[0].name, "Movie.2023.720p 🇮🇹");
+    }
+
+    #[test]
+    fn av1_is_penalised_only_where_it_may_not_decode() {
+        let preferences = ranking_preferences(&AppSettings::default(), "");
+        assert_eq!(preferences.supports_av1, !cfg!(target_os = "android"));
+        assert!(preferences.supports_hevc && preferences.supports_hdr);
+    }
+
+    #[test]
+    fn title_and_description_are_both_kept() {
+        let both = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "Movie.2023.1080p.WEB-DL",
+            "description": "💾 2.1 GB 🇮🇹",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(both.description, "Movie.2023.1080p.WEB-DL\n💾 2.1 GB 🇮🇹");
+        assert_eq!(both.languages, ["it"]);
+        assert_eq!(both.size.as_deref(), Some("2.1 GB"));
+        let same = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "Movie.2023.1080p",
+            "description": " Movie.2023.1080p ",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(same.description, "Movie.2023.1080p");
+        let blank = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "  ",
+            "description": "Movie.2023.720p",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(blank.description, "Movie.2023.720p");
     }
 
     #[test]

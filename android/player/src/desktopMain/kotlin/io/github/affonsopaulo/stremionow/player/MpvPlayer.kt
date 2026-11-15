@@ -14,6 +14,7 @@ import java.io.File
 import java.util.Locale
 import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
+import kotlin.math.roundToInt
 
 /**
  * A video player backed by libmpv that renders into a native window owned by the app.
@@ -33,6 +34,9 @@ class MpvPlayer private constructor(
     @Volatile private var released = false
 
     @Volatile private var fileLoaded = false
+
+    /** Which end of file means the file asked for last could not be opened. */
+    private val fileEnds = FileEnds()
 
     /** Whether the video format of the current file was logged; it is known after the first frame. */
     @Volatile private var videoInfoLogged = false
@@ -58,6 +62,27 @@ class MpvPlayer private constructor(
         }
         mpv.observeFlag("pause") { value -> mutableState.update { it.copy(isPaused = value == true) } }
         mpv.observeFlag("paused-for-cache") { value -> mutableState.update { it.copy(isBuffering = value == true) } }
+        mpv.observeLong("cache-buffering-state") { value ->
+            mutableState.update {
+                it.copy(
+                    bufferingProgress =
+                        value?.let { percent ->
+                            percent.coerceIn(0, 100) / 100f
+                        },
+                )
+            }
+        }
+        mpv.observeFlag("seeking") { value -> mutableState.update { it.copy(isSeeking = value == true) } }
+        mpv.observeDouble("volume") { value ->
+            mutableState.update { it.copy(volume = (value ?: 100.0).roundToInt().coerceIn(0, MAX_VOLUME)) }
+        }
+        mpv.observeFlag("mute") { value -> mutableState.update { it.copy(isMuted = value == true) } }
+        mpv.observeDouble("sub-delay") { value -> mutableState.update { it.copy(subtitleDelaySeconds = value ?: 0.0) } }
+        mpv.observeDouble("sub-scale") { value -> mutableState.update { it.copy(subtitleScale = value ?: 1.0) } }
+        mpv.observeDouble("sub-pos") { value ->
+            mutableState.update { it.copy(subtitlePosition = (value ?: 100.0).roundToInt()) }
+        }
+        mpv.observeDouble("speed") { value -> mutableState.update { it.copy(speed = value ?: 1.0) } }
         mpv.observeFlag("eof-reached") { value -> mutableState.update { it.copy(isEnded = value == true) } }
         mpv.observeString("hwdec-current") { value ->
             val decoder = value?.takeUnless { it.isEmpty() || it == "no" }
@@ -93,10 +118,26 @@ class MpvPlayer private constructor(
             pendingSubtitles.clear()
         }
         videoInfoLogged = false
-        mutableState.value = PlaybackState()
+        fileEnds.onLoad()
+        // mpv keeps pausing across files, and pauses by itself at the end of one (keep-open): the
+        // next video starts playing, as the fresh state says.
+        mpv.setProperty("pause", "no")
+        mutableState.update { it.forNextVideo() }
         containerFps = null
         mpv.setProperty("start", if (startSeconds > 0) formatSeconds(startSeconds) else "none")
         mpv.command("loadfile", url, "replace")
+    }
+
+    override fun stop() {
+        if (released) return
+        // The end of the file that follows, if one was open, is this stop, not a failure.
+        fileEnds.onStop()
+        synchronized(pendingSubtitles) { pendingSubtitles.clear() }
+        // Not paused, as the fresh state says, so play and pause keep matching what mpv does.
+        mpv.setProperty("pause", "no")
+        mutableState.update { it.forNextVideo() }
+        containerFps = null
+        mpv.command("stop")
     }
 
     override fun addSubtitle(
@@ -120,7 +161,11 @@ class MpvPlayer private constructor(
 
     override fun pause() = setPaused(true)
 
-    override fun togglePause() = setPaused(!state.value.isPaused)
+    // From mpv's own value: the state can lag behind it, and a toggle from a stale one does nothing.
+    override fun togglePause() {
+        if (released) return
+        setPaused(!(mpv.getProperty("pause")?.let { it == "yes" } ?: state.value.isPaused))
+    }
 
     override fun seekBy(seconds: Double) {
         if (!released) mpv.command("seek", formatSeconds(seconds), "relative+exact")
@@ -133,6 +178,39 @@ class MpvPlayer private constructor(
     override fun selectAudio(trackId: Int?) = selectTrack("aid", trackId)
 
     override fun selectSubtitle(trackId: Int?) = selectTrack("sid", trackId)
+
+    override fun setVolume(percent: Int) {
+        if (!released) mpv.setProperty("volume", percent.coerceIn(0, MAX_VOLUME).toString())
+    }
+
+    override fun setMuted(muted: Boolean) {
+        if (!released) mpv.setProperty("mute", if (muted) "yes" else "no")
+    }
+
+    override fun setSubtitleDelay(seconds: Double) {
+        if (!released) mpv.setProperty("sub-delay", formatSeconds(seconds))
+    }
+
+    override fun setSubtitleScale(scale: Double) {
+        if (!released) mpv.setProperty("sub-scale", formatSeconds(scale.coerceIn(MIN_SUB_SCALE, MAX_SUB_SCALE)))
+    }
+
+    override fun setSpeed(speed: Double) {
+        if (!released) mpv.setProperty("speed", formatSeconds(speed.coerceIn(MIN_SPEED, MAX_SPEED)))
+    }
+
+    override fun setVideoScale(scale: VideoScale) {
+        if (released) return
+        // Fit keeps the shape with bars; Fill zooms until the bars are gone (panscan); Stretch
+        // drops the shape.
+        mpv.setProperty("keepaspect", if (scale == VideoScale.Stretch) "no" else "yes")
+        mpv.setProperty("panscan", if (scale == VideoScale.Fill) "1.0" else "0.0")
+        mutableState.update { it.copy(videoScale = scale) }
+    }
+
+    override fun setSubtitlePosition(percent: Int) {
+        if (!released) mpv.setProperty("sub-pos", percent.coerceIn(MIN_SUB_POS, MAX_SUB_POS).toString())
+    }
 
     override fun release() = release {}
 
@@ -193,18 +271,24 @@ class MpvPlayer private constructor(
             }
 
             is Mpv.Event.EndFile -> {
-                // An end without a successful load means the file could not be opened. mpv's
-                // reason is technical; it goes to the log, not to the screen.
-                if (event.failed || !fileLoaded) {
+                // An end of the file asked for last, before it loaded and not asked for, means it
+                // could not be opened. mpv's reason is technical; it goes to the log, not to the
+                // screen.
+                val openFailed = fileEnds.isOpenFailure(loaded = fileLoaded, failed = !event.replaced)
+                if (event.failed || openFailed) {
                     log.log(
                         System.Logger.Level.WARNING,
                         "Playback failed: ${event.error ?: "the file could not be opened"}",
                     )
-                    if (!fileLoaded) mutableState.update { it.copy(error = PlayerError.LoadFailed) }
                 }
+                if (openFailed) mutableState.update { it.copy(error = PlayerError.LoadFailed) }
             }
 
-            Mpv.Event.StartFile, Mpv.Event.Shutdown -> {}
+            Mpv.Event.StartFile -> {
+                fileEnds.onStart()
+            }
+
+            Mpv.Event.Shutdown -> {}
         }
     }
 
@@ -218,6 +302,21 @@ class MpvPlayer private constructor(
 
     companion object {
         private val log = System.getLogger("StremioNow.player")
+
+        /** Playback rates the app allows. */
+        private const val MIN_SPEED = 0.25
+        private const val MAX_SPEED = 4.0
+
+        /** Subtitle sizes the app allows. */
+        private const val MIN_SUB_SCALE = 0.5
+        private const val MAX_SUB_SCALE = 2.0
+
+        /** Subtitle places the app allows: from a third of the way down to the bottom. */
+        private const val MIN_SUB_POS = 30
+        private const val MAX_SUB_POS = 100
+
+        /** mpv's own scale goes up to 130 %, which distorts; the app offers up to 100 %. */
+        private const val MAX_VOLUME = 100
 
         /** Logged once per file, to report what mpv chose. */
         private val VIDEO_INFO_PROPERTIES =
@@ -335,6 +434,7 @@ class MpvPlayer private constructor(
                     library = MpvLibrary.locate(libraryDirectory),
                     options = mpvOptions,
                     preferences = preferences,
+                    firstKnown = options.subtitleStyle.mpvOptions(),
                     logLevel = if (options.verboseLogs) "v" else "warn",
                 )
             val macOutput =

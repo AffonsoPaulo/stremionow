@@ -6,6 +6,7 @@ import com.sun.jna.Platform
 import io.github.affonsopaulo.stremionow.ui.data.DesktopPaths
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -39,24 +40,56 @@ internal class SecretStoreUnavailableException(
  * Keeps secrets in the system store when it works, and otherwise keeps nothing: the session then
  * lasts until the app closes. Nothing is ever written in plain text. The first failure is logged;
  * later ones are not, so a missing keyring does not flood the log.
+ *
+ * When the store refuses to delete a secret (a keychain that denies it), an empty marker file in
+ * [markers] says it was cleared, so it is never handed back, as after signing out; the next save,
+ * or a later delete that works, removes the marker.
  */
 internal class SessionFallback(
     private val backend: SecretBackend?,
+    private val markers: File?,
 ) {
     private val warned = AtomicBoolean(false)
 
+    /** False when the value was not kept. */
     fun save(
         name: String,
         value: String,
-    ) {
-        attempt("save \"$name\"") { it.save(name, value) }
+    ): Boolean {
+        val saved = attempt("save \"$name\"") { it.save(name, value) } != null
+        if (saved) marker(name)?.delete()
+        return saved
     }
 
-    fun load(name: String): String? = attempt("read \"$name\"") { it.load(name) }
-
-    fun clear(name: String) {
-        attempt("clear \"$name\"") { it.clear(name) }
+    fun load(name: String): String? {
+        if (marker(name)?.isFile == true) {
+            // Cleared earlier, but the store kept it: try the delete again, never hand it back.
+            if (attempt("clear \"$name\"") { it.clear(name) } != null) marker(name)?.delete()
+            return null
+        }
+        return attempt("read \"$name\"") { it.load(name) }
     }
+
+    /** False when the value may still be loaded at the next launch. */
+    fun clear(name: String): Boolean {
+        if (backend == null || attempt("clear \"$name\"") { it.clear(name) } != null) {
+            marker(name)?.delete()
+            return true
+        }
+        val marker = marker(name) ?: return false
+        return try {
+            marker.parentFile.mkdirs()
+            marker.createNewFile() || marker.isFile
+        } catch (failure: IOException) {
+            logWarning("Could not note that \"$name\" was cleared", failure)
+            false
+        } catch (failure: SecurityException) {
+            logWarning("Could not note that \"$name\" was cleared", failure)
+            false
+        }
+    }
+
+    private fun marker(name: String): File? = markers?.let { File(it, "$name.cleared") }
 
     private fun <T> attempt(
         what: String,

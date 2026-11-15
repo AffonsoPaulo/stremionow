@@ -38,9 +38,9 @@ import io.github.affonsopaulo.stremionow.ui.components.SnChipRow
 import io.github.affonsopaulo.stremionow.ui.components.SnTextField
 import io.github.affonsopaulo.stremionow.ui.components.SnWordmark
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.crash.KnownSecrets
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
-import io.github.affonsopaulo.stremionow.ui.data.SecureStore
-import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
@@ -70,6 +70,16 @@ enum class DebridService(
     DebridLink("Debrid-Link", "debridlink"),
 }
 
+/**
+ * Whether [key] can be a debrid service's API key, checked before it goes into Torrentio's
+ * address. Real-Debrid, AllDebrid, Premiumize, Offcloud and Debrid-Link keys are letters and
+ * digits; TorBox's are UUIDs, with hyphens. Underscores pass too, in case a service's tokens use
+ * them. All of these stay plain in a URL path, while Torrentio's own separators (`|`, `=`) and
+ * anything else that would change the address are refused.
+ */
+internal fun isPlausibleDebridKey(key: String): Boolean =
+    key.length in 8..200 && key.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-' || it == '_' }
+
 private enum class Step { Welcome, SignIn, Preferences, Debrid }
 
 data class OnboardingState(
@@ -88,19 +98,9 @@ class OnboardingViewModel(
         subtitles: String,
         maxResolution: UInt,
     ) {
-        viewModelScope.launch {
-            runCatching {
-                io {
-                    val current = core.settings()
-                    core.updateSettings(
-                        current.copy(
-                            audioLanguage = audio,
-                            subtitleLanguage = subtitles,
-                            maxResolution = maxResolution,
-                        ),
-                    )
-                }
-            }
+        // Queued before finish's, so "onboarded" is never saved over by these.
+        SettingsWriter.post(core) {
+            it.copy(audioLanguage = audio, subtitleLanguage = subtitles, maxResolution = maxResolution)
         }
     }
 
@@ -111,11 +111,11 @@ class OnboardingViewModel(
         onDone: () -> Unit,
     ) {
         val key = apiKey.trim()
-        // Debrid keys are plain alphanumerics; refusing anything else keeps the address well formed.
-        if (key.length !in 8..200 || !key.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' }) {
+        if (!isPlausibleDebridKey(key)) {
             mutableState.update { it.copy(debridFailed = true) }
             return
         }
+        KnownSecrets.add(key)
         mutableState.update { it.copy(busy = true, debridFailed = false) }
         viewModelScope.launch {
             val url = "https://torrentio.strem.fun/${service.torrentioKey}=$key/manifest.json"
@@ -133,7 +133,7 @@ class OnboardingViewModel(
 
     fun finish(onDone: () -> Unit) {
         viewModelScope.launch {
-            runCatching { io { core.updateSettings(core.settings().copy(onboarded = true)) } }
+            runCatching { SettingsWriter.update(core) { it.copy(onboarded = true) } }
             onDone()
         }
     }
@@ -149,7 +149,10 @@ fun OnboardingScreen(onFinished: () -> Unit) {
     val viewModel = viewModel { OnboardingViewModel(AppGraph.core(context)) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     var step by rememberSaveable { mutableStateOf(Step.Welcome) }
-    SnBackHandler(enabled = step != Step.Welcome) {
+    // Once signed in, the sign-in step is done: Back from the preferences no longer leads to it
+    // through the welcome page, and the welcome page (after a restart) skips it.
+    val signedIn = rememberAccountSummary()?.signedIn == true
+    SnBackHandler(enabled = step != Step.Welcome && !(step == Step.Preferences && signedIn)) {
         step = if (step == Step.Debrid) Step.Preferences else Step.Welcome
     }
 
@@ -165,7 +168,10 @@ fun OnboardingScreen(onFinished: () -> Unit) {
         ) {
             when (step) {
                 Step.Welcome -> {
-                    Welcome(onSignIn = { step = Step.SignIn }, onLocal = { step = Step.Preferences })
+                    Welcome(
+                        onSignIn = { step = if (signedIn) Step.Preferences else Step.SignIn },
+                        onLocal = { step = Step.Preferences },
+                    )
                 }
 
                 Step.SignIn -> {
@@ -362,9 +368,14 @@ private fun Field(
     }
 }
 
-/** A language's name in that language, for example "Português" or "English". */
+/**
+ * A language's name in that language, for example "Português" or "English", capitalised by
+ * that language's rules rather than the device's (a Turkish device would write "İtaliano").
+ */
 internal fun languageName(code: String): String =
-    Locale.forLanguageTag(code).let { it.getDisplayLanguage(it) }.replaceFirstChar { it.titlecase(Locale.getDefault()) }
+    Locale.forLanguageTag(code).let { locale ->
+        locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
+    }
 
 /** Languages offered for audio and subtitles: the device's first, then common ones. */
 internal fun playbackLanguages(device: String): List<String> =

@@ -34,6 +34,9 @@ class MpvPlayer private constructor(
 
     @Volatile private var fileLoaded = false
 
+    /** Which end of file means the file asked for last could not be opened. */
+    private val fileEnds = FileEnds()
+
     /** Frame rate the container declares for the current file, when it does. */
     @Volatile private var containerFps: Double? = null
 
@@ -50,10 +53,26 @@ class MpvPlayer private constructor(
             fileLoaded = false
             pendingSubtitles.clear()
         }
-        mutableState.value = PlaybackState()
+        fileEnds.onLoad()
+        // mpv keeps pausing across files, and pauses by itself at the end of one (keep-open): the
+        // next video starts playing, as the fresh state says.
+        mpv.setPropertyBoolean("pause", false)
+        mutableState.update { it.forNextVideo() }
         containerFps = null
         mpv.setPropertyString("start", if (startSeconds > 0) formatSeconds(startSeconds) else "none")
         mpv.command(arrayOf("loadfile", url, "replace"))
+    }
+
+    override fun stop() {
+        if (released) return
+        // The end of the file that follows, if one was open, is this stop, not a failure.
+        fileEnds.onStop()
+        synchronized(pendingSubtitles) { pendingSubtitles.clear() }
+        // Not paused, as the fresh state says, so play and pause keep matching what mpv does.
+        mpv.setPropertyBoolean("pause", false)
+        mutableState.update { it.forNextVideo() }
+        containerFps = null
+        mpv.command(arrayOf("stop"))
     }
 
     /**
@@ -81,7 +100,11 @@ class MpvPlayer private constructor(
 
     override fun pause() = setPaused(true)
 
-    override fun togglePause() = setPaused(!state.value.isPaused)
+    // From mpv's own value: the state can lag behind it, and a toggle from a stale one does nothing.
+    override fun togglePause() {
+        if (released) return
+        setPaused(!(runCatching { mpv.getPropertyBoolean("pause") }.getOrNull() ?: state.value.isPaused))
+    }
 
     /** Moves the playback position by [seconds], backwards when negative. */
     override fun seekBy(seconds: Double) {
@@ -98,13 +121,11 @@ class MpvPlayer private constructor(
     /** Selects a subtitle track, or turns subtitles off with null. */
     override fun selectSubtitle(trackId: Int?) = selectTrack("sid", trackId)
 
-    /** Shifts subtitles in time; positive values show them later. */
-    fun setSubtitleDelay(seconds: Double) {
+    override fun setSubtitleDelay(seconds: Double) {
         if (!released) mpv.setPropertyDouble("sub-delay", seconds)
     }
 
-    /** Scales subtitle text, where 1.0 is the default size. */
-    fun setSubtitleScale(scale: Double) {
+    override fun setSubtitleScale(scale: Double) {
         if (!released) mpv.setPropertyDouble("sub-scale", scale.coerceIn(0.5, 3.0))
     }
 
@@ -232,9 +253,16 @@ class MpvPlayer private constructor(
                 mutableState.update { it.copy(isLoaded = true, error = null) }
             }
 
+            MpvEvent.MPV_EVENT_START_FILE -> {
+                fileEnds.onStart()
+            }
+
+            // This libmpv does not say why a file ended: an end of the file asked for last,
+            // before it loaded and not after a stop, means it could not be opened.
             MpvEvent.MPV_EVENT_END_FILE -> {
-                // An end without a successful load means the file could not be opened.
-                if (!fileLoaded) mutableState.update { it.copy(error = PlayerError.LoadFailed) }
+                if (fileEnds.isOpenFailure(loaded = fileLoaded, failed = null)) {
+                    mutableState.update { it.copy(error = PlayerError.LoadFailed) }
+                }
             }
         }
     }
@@ -295,6 +323,10 @@ class MpvPlayer private constructor(
                     setOptionString("slang", options.subtitleLanguages.joinToString(","))
                 } else {
                     setOptionString("sid", "no")
+                }
+                // Each under the first name this libmpv knows; one it knows under none stays as it is.
+                for (option in options.subtitleStyle.mpvOptions()) {
+                    option.names.firstOrNull { setOptionString(it, option.value) >= 0 }
                 }
 
                 init()

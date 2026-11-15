@@ -3,6 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.platform
 
 import androidx.compose.runtime.ProvidableCompositionLocal
 import io.github.affonsopaulo.stremionow.player.StreamMemory
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Where platform services come from: Android's `Context`, or a single instance on the desktop.
@@ -47,3 +48,38 @@ internal expect fun displaySwitchingSupported(): Boolean
  * sizes until it gets levels of its own.
  */
 internal expect fun automaticStreamMemory(): StreamMemory?
+
+/**
+ * Whether this is the desktop app, with a keyboard and windows of its own: Settings offers the
+ * shorter Shift+arrow seek step and how the window behaves there.
+ */
+internal expect fun isDesktopApp(): Boolean
+
+/**
+ * Whether sources can play in another app on this device (Settings' "Play in"): on Android,
+ * phones and TVs, where VLC, MX Player, Just Player and others take video addresses. The
+ * desktop's player is always its own.
+ */
+internal expect fun externalPlayerSupported(): Boolean
+
+/**
+ * Hands [url], the local server's playback address and never an addon's or debrid's, to another
+ * app that plays video, through the system's chooser titled [chooserTitle]; [title] is what that
+ * app shows, for the apps that read it. False when nothing can play it or the platform has no
+ * such apps.
+ */
+internal expect fun openInExternalPlayer(
+    context: PlatformContext,
+    url: String,
+    title: String,
+    chooserTitle: String,
+): Boolean
+
+/**
+ * The newer version of the app that was downloaded and installs when the app quits, or null
+ * while there is none: the Windows app installed by its installer updates itself this way.
+ */
+internal expect fun downloadedUpdate(): StateFlow<String?>
+
+/** Installs the version of [downloadedUpdate] now; the app closes and opens again. */
+internal expect fun installUpdateNow()

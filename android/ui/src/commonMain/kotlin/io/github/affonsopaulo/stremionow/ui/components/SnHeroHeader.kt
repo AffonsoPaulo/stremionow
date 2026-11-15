@@ -10,6 +10,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -92,6 +93,21 @@ fun ClearHeaderOverHero(listState: LazyListState) {
                 }
             }
         }
+    DisposableEffect(overlay, page, opacity) {
+        overlay.show(page, opacity)
+        onDispose { overlay.release(page, opacity) }
+    }
+}
+
+/**
+ * Clears the header over this page, whose title art cannot scroll away, such as the
+ * placeholder art of a title's page while it loads.
+ */
+@Composable
+fun ClearHeaderOverArt() {
+    val overlay = LocalHeaderOverlay.current
+    val page = LocalHeaderPage.current ?: return
+    val opacity = remember { mutableFloatStateOf(0f) }
     DisposableEffect(overlay, page, opacity) {
         overlay.show(page, opacity)
         onDispose { overlay.release(page, opacity) }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Building resource URLs from an addon's manifest URL.
 
+use std::net::{Ipv4Addr, Ipv6Addr};
+
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use url::{Host, Url};
 
@@ -41,10 +43,15 @@ impl AddonUrl {
     /// Parses a manifest URL such as `https://example.com/config/manifest.json`. The `stremio://`
     /// scheme that install links use is accepted and treated as HTTPS.
     pub fn parse(input: &str) -> Result<Self, TransportError> {
+        const STREMIO: &str = "stremio://";
         let trimmed = input.trim();
-        let normalized = match trimmed.strip_prefix("stremio://") {
-            Some(rest) => format!("https://{rest}"),
-            None => trimmed.to_owned(),
+        // Schemes are case-insensitive, and links typed or pasted by hand are not always
+        // lowercase.
+        let normalized = match trimmed.get(..STREMIO.len()) {
+            Some(scheme) if scheme.eq_ignore_ascii_case(STREMIO) => {
+                format!("https://{}", &trimmed[STREMIO.len()..])
+            }
+            _ => trimmed.to_owned(),
         };
         let mut manifest = Url::parse(&normalized).map_err(|_| TransportError::InvalidUrl)?;
         if !matches!(manifest.scheme(), "http" | "https") {
@@ -110,49 +117,17 @@ impl AddonUrl {
             })
     }
 
-    /// Whether the addon is served over HTTPS from a public host: not `localhost`, a
-    /// `.local` or `.internal` name, or a loopback, private, link-local or unspecified
-    /// address. Addons recommended by a catalog must pass this, so a list from the internet
-    /// cannot point the app at devices on the user's network.
+    /// Whether the addon is served over HTTPS from a public host (see [`has_public_host`]).
+    /// Addons recommended by a catalog must pass this, so a list from the internet cannot
+    /// point the app at devices on the user's network.
     pub fn is_public_https(&self) -> bool {
-        if self.manifest.scheme() != "https" {
-            return false;
-        }
-        match self.manifest.host() {
-            Some(Host::Domain(domain)) => {
-                let domain = domain.trim_end_matches('.').to_ascii_lowercase();
-                domain.contains('.')
-                    && !["localhost", ".local", ".internal", ".lan", ".home.arpa"]
-                        .iter()
-                        .any(|suffix| {
-                            domain == suffix.trim_start_matches('.') || domain.ends_with(suffix)
-                        })
-            }
-            Some(Host::Ipv4(ip)) => {
-                !(ip.is_loopback()
-                    || ip.is_private()
-                    || ip.is_link_local()
-                    || ip.is_unspecified()
-                    || ip.is_broadcast()
-                    || ip.is_documentation()
-                    // Carrier-grade NAT, 100.64.0.0/10.
-                    || (ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64))
-            }
-            Some(Host::Ipv6(ip)) => {
-                let first = ip.segments()[0];
-                !(ip.is_loopback()
-                    || ip.is_unspecified()
-                    // Unique local (fc00::/7) and link-local (fe80::/10) addresses.
-                    || (first & 0xfe00) == 0xfc00
-                    || (first & 0xffc0) == 0xfe80
-                    || ip.to_ipv4_mapped().is_some())
-            }
-            None => false,
-        }
+        self.manifest.scheme() == "https" && is_public(&self.manifest)
     }
 
     /// URL of `resource` for `kind` and `id`, for example
-    /// `https://example.com/catalog/movie/top/genre=Drama&skip=100.json`.
+    /// `https://example.com/catalog/movie/top/genre=Drama&skip=100.json`. A query on the
+    /// manifest URL (`manifest.json?token=abc`) is kept on every resource URL, as Stremio
+    /// does: some addons take their settings or key there.
     pub fn resource(&self, resource: &str, kind: &str, id: &str, extra: &Extra) -> String {
         let mut url = format!(
             "{}/{}/{}/{}",
@@ -166,8 +141,99 @@ impl AddonUrl {
             url.push_str(&extra.encode());
         }
         url.push_str(".json");
+        if let Some(query) = self.manifest.query().filter(|query| !query.is_empty()) {
+            url.push('?');
+            url.push_str(query);
+        }
         url
     }
+}
+
+/// Whether `url` is an HTTP(S) address on a public host: not `localhost`, a `.local`,
+/// `.internal`, `.lan` or `.home.arpa` name, a name that spells out a private IPv4 address
+/// (`192.168.1.1.nip.io`), or a loopback, private, link-local, unspecified or otherwise
+/// special address, IPv6 forms that embed an IPv4 address included. It cannot tell where a
+/// public name resolves to.
+pub fn has_public_host(url: &str) -> bool {
+    Url::parse(url).is_ok_and(|url| matches!(url.scheme(), "http" | "https") && is_public(&url))
+}
+
+fn is_public(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Domain(domain)) => is_public_name(domain),
+        Some(Host::Ipv4(ip)) => is_public_ipv4(ip),
+        Some(Host::Ipv6(ip)) => is_public_ipv6(ip),
+        None => false,
+    }
+}
+
+fn is_public_name(domain: &str) -> bool {
+    let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+    domain.contains('.')
+        && !["localhost", ".local", ".internal", ".lan", ".home.arpa"]
+            .iter()
+            .any(|suffix| domain == suffix.trim_start_matches('.') || domain.ends_with(suffix))
+        && !names_private_ipv4(&domain)
+}
+
+/// Whether the name holds a non-public IPv4 address as four labels (`10.0.0.1.nip.io`) or
+/// at the end of a label split by dashes (`app-10-0-0-1.sslip.io`), the forms wildcard DNS
+/// services resolve to the address they spell.
+fn names_private_ipv4(domain: &str) -> bool {
+    let octets = |parts: &[&str]| -> Option<Ipv4Addr> {
+        let mut octets = [0u8; 4];
+        for (octet, part) in octets.iter_mut().zip(parts) {
+            *octet = part.parse().ok()?;
+        }
+        Some(Ipv4Addr::from(octets))
+    };
+    let labels: Vec<&str> = domain.split('.').collect();
+    let dotted = labels
+        .windows(4)
+        .filter_map(octets)
+        .any(|ip| !is_public_ipv4(ip));
+    let dashed = labels.iter().any(|label| {
+        let parts: Vec<&str> = label.split('-').collect();
+        parts.len() >= 4 && octets(&parts[parts.len() - 4..]).is_some_and(|ip| !is_public_ipv4(ip))
+    });
+    dotted || dashed
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    !(ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || ip.is_multicast()
+        // "This network" (0.0.0.0/8), carrier-grade NAT (100.64.0.0/10), protocol
+        // assignments (192.0.0.0/24), benchmarking (198.18.0.0/15) and reserved (240.0.0.0/4).
+        || a == 0
+        || (a == 100 && (b & 0xc0) == 64)
+        || (a == 192 && b == 0 && ip.octets()[2] == 0)
+        || (a == 198 && (b & 0xfe) == 18)
+        || a >= 240)
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    let first = segments[0];
+    !(ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        // IPv4-compatible (::a.b.c.d) and IPv4-mapped (::ffff:a.b.c.d) addresses.
+        || segments[..5].iter().all(|&s| s == 0)
+        // NAT64 (64:ff9b::/96 and the local-use 64:ff9b:1::/48), which reach IPv4 hosts.
+        || (first == 0x64 && segments[1] == 0xff9b)
+        // 6to4 (2002::/16) and Teredo (2001::/32), which embed IPv4 addresses too.
+        || first == 0x2002
+        || (first == 0x2001 && segments[1] == 0)
+        // Unique local (fc00::/7), link-local (fe80::/10) and the old site-local (fec0::/10).
+        || (first & 0xfe00) == 0xfc00
+        || (first & 0xffc0) == 0xfe80
+        || (first & 0xffc0) == 0xfec0)
 }
 
 fn encode(segment: &str) -> String {
@@ -220,12 +286,23 @@ mod tests {
     }
 
     #[test]
-    fn keeps_configuration_path_and_drops_query() {
+    fn keeps_configuration_path_and_query() {
         let url = AddonUrl::parse("https://addon.example/cfg%7Bx%7D/manifest.json?t=1#frag")
             .expect("valid");
         assert_eq!(
             url.resource("stream", "series", "tt1:1:2", &Extra::new()),
-            "https://addon.example/cfg%7Bx%7D/stream/series/tt1:1:2.json"
+            "https://addon.example/cfg%7Bx%7D/stream/series/tt1:1:2.json?t=1"
+        );
+        let url = AddonUrl::parse("https://addon.example/manifest.json?token=abc").expect("valid");
+        assert_eq!(
+            url.resource("catalog", "movie", "top", &Extra::new().with("skip", "100")),
+            "https://addon.example/catalog/movie/top/skip=100.json?token=abc"
+        );
+        let url = AddonUrl::parse("https://addon.example/manifest.json?").expect("valid");
+        assert_eq!(
+            url.resource("meta", "movie", "tt1", &Extra::new()),
+            "https://addon.example/meta/movie/tt1.json",
+            "an empty query adds nothing"
         );
     }
 
@@ -233,6 +310,13 @@ mod tests {
     fn accepts_stremio_scheme() {
         let url = AddonUrl::parse(" stremio://addon.example/manifest.json ").expect("valid");
         assert_eq!(url.manifest_url(), "https://addon.example/manifest.json");
+        let url = AddonUrl::parse("Stremio://addon.example/manifest.json").expect("valid");
+        assert_eq!(url.manifest_url(), "https://addon.example/manifest.json");
+        assert_eq!(
+            AddonUrl::parse("STREMIO:/"),
+            Err(TransportError::UnsupportedScheme),
+            "shorter than the scheme is just another URL"
+        );
     }
 
     #[test]
@@ -325,6 +409,18 @@ mod tests {
             "https://[fd00::1]/manifest.json",
             "https://[fe80::1]/manifest.json",
             "https://[::ffff:127.0.0.1]/manifest.json",
+            "https://[::127.0.0.1]/manifest.json",
+            "https://[64:ff9b::c0a8:101]/manifest.json",
+            "https://[2002:c0a8:101::1]/manifest.json",
+            "https://[2001:0:4136:e378::1]/manifest.json",
+            "https://[fec0::1]/manifest.json",
+            "https://[ff02::1]/manifest.json",
+            "https://224.0.0.1/manifest.json",
+            "https://240.0.0.1/manifest.json",
+            "https://198.18.0.1/manifest.json",
+            "https://127.0.0.1.nip.io/manifest.json",
+            "https://app.192.168.1.1.nip.io/manifest.json",
+            "https://app-10-0-0-1.sslip.io/manifest.json",
         ];
         for link in private {
             assert!(
@@ -332,6 +428,24 @@ mod tests {
                 "{link}"
             );
         }
+    }
+
+    #[test]
+    fn tells_public_hosts_of_any_url_apart() {
+        assert!(has_public_host("https://cdn.example/x.mkv"));
+        assert!(
+            has_public_host("http://cdn.example/x.mkv"),
+            "any HTTP scheme"
+        );
+        assert!(
+            has_public_host("https://8.8.8.8.nip.io/"),
+            "spells a public address"
+        );
+        assert!(has_public_host("https://v1.2.3.example/"));
+        assert!(!has_public_host("http://192.168.1.1/admin"));
+        assert!(!has_public_host("http://localhost:11470/"));
+        assert!(!has_public_host("ftp://cdn.example/"));
+        assert!(!has_public_host("not a url"));
     }
 
     #[test]

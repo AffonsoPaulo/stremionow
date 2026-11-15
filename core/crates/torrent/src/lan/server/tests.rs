@@ -301,6 +301,7 @@ async fn a_paired_device_streams_through_its_loopback_relay() {
             &remote,
             &hash,
             None,
+            None,
             &["tracker:udp://localhost:1/announce".to_owned()],
         )
         .await
@@ -385,7 +386,7 @@ async fn playback_continues_locally_when_the_server_goes_away() {
     // The client has the data too, as a peer would provide it.
     let _ = cached_torrent(&client, client_cache.path(), &content).await;
     let url = client
-        .remote_torrent_url(&remote, &hash, None, &[])
+        .remote_torrent_url(&remote, &hash, None, None, &[])
         .await
         .expect("remote url");
 
@@ -424,7 +425,7 @@ async fn a_torrent_used_by_two_devices_stops_with_the_last() {
         .add_for(
             InfoHash::parse(&hash).expect("hash"),
             Holder::Local,
-            None,
+            FileRequest::default(),
             &[],
         )
         .await
@@ -432,7 +433,7 @@ async fn a_torrent_used_by_two_devices_stops_with_the_last() {
     let remote = harness.pair("TV").await;
     let (client, _client_cache) = offline_server(0).await;
     client
-        .remote_torrent_url(&remote, &hash, None, &[])
+        .remote_torrent_url(&remote, &hash, None, None, &[])
         .await
         .expect("remote url");
     client.stop(&hash).await;
@@ -455,12 +456,13 @@ async fn torrents_are_refused_while_paused() {
             &remote,
             "1111111111111111111111111111111111111111",
             None,
+            None,
             &[],
         )
         .await;
     assert_eq!(result.err(), Some(RemoteError::Paused));
     let result = client
-        .remote_torrent_url(&remote, "not a hash", None, &[])
+        .remote_torrent_url(&remote, "not a hash", None, None, &[])
         .await;
     assert!(matches!(result, Err(RemoteError::Torrent(_))));
 }
@@ -636,7 +638,7 @@ async fn removing_a_device_ends_its_open_streams() {
     let remote = harness.pair("TV").await;
     let (client, _client_cache) = offline_server(0).await;
     let url = client
-        .remote_torrent_url(&remote, &hash, None, &[])
+        .remote_torrent_url(&remote, &hash, None, None, &[])
         .await
         .expect("remote url");
     let mut response = crate::server::tests::client()
@@ -663,7 +665,7 @@ async fn gone_torrents_and_switched_files_answer_differently() {
     let remote = harness.pair("TV").await;
     let (client, _client_cache) = offline_server(0).await;
     client
-        .remote_torrent_url(&remote, &hash, None, &[])
+        .remote_torrent_url(&remote, &hash, None, None, &[])
         .await
         .expect("remote url");
     let raw = pinned_client(&harness);
@@ -724,4 +726,30 @@ async fn failed_torrents_report_only_a_code() {
     let body: wire::Failure = response.json().await.expect("json");
     assert_eq!(body.message, None);
     assert!(!body.error.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_port_taken_while_paused_is_chosen_again() {
+    let harness = Harness::start(None).await;
+    let port = harness.lan.status().port;
+    assert_ne!(port, 0);
+    // Serving pauses (the network went away), and another program takes the port.
+    let listeners: Vec<Listener> = std::mem::take(&mut *lock(&harness.lan.inner.listeners))
+        .into_values()
+        .collect();
+    for listener in listeners {
+        listener.close().await;
+    }
+    let _taken = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("take port");
+
+    harness.lan.inner.reconcile().await;
+    let status = harness.lan.status();
+    assert_ne!(status.port, port, "a new port");
+    assert_ne!(status.port, 0);
+    assert_eq!(status.addresses, [Ipv4Addr::LOCALHOST]);
+    assert_eq!(status.paused, None);
+    // Devices reach it on the new port.
+    tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, status.port))
+        .await
+        .expect("listening on the new port");
 }

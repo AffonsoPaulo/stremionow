@@ -30,7 +30,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -55,6 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.core.DisplaySwitch
+import io.github.affonsopaulo.stremionow.core.PlayerType
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
@@ -70,15 +70,24 @@ import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.crash.IssueLink
 import io.github.affonsopaulo.stremionow.ui.crash.TestCrashMenu
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.l10n.AppLanguage
+import io.github.affonsopaulo.stremionow.ui.l10n.InterfaceLanguages
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.endonym
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
+import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.automaticStreamMemory
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.platform.displaySwitchingSupported
+import io.github.affonsopaulo.stremionow.ui.platform.downloadedUpdate
+import io.github.affonsopaulo.stremionow.ui.platform.externalPlayerSupported
+import io.github.affonsopaulo.stremionow.ui.platform.installUpdateNow
+import io.github.affonsopaulo.stremionow.ui.platform.isDesktopApp
 import io.github.affonsopaulo.stremionow.ui.platform.openExternalLink
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
@@ -87,9 +96,11 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The project's source code, linked from About. */
 private const val SOURCE_URL = "https://github.com/AffonsoPaulo/stremionow"
@@ -100,6 +111,7 @@ class SettingsViewModel(
     private val mutableSettings = MutableStateFlow<AppSettings?>(null)
     val settings = mutableSettings.asStateFlow()
     val cacheChoices: List<UInt> = core.torrentCacheChoices()
+    val seekStepChoices: List<UInt> = core.seekStepChoices()
     private val mutableHdrTitles = MutableStateFlow(0)
 
     /** Titles the user turned HDR on for ("Only for this title"). */
@@ -107,7 +119,7 @@ class SettingsViewModel(
 
     init {
         viewModelScope.launch {
-            mutableSettings.value = runCatching { io { core.settings() } }.getOrNull()
+            mutableSettings.value = runCatching { SettingsWriter.read(core) }.getOrNull()
             mutableHdrTitles.value = runCatching { io { core.hdrTitleCount().toInt() } }.getOrDefault(0)
         }
     }
@@ -120,12 +132,14 @@ class SettingsViewModel(
 
     /**
      * Applies a change at once; there is no Save button to forget. The change is applied to
-     * the saved settings again, so what other pages changed meanwhile (Other devices) stays.
+     * the saved settings again, so what other pages changed meanwhile (Other devices) stays, and
+     * saves one after another in order (see [SettingsWriter]).
      */
     fun update(change: (AppSettings) -> AppSettings) {
         val current = settings.value ?: return
         mutableSettings.value = change(current)
-        viewModelScope.launch { runCatching { io { core.updateSettings(change(core.settings())) } } }
+        DebugLog.enabled = mutableSettings.value?.debugLogs == true
+        SettingsWriter.post(core, change)
     }
 }
 
@@ -146,7 +160,7 @@ fun SettingsScreen(
     if (SnLayout.formFactor == FormFactor.Phone) {
         if (asked == null) SettingsList(pages, onOpenPage) else PageContent(asked, onSignIn)
     } else {
-        SideBySide(pages, initial = asked ?: SettingsPage.Playback, onSignIn = onSignIn)
+        SideBySide(pages, initial = asked ?: SettingsPage.General, onSignIn = onSignIn)
     }
 }
 
@@ -271,6 +285,7 @@ private fun PageContent(
         else -> {
             PageColumn(page) {
                 when (page) {
+                    SettingsPage.General -> GeneralPage()
                     SettingsPage.Playback -> PlaybackPage()
                     SettingsPage.Display -> DisplayPage()
                     SettingsPage.Torrents -> TorrentsPage()
@@ -315,6 +330,55 @@ private fun settingsViewModel(): SettingsViewModel {
     return viewModel { SettingsViewModel(AppGraph.core(context)) }
 }
 
+/**
+ * The interface language, the system's by default (see [AppLanguage]); on the desktop, also how
+ * its windows behave.
+ */
+@Composable
+private fun GeneralPage() {
+    val context = LocalPlatformContext.current
+    var language by remember { mutableStateOf(AppLanguage.current(context)) }
+    val system = stringResource(Res.string.settings_language_system)
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_language), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(Res.string.settings_language_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = listOf("") + InterfaceLanguages,
+            selected = language,
+            // Each in its own language, so whoever lands on the wrong one finds theirs.
+            label = { if (it.isEmpty()) system else endonym(it) },
+            onSelect = { tag ->
+                language = tag
+                AppLanguage.set(context, tag)
+            },
+        )
+    }
+    if (isDesktopApp()) WindowSettings()
+}
+
+/** How the desktop app's windows behave: Esc in the player's full screen, and closing the window. */
+@Composable
+private fun WindowSettings() {
+    val viewModel = settingsViewModel()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val current = settings ?: return
+    SettingsToggle(
+        title = stringResource(Res.string.settings_esc_full_screen),
+        body = stringResource(Res.string.settings_esc_full_screen_body),
+        checked = current.escExitsFullScreen,
+        onToggle = { viewModel.update { it.copy(escExitsFullScreen = !it.escExitsFullScreen) } },
+    )
+    SettingsToggle(
+        title = stringResource(Res.string.settings_quit_on_close),
+        body = stringResource(Res.string.settings_quit_on_close_body),
+        checked = current.quitOnClose,
+        onToggle = { viewModel.update { it.copy(quitOnClose = !it.quitOnClose) } },
+    )
+}
+
 @Composable
 private fun PlaybackPage() {
     val viewModel = settingsViewModel()
@@ -339,6 +403,7 @@ private fun PlaybackPage() {
             onSelect = { language -> viewModel.update { it.copy(subtitleLanguage = language) } },
         )
     }
+    SubtitleStyleSetting(current, viewModel::update)
     Group(stringResource(Res.string.onboarding_quality)) {
         SnChipRow(
             options = listOf(0u, 2160u, 1080u, 720u),
@@ -353,6 +418,9 @@ private fun PlaybackPage() {
             onSelect = { lines -> viewModel.update { it.copy(maxResolution = lines) } },
         )
     }
+    if (externalPlayerSupported()) PlayInSetting(current, viewModel::update)
+    NextEpisodeSettings(current, viewModel::update)
+    SeekStepSetting(current, viewModel.seekStepChoices, viewModel::update)
     SettingsToggle(
         title = stringResource(Res.string.settings_aniskip),
         body = stringResource(Res.string.settings_aniskip_body),
@@ -362,6 +430,115 @@ private fun PlaybackPage() {
     // Only where the player takes the choice (the desktop); Android keeps its own sizes.
     val automatic = remember { automaticStreamMemory() }
     if (automatic != null) VideoMemorySetting(current, automatic, viewModel::update)
+}
+
+/** Which app plays sources: this one, or another that plays video (Android). */
+@Composable
+private fun PlayInSetting(
+    current: AppSettings,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_play_in), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(Res.string.settings_play_in_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = listOf(PlayerType.INTERNAL, PlayerType.EXTERNAL),
+            selected = current.playerType,
+            label = {
+                stringResource(
+                    when (it) {
+                        PlayerType.INTERNAL -> Res.string.settings_play_in_app
+                        PlayerType.EXTERNAL -> Res.string.settings_play_in_other_app
+                    },
+                )
+            },
+            onSelect = { choice -> onChange { it.copy(playerType = choice) } },
+        )
+    }
+}
+
+/**
+ * Moving on to the next episode: on or off, and how long the card counts down, which only
+ * matters while it is on.
+ */
+@Composable
+private fun NextEpisodeSettings(
+    current: AppSettings,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    SettingsToggle(
+        title = stringResource(Res.string.settings_autoplay_next),
+        body = stringResource(Res.string.settings_autoplay_next_body),
+        checked = current.autoplayNext,
+        onToggle = { onChange { it.copy(autoplayNext = !it.autoplayNext) } },
+    )
+    if (!current.autoplayNext) return
+    val off = stringResource(Res.string.state_off)
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(
+            stringResource(Res.string.settings_up_next_countdown),
+            style = SnTypography.bodyLg.copy(color = SnColors.fg),
+        )
+        BasicText(
+            stringResource(Res.string.settings_up_next_countdown_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        val saved = current.upNextCountdownSeconds.toInt()
+        SnChipRow(
+            // A length saved elsewhere (another version) stays selectable.
+            options = (UpNextCountdownChoices + saved).distinct().sorted(),
+            selected = saved,
+            label = { seconds ->
+                if (seconds == 0) off else pluralStringResource(Res.plurals.settings_duration_seconds, seconds, seconds)
+            },
+            onSelect = { seconds -> onChange { it.copy(upNextCountdownSeconds = seconds.toUInt()) } },
+        )
+    }
+}
+
+/**
+ * How far the player skips back and forward per press, and on the desktop the shorter step of
+ * Shift and the arrow keys.
+ */
+@Composable
+private fun SeekStepSetting(
+    current: AppSettings,
+    choices: List<UInt>,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    val desktop = isDesktopApp()
+    val label: @Composable (UInt) -> String = { seconds ->
+        pluralStringResource(Res.plurals.settings_duration_seconds, seconds.toInt(), seconds.toInt())
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_seek), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(if (desktop) Res.string.settings_seek_body_desktop else Res.string.settings_seek_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = choices,
+            selected = current.seekStepSeconds,
+            label = label,
+            onSelect = { seconds -> onChange { it.copy(seekStepSeconds = seconds) } },
+        )
+        if (desktop) {
+            BasicText(
+                stringResource(Res.string.settings_seek_short),
+                modifier = Modifier.padding(top = SnSpacing.space2),
+                style = SnTypography.label.copy(color = SnColors.fgSecondary),
+            )
+            SnChipRow(
+                options = choices,
+                selected = current.seekShortStepSeconds,
+                label = label,
+                onSelect = { seconds -> onChange { it.copy(seekShortStepSeconds = seconds) } },
+            )
+        }
+    }
 }
 
 /** HDR and refresh rate switching, where the app can change the display (Windows). */
@@ -484,6 +661,16 @@ private fun PrivacyPage() {
             onSelect = CrashReports::setMode,
         )
     }
+    val viewModel = settingsViewModel()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    settings?.let { current ->
+        SettingsToggle(
+            title = stringResource(Res.string.settings_debug_logs),
+            body = stringResource(Res.string.settings_debug_logs_body),
+            checked = current.debugLogs,
+            onToggle = { viewModel.update { it.copy(debugLogs = !it.debugLogs) } },
+        )
+    }
 }
 
 /**
@@ -498,7 +685,6 @@ private fun AccountPage(onSignIn: () -> Unit) {
     var confirmSignOut by remember { mutableStateOf(false) }
     var syncing by remember { mutableStateOf(false) }
     var syncFailed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     if (confirmSignOut) {
         SnDialog(
             title = stringResource(Res.string.profile_sign_out_title),
@@ -528,12 +714,15 @@ private fun AccountPage(onSignIn: () -> Unit) {
                         if (syncing) return@SnButton
                         syncing = true
                         syncFailed = false
-                        scope.launch {
+                        // In the app's scope, so leaving the page does not cancel the sync.
+                        AppGraph.scope.launch {
                             val result = runCatching { AppGraph.core(context).sync() }
                             // An expired session signs out quietly, as at start-up.
                             if (result.exceptionOrNull() is CoreException.SignIn) signOutOfStremio(context)
-                            syncFailed = result.isFailure
-                            syncing = false
+                            withContext(Dispatchers.Main) {
+                                syncFailed = result.isFailure
+                                syncing = false
+                            }
                             AccountEvents.changed()
                         }
                     },
@@ -598,6 +787,7 @@ private fun AboutPage() {
             style = SnTypography.body.copy(color = SnColors.fgMuted),
         )
     }
+    UpdateReady()
     if (isTv) {
         // A TV has no browser to open them in; the addresses are there to type elsewhere.
         Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
@@ -616,6 +806,28 @@ private fun AboutPage() {
                 { openExternalLink(context, IssueLink.NEW_ISSUE) },
                 style = SnButtonStyle.Ghost,
             )
+        }
+    }
+}
+
+/** A newer version downloaded by the Windows app, which installs on quit or now from here. */
+@Composable
+private fun UpdateReady() {
+    val version by remember { downloadedUpdate() }.collectAsStateWithLifecycle()
+    val ready = version ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+            BasicText(
+                stringResource(Res.string.settings_update_ready, ready),
+                style = SnTypography.bodyLg.copy(color = SnColors.fg),
+            )
+            BasicText(
+                stringResource(Res.string.settings_update_ready_body),
+                style = SnTypography.body.copy(color = SnColors.fgMuted),
+            )
+        }
+        Row {
+            SnButton(stringResource(Res.string.settings_update_restart), ::installUpdateNow)
         }
     }
 }

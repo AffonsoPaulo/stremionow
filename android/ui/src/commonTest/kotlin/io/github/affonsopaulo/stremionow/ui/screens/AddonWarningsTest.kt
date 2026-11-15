@@ -14,6 +14,7 @@ class AddonWarningsTest {
     ) = AddonInfo(
         manifestUrl = url,
         id = url,
+        key = url,
         name = url,
         version = "1.0.0",
         description = "",

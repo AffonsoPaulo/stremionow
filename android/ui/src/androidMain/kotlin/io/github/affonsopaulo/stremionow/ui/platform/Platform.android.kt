@@ -10,6 +10,8 @@ import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.ui.platform.LocalContext
 import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 actual typealias PlatformContext = Context
 
@@ -23,6 +25,10 @@ internal actual fun logWarning(
 ) {
     Log.w(TAG, message, error)
     RecentLog.add('W', message, error)
+}
+
+internal actual fun logInfo(message: String) {
+    Log.i(TAG, message)
 }
 
 internal actual fun openExternalLink(
@@ -42,3 +48,36 @@ internal actual fun appVersion(context: PlatformContext): String? =
 internal actual fun displaySwitchingSupported(): Boolean = false
 
 internal actual fun automaticStreamMemory(): StreamMemory? = null
+
+internal actual fun isDesktopApp(): Boolean = false
+
+/** Android apps update through their store. */
+private val noUpdate = MutableStateFlow<String?>(null)
+
+internal actual fun downloadedUpdate(): StateFlow<String?> = noUpdate
+
+internal actual fun installUpdateNow() = Unit
+
+internal actual fun externalPlayerSupported(): Boolean = true
+
+/** The `title` extra is read by VLC, MX Player and Just Player, among others. */
+internal actual fun openInExternalPlayer(
+    context: PlatformContext,
+    url: String,
+    title: String,
+    chooserTitle: String,
+): Boolean {
+    val view =
+        Intent(Intent.ACTION_VIEW)
+            .setDataAndType(Uri.parse(url), "video/*")
+            .putExtra(EXTRA_TITLE, title)
+    return try {
+        context.startActivity(Intent.createChooser(view, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    }
+}
+
+/** The extra most video players read for the title they show. */
+private const val EXTRA_TITLE = "title"

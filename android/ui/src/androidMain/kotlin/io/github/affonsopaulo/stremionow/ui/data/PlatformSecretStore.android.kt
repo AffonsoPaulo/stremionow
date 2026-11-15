@@ -3,10 +3,13 @@ package io.github.affonsopaulo.stremionow.ui.data
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.logWarning
 import java.security.KeyStore
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -30,11 +33,18 @@ internal actual object PlatformSecretStore {
         context: PlatformContext,
         name: String,
         value: String,
-    ) {
-        val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val sealed = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        preferences(context).edit().putString(name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
-    }
+    ): Boolean =
+        try {
+            val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            val sealed = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+            preferences(context).edit().putString(name, Base64.encodeToString(sealed, Base64.NO_WRAP)).apply()
+            true
+        } catch (failure: Exception) {
+            // Some devices' Keystores fail to create or use keys (ProviderException and the like).
+            // The value is then not kept at all, never in plain text; only the name is logged.
+            logWarning("The Android Keystore could not keep \"$name\"", failure)
+            false
+        }
 
     actual fun load(
         context: PlatformContext,
@@ -49,9 +59,15 @@ internal actual object PlatformSecretStore {
                     init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, iv))
                 }
             String(cipher.doFinal(sealed, GCM_IV_BYTES, sealed.size - GCM_IV_BYTES), Charsets.UTF_8)
-        }.getOrElse {
-            // A reset Keystore (for example after a device restore) makes old values unreadable.
-            clear(context, name)
+        }.getOrElse { failure ->
+            if (unreadableForever(failure)) {
+                // A reset Keystore (for example after a device restore) or a damaged value: it
+                // can never be read again, so forget it.
+                clear(context, name)
+            } else {
+                // The Keystore may be busy or briefly unavailable: keep the value for next time.
+                logWarning("The Android Keystore could not read \"$name\"", failure)
+            }
             null
         }
     }
@@ -59,9 +75,20 @@ internal actual object PlatformSecretStore {
     actual fun clear(
         context: PlatformContext,
         name: String,
-    ) {
+    ): Boolean {
         preferences(context).edit().remove(name).apply()
+        return true
     }
+
+    /**
+     * Whether [failure] means the value can never be decrypted: a key that is gone or changed
+     * (the tag no longer matches), a key the system invalidated, or a value too damaged to parse.
+     */
+    private fun unreadableForever(failure: Throwable): Boolean =
+        failure is AEADBadTagException ||
+            failure is KeyPermanentlyInvalidatedException ||
+            failure is IllegalArgumentException ||
+            failure is IndexOutOfBoundsException
 
     private fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)

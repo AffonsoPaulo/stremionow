@@ -7,13 +7,16 @@ import android.media.session.PlaybackState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import io.github.affonsopaulo.stremionow.player.MpvPlayer
 
 /**
  * Publishes playback to Android while the player is open, so headset and Bluetooth buttons,
  * TV remotes' media keys, Google Assistant and the system media controls can drive it.
+ * Fast-forward and rewind move by [seekStepSeconds], the skip buttons' step.
  */
 @Composable
 fun PlayerMediaSession(
@@ -25,7 +28,11 @@ fun PlayerMediaSession(
     paused: Boolean,
     hasNext: Boolean,
     onNext: () -> Unit,
+    seekStepSeconds: Double,
 ) {
+    val step by rememberUpdatedState(seekStepSeconds)
+    // The callback is set once, but the next episode changes each time the player moves on.
+    val next by rememberUpdatedState(onNext)
     val context = LocalContext.current
     val session = remember { MediaSession(context, "StremioNow") }
     DisposableEffect(session) {
@@ -37,11 +44,11 @@ fun PlayerMediaSession(
 
                 override fun onSeekTo(position: Long) = player.seekTo(position / 1000.0)
 
-                override fun onFastForward() = player.seekBy(SEEK_STEP_SECONDS)
+                override fun onFastForward() = player.seekBy(step)
 
-                override fun onRewind() = player.seekBy(-SEEK_STEP_SECONDS)
+                override fun onRewind() = player.seekBy(-step)
 
-                override fun onSkipToNext() = onNext()
+                override fun onSkipToNext() = next()
             },
         )
         session.isActive = true
@@ -80,5 +87,4 @@ fun PlayerMediaSession(
     }
 }
 
-private const val SEEK_STEP_SECONDS = 10.0
 private const val POSITION_STEP_SECONDS = 5.0

@@ -19,6 +19,9 @@ import java.beans.PropertyChangeListener
 import javax.swing.Timer
 import kotlin.math.roundToInt
 
+/** How long the overlay's content takes to fade out before the pair minimizes. */
+internal const val OVERLAY_FADE_OUT_MS = 120
+
 /** Which edges a resize gesture moves. */
 internal enum class ResizeEdge(
     val left: Boolean = false,
@@ -37,15 +40,21 @@ internal enum class ResizeEdge(
 }
 
 /**
- * Keeps the video window exactly under the overlay and makes the two behave as one window.
+ * Keeps the video window and the overlay together and makes the two behave as one window.
  *
  * - Stacking: the overlay is owned by the video window, so the system keeps it directly above
  *   the video without making it topmost, hides it while the video window is minimized and shows
  *   it again on restore. Nothing here touches the z-order.
- * - Geometry: the overlay is the reference. Moves and resizes made by the app ([beginGesture],
- *   [enterFullScreen]) apply to both windows in one step; changes made by the system (DPI changes,
- *   display changes, window snapping) are copied from the overlay to the video window, and the
- *   video window is put back under the overlay if anything moves it alone.
+ * - Geometry, with a [framed] video window (Windows): the video window is the reference. The
+ *   system moves, resizes, snaps and maximizes it through its frame, and the overlay is kept over
+ *   the area inside the frame. Full screen hides the frame.
+ * - Geometry, with a borderless video window: the overlay is the reference. Moves and resizes
+ *   made by the app ([beginGesture], [enterFullScreen]) apply to both windows in one step;
+ *   changes made by the system (DPI changes, display changes, window snapping) are copied from
+ *   the overlay to the video window, and the video window is put back under the overlay if
+ *   anything moves it alone.
+ * - Minimizing: the overlay's content fades out first ([isFadingOut]) and back in on restore, so
+ *   the controls do not vanish ahead of the system's animation of the video window.
  * - Focus: activating the video window (taskbar, Alt+Tab) passes focus to the overlay, which
  *   handles all input.
  *
@@ -55,14 +64,32 @@ internal enum class ResizeEdge(
 internal class WindowPair(
     private val video: Frame,
     private val overlay: Window,
+    /** Whether the video window has the system's frame; see [VideoWindow.isFramed]. */
+    val framed: Boolean = !video.isUndecorated,
     private val system: WindowSystem = WindowSystem.current(),
 ) : AutoCloseable {
     /** Whether both windows cover the monitor. Compose state, so the UI follows it. */
     var isFullScreen by mutableStateOf(false)
         private set
 
+    /**
+     * Whether the overlay's content should be hidden: while minimizing and minimized. Compose
+     * state; the overlay fades along with it.
+     */
+    var isFadingOut by mutableStateOf(false)
+        private set
+
     /** Where the windows were before going full screen. */
     private var windowedBounds: Rectangle? = null
+
+    /** Whether the framed video window was maximized before going full screen. */
+    private var wasMaximized = false
+
+    /** Undoes [WindowSystem.interceptMinimize]. */
+    private var minimizeHook: AutoCloseable? = null
+
+    /** Minimizes once the overlay has faded out. */
+    private val minimizeTimer = Timer(OVERLAY_FADE_OUT_MS) { system.minimize(video) }.apply { isRepeats = false }
 
     private class Gesture(
         val edge: ResizeEdge?,
@@ -104,6 +131,9 @@ internal class WindowPair(
             override fun componentMoved(event: ComponentEvent) = conform()
 
             override fun componentResized(event: ComponentEvent) = conform()
+
+            // Attached before the overlay shows, conform() would have nothing to place yet.
+            override fun componentShown(event: ComponentEvent) = conform()
         }
 
     /**
@@ -138,10 +168,22 @@ internal class WindowPair(
             val wasMinimized = event.oldState and Frame.ICONIFIED != 0
             val isMinimized = event.newState and Frame.ICONIFIED != 0
             when {
-                wasMinimized && !isMinimized -> conform()
+                wasMinimized && !isMinimized -> {
+                    conform()
+                    isFadingOut = false
+                }
 
-                // Minimized from outside (taskbar, Win+Down): the hidden overlay would keep the keyboard.
-                !wasMinimized && isMinimized && overlay.isFocused -> system.activate(video)
+                !wasMinimized && isMinimized -> {
+                    // However it was minimized, the controls come back with a fade on restore.
+                    isFadingOut = true
+                    // Minimized from outside (Win+Down): the hidden overlay would keep the keyboard.
+                    if (overlay.isFocused) system.activate(video)
+                }
+
+                // Maximized or restored by the system: the area inside the frame changed.
+                else -> {
+                    conform()
+                }
             }
         }
 
@@ -150,10 +192,11 @@ internal class WindowPair(
             override fun windowIconified(event: WindowEvent) = minimizeFromOverlay()
         }
 
-    /** Starts following the overlay. */
+    /** Starts keeping the windows together. */
     fun attach() {
         conform()
         rememberSize()
+        if (framed) minimizeHook = system.interceptMinimize(video, ::minimize)
         overlay.addComponentListener(geometryListener)
         overlay.addWindowListener(overlayStateListener)
         video.addComponentListener(geometryListener)
@@ -163,9 +206,12 @@ internal class WindowPair(
         video.addPropertyChangeListener("graphicsConfiguration", configurationListener)
     }
 
-    /** Starts moving the windows with the pointer, or resizing them from [edge]. */
+    /**
+     * Starts moving the windows with the pointer, or resizing them from [edge]. Only for a
+     * borderless video window: a framed one is moved and resized through its frame.
+     */
     fun beginGesture(edge: ResizeEdge?) {
-        if (isFullScreen) return
+        if (isFullScreen || framed) return
         gesture = Gesture(edge, system.cursorPosition(), system.bounds(overlay))
         gestureTimer.restart()
     }
@@ -221,8 +267,18 @@ internal class WindowPair(
     fun enterFullScreen() {
         if (isFullScreen) return
         gesture = null
-        windowedBounds = system.bounds(overlay)
-        system.setBounds(video, overlay, system.monitorBounds(overlay))
+        if (framed) {
+            val monitor = system.monitorBounds(video)
+            // Restored first, as browsers do: a maximized window keeps its maximized place.
+            wasMaximized = video.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+            if (wasMaximized) video.extendedState = Frame.NORMAL
+            windowedBounds = system.bounds(video)
+            system.setFramed(video, false)
+            system.setBounds(video, overlay, monitor)
+        } else {
+            windowedBounds = system.bounds(overlay)
+            system.setBounds(video, overlay, system.monitorBounds(overlay))
+        }
         isFullScreen = true
         log.log(System.Logger.Level.INFO, "Full screen on: ${system.bounds(overlay)}")
     }
@@ -230,7 +286,15 @@ internal class WindowPair(
     /** Puts both windows back where they were before [enterFullScreen]. */
     fun exitFullScreen() {
         if (!isFullScreen) return
-        windowedBounds?.let { system.setBounds(video, overlay, it) }
+        if (framed) {
+            system.setFramed(video, true)
+            windowedBounds?.let { system.setBounds(video, it) }
+            if (wasMaximized) video.extendedState = Frame.MAXIMIZED_BOTH
+            wasMaximized = false
+            conform()
+        } else {
+            windowedBounds?.let { system.setBounds(video, overlay, it) }
+        }
         windowedBounds = null
         isFullScreen = false
         // Full screen may have ended on a monitor with another scale.
@@ -239,12 +303,19 @@ internal class WindowPair(
     }
 
     /**
-     * Minimizes the pair; the system hides the overlay along with the video window it belongs to
-     * and activates the window behind, as for any minimized app.
+     * Minimizes the pair once the overlay has faded out; the system hides the overlay along with
+     * the video window it belongs to and activates the window behind, as for any minimized app.
      */
-    fun minimize() = system.minimize(video)
+    fun minimize() {
+        if (system.isMinimized(video) || minimizeTimer.isRunning) return
+        isFadingOut = true
+        minimizeTimer.restart()
+    }
 
     override fun close() {
+        minimizeHook?.close()
+        minimizeHook = null
+        minimizeTimer.stop()
         overlay.removeComponentListener(geometryListener)
         overlay.removeWindowListener(overlayStateListener)
         video.removeComponentListener(geometryListener)
@@ -261,7 +332,7 @@ internal class WindowPair(
      * scale, keeping its top-left corner, then puts the video window under it.
      */
     private fun settle() {
-        if (gesture == null && !isFullScreen && !system.isMinimized(overlay) && overlay.isShowing) {
+        if (!framed && gesture == null && !isFullScreen && !system.isMinimized(overlay) && overlay.isShowing) {
             val bounds = system.bounds(overlay)
             val size = sizeAtCurrentScale()
             if (bounds.width != size.width || bounds.height != size.height) {
@@ -277,13 +348,23 @@ internal class WindowPair(
 
     private fun sizeAtCurrentScale(): Dimension = windowedSize.at(system.scale(overlay))
 
-    /** Puts the video window exactly under the overlay. */
+    /**
+     * Puts the overlay over the area inside a framed video window's frame, or the borderless
+     * video window exactly under the overlay.
+     */
     private fun conform() {
         if (system.isMinimized(overlay)) {
             minimizeFromOverlay()
             return
         }
         if (system.isMinimized(video) || !overlay.isShowing) return
+        if (framed) {
+            val inside = system.clientBounds(video)
+            if (inside.width > 0 && inside.height > 0 && system.bounds(overlay) != inside) {
+                system.setBounds(overlay, inside)
+            }
+            return
+        }
         val target = system.bounds(overlay)
         if (system.bounds(video) != target) system.setBounds(video, target)
         // Resized by the system at the same scale (snapping, another program): that is the new

@@ -40,6 +40,7 @@ use super::net::{self, BindPolicy};
 use super::pairing::{self, Pairing, Refusal};
 use super::tls::Fingerprint;
 use super::wire;
+use crate::files::{self, FileRequest};
 use crate::http::Body;
 use crate::magnet::{self, InfoHash};
 use crate::server::Holder;
@@ -532,24 +533,36 @@ impl Inner {
         }
     }
 
-    /// Binds `address` on the server's port (choosing it on the first bind) and accepts
-    /// connections there.
+    /// Binds `address` on the server's port and accepts connections there. The port is chosen
+    /// on the first bind, and again when it is taken while nothing listens (another program
+    /// took it while serving was paused); the announcement then moves to the new port.
     async fn bind(self: &Arc<Self>, address: Ipv4Addr) {
         if self.policy.check(IpAddr::V4(address)).is_err() {
             return;
         }
         let port = *lock(&self.port);
-        let bound = if port != 0 {
+        let mut bound = if port != 0 {
             TcpListener::bind((address, port)).await
         } else {
-            match TcpListener::bind((address, DEFAULT_PORT)).await {
+            Err(std::io::Error::other("no port chosen yet"))
+        };
+        // While other addresses listen on the port, all of them must keep sharing it: the
+        // announcement names a single port.
+        let may_move = port == 0 || lock(&self.listeners).is_empty();
+        if let Err(error) = &bound
+            && may_move
+        {
+            if port != 0 {
+                log::info!("lan: port {port} unavailable ({error}); choosing again");
+            }
+            bound = match TcpListener::bind((address, DEFAULT_PORT)).await {
                 Ok(listener) => Ok(listener),
                 Err(error) => {
                     log::info!("lan: port {DEFAULT_PORT} unavailable ({error}); using another");
                     TcpListener::bind((address, 0)).await
                 }
-            }
-        };
+            };
+        }
         let listener = match bound {
             Ok(listener) => listener,
             Err(error) => {
@@ -557,10 +570,12 @@ impl Inner {
                 return;
             }
         };
-        if port == 0
-            && let Ok(local) = listener.local_addr()
+        if let Ok(local) = listener.local_addr()
+            && local.port() != port
         {
             *lock(&self.port) = local.port();
+            // `reconcile` announces again, on the new port.
+            lock(&self.announcement).take();
         }
         log::info!("lan: serving on {address}");
         let stop = self.shutdown.child_token();
@@ -816,11 +831,17 @@ impl Inner {
                 })
                 .last_used = Instant::now();
         }
-        let requested = add.file_idx.and_then(|index| usize::try_from(index).ok());
+        let request = FileRequest {
+            // An index this system cannot even represent names no file.
+            index: add
+                .file_idx
+                .map(|index| usize::try_from(index).unwrap_or(usize::MAX)),
+            hint: add.file_hint.as_deref().map(files::bounded_hint),
+        };
         let added = self
             .stream
             .shared
-            .add_for(hash, holder.clone(), requested, &trackers)
+            .add_for(hash, holder.clone(), request, &trackers)
             .await;
         // A DELETE, a removal or the lease may have let go of the holding meanwhile; the
         // engine must not keep a torrent nobody holds.
@@ -843,6 +864,9 @@ impl Inner {
                 let code = match error {
                     TorrentError::MetadataTimeout(_) => "metadata_timeout",
                     TorrentError::NoVideoFile => "no_video_file",
+                    TorrentError::NoSuchFile(_) => "no_such_file",
+                    TorrentError::UnsafeFileName => "unsafe_file_name",
+                    TorrentError::NotEnoughSpace { .. } => "not_enough_space",
                     TorrentError::Stopped => "stopped",
                     _ => "torrent_failed",
                 };
@@ -862,7 +886,8 @@ impl Inner {
         {
             return failure(StatusCode::NOT_FOUND, "not_found");
         }
-        match self.stream.shared.engine.status(hash) {
+        let holder = Holder::Device(device.to_owned());
+        match self.stream.shared.engine.status(hash, &holder) {
             Some(status) => json(StatusCode::OK, &wire::Status::from(status)),
             None => failure(StatusCode::NOT_FOUND, "not_found"),
         }
@@ -898,16 +923,15 @@ impl Inner {
         if open >= MAX_STREAMS_PER_DEVICE {
             return failure(StatusCode::SERVICE_UNAVAILABLE, "too_many_streams");
         }
-        // Another device may have switched the torrent to a different file (two episodes
-        // of one season pack at once): that is a conflict, which the device's relay must not
-        // answer by adding the torrent again. A torrent that is gone or failed is "not
-        // found", which it may.
-        match self.stream.shared.engine.selected_index(parsed) {
+        // Every file someone plays stays served, so two episodes of one season pack play at
+        // once. A file nobody plays any more (the device moved on to another) is a conflict,
+        // which the device's relay must not answer by adding the torrent again. A torrent
+        // that is gone or failed is "not found", which it may.
+        let requested = index.parse::<usize>().unwrap_or(usize::MAX);
+        match self.stream.shared.engine.serves(parsed, requested) {
             None => return failure(StatusCode::NOT_FOUND, "not_found"),
-            Some(selected) if index.parse::<usize>().ok() != Some(selected) => {
-                return failure(StatusCode::CONFLICT, "file_switched");
-            }
-            Some(_) => {}
+            Some(false) => return failure(StatusCode::CONFLICT, "file_switched"),
+            Some(true) => {}
         }
         let range = request
             .headers()

@@ -42,15 +42,19 @@ internal class WindowedPlayer private constructor(
     companion object {
         private val log = System.getLogger("StremioNow.player")
 
-        /** Shows a video window titled [title] at [bounds] and creates the player that draws into it. */
+        /**
+         * Shows a video window titled [title] at [bounds], maximized when [maximized], and
+         * creates the player that draws into it.
+         */
         fun open(
             title: String,
             bounds: Rectangle,
             icons: List<Image>,
+            maximized: Boolean = false,
             createPlayer: (canvas: Canvas) -> MpvPlayer,
         ): WindowedPlayer {
             val video = VideoWindow(title, icons)
-            video.show(bounds)
+            video.show(bounds, maximized)
             val mpv =
                 try {
                     createPlayer(video.canvas)

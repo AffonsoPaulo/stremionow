@@ -29,10 +29,14 @@ internal class Mpv private constructor(
         /** The file was opened and playback can start. */
         data object FileLoaded : Event
 
-        /** Playback of a file ended; [error] is mpv's error text when [failed]. */
+        /**
+         * Playback of a file ended; [error] is mpv's error text when [failed]. [replaced] is an
+         * end asked for: a stop, another file in its place, quitting or a redirect.
+         */
         data class EndFile(
             val failed: Boolean,
             val error: String?,
+            val replaced: Boolean = false,
         ) : Event
 
         /** mpv shut down on its own; the instance must be closed. */
@@ -158,7 +162,9 @@ internal class Mpv private constructor(
                 MpvConstants.EVENT_END_FILE -> {
                     val endFile = event.data?.let(::MpvEventEndFile)
                     val failed = endFile?.reason == MpvConstants.END_FILE_REASON_ERROR
-                    emit(Event.EndFile(failed, endFile?.error?.takeIf { failed }?.let(lib::mpv_error_string)))
+                    val replaced = endFile?.reason in REPLACED_REASONS
+                    val error = endFile?.error?.takeIf { failed }?.let(lib::mpv_error_string)
+                    emit(Event.EndFile(failed, error, replaced))
                 }
 
                 MpvConstants.EVENT_SHUTDOWN -> {
@@ -229,6 +235,14 @@ internal class Mpv private constructor(
         private const val EVENT_THREAD_JOIN_MS = 5_000L
         private const val CLIENT_API_MAJOR = 2
 
+        /** Ends of file that were asked for, never a file failing to open. */
+        private val REPLACED_REASONS =
+            setOf(
+                MpvConstants.END_FILE_REASON_STOP,
+                MpvConstants.END_FILE_REASON_QUIT,
+                MpvConstants.END_FILE_REASON_REDIRECT,
+            )
+
         // mpv_log_level: fatal 10, error 20, warn 30, info 40, then v, debug and trace.
         private const val LOG_LEVEL_ERROR = 20
         private const val LOG_LEVEL_WARN = 30
@@ -238,8 +252,9 @@ internal class Mpv private constructor(
          * Loads libmpv from [library] (see [MpvLibrary.locate]), applies [options] (`mpv
          * --name=value` without the dashes) and initializes it. Each of [preferences] is set to
          * the first of its values this libmpv accepts, or left alone when it accepts none (values
-         * that only newer versions understand come first). [logLevel] is the lowest mpv log
-         * level forwarded to the `StremioNow.mpv` logger.
+         * that only newer versions understand come first). Each of [firstKnown] is set under the
+         * first of its names this libmpv knows (options mpv renamed or added later). [logLevel] is the
+         * lowest mpv log level forwarded to the `StremioNow.mpv` logger.
          *
          * @throws MpvUnavailableException when libmpv cannot be loaded or is too old.
          */
@@ -247,6 +262,7 @@ internal class Mpv private constructor(
             library: String,
             options: Map<String, String>,
             preferences: Map<String, List<String>> = emptyMap(),
+            firstKnown: List<SubtitleStyle.MpvOption> = emptyList(),
             logLevel: String = "warn",
         ): Mpv {
             // mpv takes and returns UTF-8 everywhere, including on Windows.
@@ -277,6 +293,12 @@ internal class Mpv private constructor(
             for ((name, values) in preferences) {
                 val accepted = values.firstOrNull { lib.mpv_set_option_string(handle, name, it) >= 0 }
                 if (accepted == null) log.log(System.Logger.Level.WARNING, "mpv accepts none of --$name=$values")
+            }
+            for (option in firstKnown) {
+                val accepted = option.names.firstOrNull { lib.mpv_set_option_string(handle, it, option.value) >= 0 }
+                if (accepted == null) {
+                    log.log(System.Logger.Level.WARNING, "mpv accepts none of ${option.names}=${option.value}")
+                }
             }
             lib.mpv_request_log_messages(handle, logLevel)
             val initialized = lib.mpv_initialize(handle)

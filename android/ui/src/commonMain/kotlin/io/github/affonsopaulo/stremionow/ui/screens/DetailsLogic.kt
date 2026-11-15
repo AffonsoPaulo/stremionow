@@ -34,14 +34,20 @@ internal fun Episode.isReleased(now: Instant): Boolean = releaseInstant(released
 
 /**
  * A release date in [locale]'s short date format with the full year: 11/09/2009 in Brazil,
- * 9/11/2009 in the US. Never ISO. The day is the one the addon wrote, whatever the time zone.
+ * 9/11/2009 in the US. Never ISO. The day is the one the addon wrote, whatever the time zone:
+ * with an offset, its own day, not the one in UTC (late on the 11th at -03:00 is the 12th in
+ * UTC).
  */
 internal fun formatReleaseDate(
     released: String?,
     locale: Locale,
 ): String? {
-    val instant = releaseInstant(released) ?: return null
-    return shortDateFormatter(locale).format(instant.atZone(ZoneOffset.UTC).toLocalDate())
+    val text = released?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val day =
+        runCatching { OffsetDateTime.parse(text).toLocalDate() }.getOrNull()
+            ?: releaseInstant(text)?.atZone(ZoneOffset.UTC)?.toLocalDate()
+            ?: return null
+    return shortDateFormatter(locale).format(day)
 }
 
 private fun shortDateFormatter(locale: Locale): DateTimeFormatter {
@@ -51,26 +57,73 @@ private fun shortDateFormatter(locale: Locale): DateTimeFormatter {
     return DateTimeFormatter.ofPattern(pattern.replace(Regex("y+"), "yyyy"), locale)
 }
 
+/**
+ * The details as the page shows them. A movie whose addon also lists videos is still a movie,
+ * with its sources in place of a list of one "episode": when its only video has the title's
+ * own id (as Stremio's clients treat it), or when the title is a movie and no video has a
+ * season or an episode number. The page tells a series by its episodes, so these are dropped.
+ */
+internal fun MetaDetails.asShown(): MetaDetails {
+    val onlyItself = episodes.size == 1 && episodes[0].id == item.id
+    val unnumberedMovie = item.kind == "movie" && episodes.all { it.season == null && it.episode == null }
+    return if (episodes.isNotEmpty() && (onlyItself || unnumberedMovie)) copy(episodes = emptyList()) else this
+}
+
+/**
+ * The group of an episode in the season selector: its season, or [NO_SEASON] for the
+ * episodes the addon gives no season, which are neither season 0's specials nor a season.
+ */
+internal fun Episode.seasonKey(): Long = season?.toLong() ?: NO_SEASON
+
+/** The season selector's group for episodes without a season number; see [seasonKey]. */
+internal const val NO_SEASON = -1L
+
+/**
+ * The series' episodes by [seasonKey]: the seasons in order, then the episodes without a
+ * season, then the specials. An episode listed twice by its addon shows once.
+ */
+internal fun seasonGroups(episodes: List<Episode>): Map<Long, List<Episode>> =
+    episodes
+        .distinctBy { it.id }
+        .groupBy { it.seasonKey() }
+        .toSortedMap(
+            compareBy<Long> {
+                when (it) {
+                    0L -> 2
+                    NO_SEASON -> 1
+                    else -> 0
+                }
+            }.thenBy { it },
+        )
+
+/** Whether the Details tab has anything to show: a synopsis, the runtime, genres or people. */
+internal fun hasInfo(details: MetaDetails): Boolean =
+    details.item.description != null ||
+        details.runtime != null ||
+        details.item.genres.isNotEmpty() ||
+        details.cast.isNotEmpty() ||
+        details.directors.isNotEmpty()
+
 /** What "Mark as watched" covers on a series. */
 enum class WatchScope { Episode, Season, Series }
 
 /**
  * The videos a "Mark as watched" covers: a movie itself; or, on a series, the released
- * episodes of [scope]: [episode] alone, the episodes of [season], or all of them. Episodes
- * not out yet are never included.
+ * episodes of [season] (a [seasonKey]), or all of them. Episodes not out yet are never
+ * included.
  */
 internal fun coveredVideos(
     details: MetaDetails,
     scope: WatchScope,
     episode: Episode?,
-    season: UInt?,
+    season: Long?,
     now: Instant,
 ): List<String> {
     if (details.episodes.isEmpty()) return listOf(details.item.id)
     val released = details.episodes.filter { it.isReleased(now) }
     return when (scope) {
         WatchScope.Episode -> released.filter { it.id == episode?.id }
-        WatchScope.Season -> released.filter { (it.season ?: 0u) == season }
+        WatchScope.Season -> released.filter { it.seasonKey() == season }
         WatchScope.Series -> released
     }.map(Episode::id)
 }
@@ -118,6 +171,27 @@ internal fun nextUp(
             ?.let { return NextUp(it, null, started = true) }
     }
     return NextUp(regular.firstOrNull(), null, started = false)
+}
+
+/**
+ * Where "Continue watching" moves on to when the episode it is on, [current], gets marked
+ * watched, as stremio-core does: the first released episode after it that is not in
+ * [watched] (which counts the ones just marked), specials staying apart from the seasons;
+ * null when none is left, and the title leaves the row.
+ */
+internal fun resumeAfterMarking(
+    details: MetaDetails,
+    current: String,
+    watched: Set<String>,
+    now: Instant,
+): Episode? {
+    val episode = details.episodes.firstOrNull { it.id == current } ?: return null
+    val special = (episode.season ?: 0u) == 0u
+    return details.episodes
+        .filter { ((it.season ?: 0u) == 0u) == special }
+        .dropWhile { it.id != current }
+        .drop(1)
+        .firstOrNull { it.id !in watched && it.isReleased(now) }
 }
 
 /** How far into its video a saved position is, from 0 to 1; null without a duration. */

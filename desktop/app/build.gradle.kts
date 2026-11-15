@@ -2,6 +2,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import stremionow.desktop.buildlogic.DesktopNativesPlugin
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -23,7 +26,7 @@ kotlin {
 }
 
 /** Shown in the app's profile page; the same as the Android apps' version name. */
-val appVersion = "0.0.1"
+val appVersion = "0.1.0"
 
 dependencies {
     // The shared interface, with the player and the Rust core's bindings (android/ui and friends).
@@ -74,14 +77,25 @@ compose.desktop {
             // Compose copies `common/` and the folder of the current OS into the app's resources
             // directory, for `run` and for installers alike (compose.application.resources.dir).
             appResourcesRootDir.set(layout.buildDirectory.dir(DesktopNativesPlugin.RESOURCES_ROOT))
-            modules("jdk.unsupported")
+            // From `./gradlew suggestRuntimeModules`: jlink leaves out the rest of the JDK, and a module
+            // missing here fails only in installed apps (java.management, through jdk.management,
+            // sizes the video memory from the computer's RAM). Two are loaded as services, which
+            // that task cannot see: jdk.localedata holds every locale but English (without it,
+            // dates, numbers and sorting are English whatever the language), and
+            // jdk.accessibility bridges Swing to Windows' screen readers.
+            modules("java.instrument", "jdk.management", "jdk.unsupported", "jdk.localedata", "jdk.accessibility")
 
+            // Drawn by AppIcon.kt; `./gradlew :app:writeAppIcons` writes them again after a change.
             windows {
+                iconFile.set(layout.projectDirectory.file("icons/StremioNow.ico"))
                 menuGroup = "StremioNow"
                 perUserInstall = true
                 shortcut = true
                 // Fixed so that newer installers upgrade older ones instead of installing side by side.
                 upgradeUuid = "6f0c1d2e-5b7a-4f43-9c1e-8a2d4b6e9f10"
+            }
+            linux {
+                iconFile.set(layout.projectDirectory.file("icons/StremioNow.png"))
             }
         }
     }
@@ -99,3 +113,163 @@ tasks.withType<JavaExec>().configureEach {
 
 // Compose registers its packaging tasks after this script runs, hence the lazy lookup by name.
 tasks.named { it == "prepareAppResources" }.configureEach { dependsOn("prepareNativeResources") }
+
+// The installers' icons in icons/, drawn by AppIcon.kt like the windows' own.
+tasks.register<JavaExec>("writeAppIcons") {
+    description = "Draws the installers' icons into icons/ from AppIcon.kt."
+    group = "build"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.github.affonsopaulo.stremionow.desktop.AppIconFilesKt"
+    args(
+        layout.projectDirectory
+            .dir("icons")
+            .asFile.absolutePath,
+    )
+    systemProperty("java.awt.headless", "true")
+}
+
+// The Windows installer people download: Velopack's one-click Setup.exe, which installs the app
+// in the user's profile (%LOCALAPPDATA%\StremioNow, no administrator rights), shows
+// icons/StremioNow-splash.png while it does, adds the Start menu and desktop shortcuts and
+// opens the app; Velopack also makes the packages that later updates are built from. It wraps
+// the folder `createDistributable` makes, so packaging needs a JDK with jpackage, as the MSI:
+//   ./gradlew :app:packageVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
+// `vpk` is a .NET tool pinned in desktop/dotnet-tools.json (`dotnet tool restore` installs it).
+// Each release needs a higher version than the last (appVersion above) for updates to apply.
+// Output: build/velopack/ (StremioNow-win-Setup.exe, the portable zip and the packages).
+tasks.register<Exec>("packageVelopack") {
+    description = "Builds the Windows installer (Velopack) from the app folder createDistributable makes."
+    group = "compose desktop"
+    dependsOn("createDistributable")
+    onlyIf { System.getProperty("os.name").lowercase().contains("windows") }
+    val appFolder = layout.buildDirectory.dir("compose/binaries/main/app/StremioNow")
+    val output = layout.buildDirectory.dir("velopack")
+    workingDir = projectDir
+    commandLine(
+        "dotnet",
+        "vpk",
+        "pack",
+        "--packId",
+        "StremioNow",
+        "--packTitle",
+        "StremioNow",
+        "--packAuthors",
+        "StremioNow contributors",
+        "--packVersion",
+        appVersion,
+        // The bundled runtime and libmpv are 64-bit (ARM64 builds bundle no libmpv yet).
+        "--runtime",
+        "win-x64",
+        "--packDir",
+        appFolder.get().asFile.absolutePath,
+        "--mainExe",
+        "StremioNow.exe",
+        "--icon",
+        layout.projectDirectory
+            .file("icons/StremioNow.ico")
+            .asFile.absolutePath,
+        "--splashImage",
+        layout.projectDirectory
+            .file("icons/StremioNow-splash.png")
+            .asFile.absolutePath,
+        "--splashProgressColor",
+        "#8B7CFF",
+        "--shortcuts",
+        "Desktop,StartMenuRoot",
+        // The app is not a .NET or Rust Velopack app: it handles Velopack's hook arguments itself (Main.kt).
+        "--skipVeloAppCheck",
+        // The app updates from full packages only (AppUpdates.kt).
+        "--delta",
+        "None",
+        "--outputDir",
+        output.get().asFile.absolutePath,
+    )
+}
+
+// Attaches the Windows files packageVelopack made to the GitHub release v<appVersion>: the
+// installer, the portable zip and what installed apps update from (AppUpdates.kt reads the
+// latest published release). The Release workflow adds the Android APKs to the same release
+// when the tag is pushed; whichever runs first creates the draft, the other adds to it. Needs the
+// GitHub CLI signed in (`gh auth login`) and the commit pushed:
+//   ./gradlew :app:packageVelopack :app:publishVelopack -Pstremionow.packaging.javaHome=...
+tasks.register<PublishWindowsRelease>("publishVelopack") {
+    description = "Attaches the Windows installer and update packages to this version's GitHub release (a draft)."
+    group = "compose desktop"
+    mustRunAfter("packageVelopack")
+    onlyIf { System.getProperty("os.name").lowercase().contains("windows") }
+    packages.set(layout.buildDirectory.dir("velopack"))
+    version.set(appVersion)
+    repository.set(layout.projectDirectory)
+}
+
+abstract class PublishWindowsRelease
+    @Inject
+    constructor(
+        private val exec: ExecOperations,
+    ) : DefaultTask() {
+        @get:Internal abstract val packages: DirectoryProperty
+
+        @get:Input abstract val version: Property<String>
+
+        @get:Internal abstract val repository: DirectoryProperty
+
+        @TaskAction
+        fun publish() {
+            val tag = "v${version.get()}"
+            val folder = packages.get().asFile
+            val files =
+                listOf(
+                    "StremioNow-win-Setup.exe",
+                    "StremioNow-win-Portable.zip",
+                    "StremioNow-${version.get()}-full.nupkg",
+                    "releases.win.json",
+                ).map { File(folder, it) }
+            val missing = files.filterNot { it.isFile }
+            if (missing.isNotEmpty()) {
+                throw GradleException("Missing ${missing.joinToString { it.name }}: run packageVelopack first")
+            }
+            val paths = files.map { it.absolutePath }
+            val exists =
+                gh(listOf("release", "view", tag), ignoreFailure = true, quiet = true) == 0
+            if (exists) {
+                gh(listOf("release", "upload", tag, "--clobber") + paths)
+            } else {
+                val commit = ByteArrayOutputStream()
+                exec.exec {
+                    workingDir = repository.get().asFile
+                    commandLine("git", "rev-parse", "HEAD")
+                    standardOutput = commit
+                }
+                gh(
+                    listOf(
+                        "release",
+                        "create",
+                        tag,
+                        "--draft",
+                        "--target",
+                        commit.toString().trim(),
+                        "--title",
+                        "StremioNow $tag",
+                        "--generate-notes",
+                    ) + paths,
+                )
+            }
+            logger.lifecycle("Attached the Windows files to the draft release $tag; publish it on GitHub.")
+        }
+
+        private fun gh(
+            args: List<String>,
+            ignoreFailure: Boolean = false,
+            quiet: Boolean = false,
+        ): Int =
+            exec
+                .exec {
+                    workingDir = repository.get().asFile
+                    commandLine(listOf("gh") + args)
+                    isIgnoreExitValue = ignoreFailure
+                    if (quiet) {
+                        standardOutput = OutputStream.nullOutputStream()
+                        errorOutput = OutputStream.nullOutputStream()
+                    }
+                }.exitValue
+    }

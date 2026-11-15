@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.MetaItem
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
@@ -120,25 +122,111 @@ fun SnSeeAll(
     }
 }
 
-/** Horizontal row of poster cards, aligned to the page gutter. */
+/**
+ * Horizontal row of poster cards, aligned to the page gutter. [slot] tells the row apart from
+ * the page's other rows (a row's key), so a title in two of them flies from the card chosen.
+ */
 @Composable
 fun SnPosterRow(
     items: List<MetaItem>,
     onOpen: (MetaItem) -> Unit,
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     modifier: Modifier = Modifier,
+    slot: String = "row",
 ) {
-    SnRow(
-        modifier = modifier,
-        controlsCenter = SnSpacing.space2 + PosterCardWidth * 1.5f / 2,
-    ) {
-        items(items, key = { "${it.kind}/${it.id}" }) { item ->
-            SnPosterCard(item.name, item.poster, subtitle(item), onClick = { onOpen(item) })
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val sizing = rememberPosterRowSizing(maxWidth)
+        SnRow(
+            spacing = sizing.spacing,
+            controlsCenter = SnSpacing.space2 + sizing.cardWidth * 1.5f / 2,
+        ) {
+            // Keys must be unique in a lazy row; a title repeated by an addon shows once.
+            items(items.distinctBy { "${it.kind}/${it.id}" }, key = { "${it.kind}/${it.id}" }) { item ->
+                SnPosterCard(
+                    item.name,
+                    item.poster,
+                    subtitle(item),
+                    onClick = { onOpen(item) },
+                    width = sizing.cardWidth,
+                    origin = titleOrigin(slot, item),
+                )
+            }
         }
     }
 }
 
-/** A titled section: header, optional "See all" action and a poster row. */
+/** How wide a row's poster cards are, and how far apart. */
+data class PosterRowSizing(
+    val cardWidth: Dp,
+    val spacing: Dp,
+)
+
+/**
+ * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, they are larger
+ * and further apart, and the last one in view is cut, telling there is more to the side (see
+ * [posterRowSizing]). Elsewhere they keep [PosterCardWidth].
+ */
+@Composable
+fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
+    val mouseFirst = LocalSnFeedback.current.mouseFirst
+    val gutter = SnLayout.gutter
+    return remember(rowWidth, mouseFirst, gutter) {
+        if (mouseFirst) {
+            posterRowSizing(rowWidth, gutter)
+        } else {
+            PosterRowSizing(PosterCardWidth, SnSpacing.space4)
+        }
+    }
+}
+
+/** A poster card's width where a pointer drives the screen, before fitting the window. */
+internal val POINTER_POSTER_CARD_WIDTH = 165.dp
+
+/** Room between poster cards where a pointer drives the screen. */
+internal val POSTER_SPACING = 40.dp
+
+/** Narrowest and widest a poster card gets while fitting the window. */
+internal val MIN_POSTER_CARD_WIDTH = 140.dp
+internal val MAX_POSTER_CARD_WIDTH = 185.dp
+
+/** How much of the last card in view shows, at least and at most: enough to tell it is cut. */
+internal const val MIN_LAST_CARD_SHOWN = 0.25f
+internal const val MAX_LAST_CARD_SHOWN = 0.75f
+
+/**
+ * The cards of a row [rowWidth] wide: [POINTER_POSTER_CARD_WIDTH] wide and [POSTER_SPACING]
+ * apart after the page [gutter], unless the last card in view would show less than a quarter
+ * or more than three quarters of itself; then the cards narrow or widen a little, within their
+ * bounds, until it shows a quarter or three quarters.
+ */
+internal fun posterRowSizing(
+    rowWidth: Dp,
+    gutter: Dp,
+): PosterRowSizing {
+    val room = rowWidth - gutter
+    val step = POINTER_POSTER_CARD_WIDTH + POSTER_SPACING
+    val whole = (room / step).toInt()
+    val shown = (room - step * whole) / POINTER_POSTER_CARD_WIDTH
+    if (shown in MIN_LAST_CARD_SHOWN..MAX_LAST_CARD_SHOWN) {
+        return PosterRowSizing(POINTER_POSTER_CARD_WIDTH, POSTER_SPACING)
+    }
+    // The width that makes the last card show a quarter or three quarters, for as many whole
+    // cards as now or one fewer, whichever is closest to the usual width.
+    val candidates =
+        listOf(whole, whole - 1).filter { it >= 1 }.flatMap { cards ->
+            listOf(MIN_LAST_CARD_SHOWN, MAX_LAST_CARD_SHOWN).map { part ->
+                (room - POSTER_SPACING * cards) / (cards + part)
+            }
+        }
+    val card =
+        candidates
+            .filter { it in MIN_POSTER_CARD_WIDTH..MAX_POSTER_CARD_WIDTH }
+            .minByOrNull { (it - POINTER_POSTER_CARD_WIDTH).value.let { gap -> gap * gap } }
+            ?: POINTER_POSTER_CARD_WIDTH
+    return PosterRowSizing(card, POSTER_SPACING)
+}
+
+/** A titled section: header, optional "See all" action and a poster row; see [SnPosterRow] for [slot]. */
 @Composable
 fun SnPosterSection(
     title: String,
@@ -148,10 +236,11 @@ fun SnPosterSection(
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     caption: String? = null,
     action: (@Composable () -> Unit)? = null,
+    slot: String = "row",
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(title, caption = caption, action = action)
-        SnPosterRow(items, onOpen, subtitle)
+        SnPosterRow(items, onOpen, subtitle, slot = slot)
     }
 }
 

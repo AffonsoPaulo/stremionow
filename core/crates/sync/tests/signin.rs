@@ -103,6 +103,32 @@ async fn link_code_reads_nothing_until_confirmed() {
 }
 
 #[tokio::test]
+async fn an_expired_link_code_is_reported() {
+    let (server, api) = setup().await;
+    let expired = Mock::given(method("GET"))
+        .and(path("/api/v2/read"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": { "code": 102, "message": "Code expired" }
+        })))
+        .mount_as_scoped(&server)
+        .await;
+    assert_eq!(
+        api.read_link_code("ABCD").await.unwrap_err(),
+        SyncError::LinkCodeExpired
+    );
+    drop(expired);
+    Mock::given(method("GET"))
+        .and(path("/api/v2/read"))
+        .respond_with(ResponseTemplate::new(410))
+        .mount(&server)
+        .await;
+    assert_eq!(
+        api.read_link_code("ABCD").await.unwrap_err(),
+        SyncError::LinkCodeExpired
+    );
+}
+
+#[tokio::test]
 async fn link_code_network_errors_are_returned() {
     let (server, api) = setup().await;
     Mock::given(method("GET"))

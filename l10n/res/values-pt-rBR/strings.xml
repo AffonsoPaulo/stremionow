@@ -28,6 +28,11 @@
   <string name="episode_numbered">%1$d. %2$s</string>
 
   <string name="time_left">faltam %1$s</string>
+  <plurals name="time_left_minutes">
+    <item quantity="one">falta %1$d min</item>
+    <item quantity="many">faltam %1$d min</item>
+    <item quantity="other">faltam %1$d min</item>
+  </plurals>
 
   <string name="sources_summary">%1$s de %2$s</string>
   <plurals name="sources_count">
@@ -62,6 +67,9 @@
   <string name="explore_genre_all">Todos</string>
   <string name="explore_loading_more">Carregando mais…</string>
   <string name="explore_empty_body">Este catálogo não tem nada para este filtro.</string>
+  <string name="explore_genre_missing_title">Nenhum catálogo de %1$s</string>
+  <string name="explore_genre_missing_body">Nenhum catálogo dos seus addons consegue listar títulos deste gênero.</string>
+  <string name="explore_genre_missing_action">Mostrar todos os títulos</string>
 
   <string name="search_field_label">Buscar filmes e séries</string>
   <string name="search_hint">Filmes e séries</string>
@@ -77,6 +85,7 @@
   <string name="details_tab_details">Detalhes</string>
   <string name="details_season">Temporada %1$d</string>
   <string name="details_specials">Especiais</string>
+  <string name="details_no_season">Episódios</string>
   <string name="details_overview">Sinopse</string>
   <string name="details_cast">Elenco</string>
   <string name="details_directors">Direção</string>
@@ -106,6 +115,8 @@
   <string name="watched_season_unmark">Marcar a temporada %1$d como não assistida</string>
   <string name="watched_specials_mark">Marcar os especiais como assistidos</string>
   <string name="watched_specials_unmark">Marcar os especiais como não assistidos</string>
+  <string name="watched_no_season_mark">Marcar os episódios sem temporada como assistidos</string>
+  <string name="watched_no_season_unmark">Marcar os episódios sem temporada como não assistidos</string>
   <string name="watched_series_mark">Marcar a série inteira como assistida</string>
   <string name="watched_series_unmark">Marcar a série inteira como não assistida</string>
   <string name="episode_watched">Assistido</string>
@@ -241,7 +252,11 @@
   <string name="sources_best">Melhor opção</string>
   <string name="sources_opens_outside">Abre fora do app</string>
   <string name="sources_empty_title">Nenhuma fonte encontrada</string>
-  <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Outro addon de fontes pode ter.</string>
+  <string name="sources_no_addons_title">Nenhum addon de fontes</string>
+  <string name="sources_no_addons_body">Nenhum dos seus addons oferece fontes para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="sources_failed_title">Não foi possível falar com seus addons</string>
+  <string name="sources_failed_body">Nenhum dos seus addons respondeu. Verifique sua conexão e tente de novo.</string>
   <string name="sources_back_to_episodes">Voltar aos episódios</string>
   <string name="sources_search">Buscar fontes</string>
   <string name="sources_search_clear">Limpar busca</string>
@@ -289,8 +304,8 @@
   </plurals>
   <string name="player_play">Reproduzir</string>
   <string name="player_pause">Pausar</string>
-  <string name="player_back10">Voltar 10 segundos</string>
-  <string name="player_forward10">Avançar 10 segundos</string>
+  <string name="player_back_seconds">Voltar %1$d segundos</string>
+  <string name="player_forward_seconds">Avançar %1$d segundos</string>
   <string name="player_timeline">Posição da reprodução</string>
   <string name="player_tracks">Áudio e legendas</string>
   <string name="player_audio">Áudio</string>
@@ -311,6 +326,49 @@
   <string name="player_key_right">→</string>
   <string name="player_key_full_screen">F</string>
   <string name="player_key_next">N</string>
+  <string name="player_key_episodes">E</string>
+  <string name="player_volume">Volume</string>
+  <string name="player_watch_credits">Ver créditos</string>
+  <string name="player_starts_in">Começa sozinho em %1$d s</string>
+  <string name="player_closes_in">Fecha sozinho em %1$d s</string>
+  <string name="player_hdr_not_now">Agora não</string>
+  <string name="player_incomplete_title">Este vídeo parece incompleto</string>
+  <string name="player_incomplete_body">Ele tem só %1$s, bem menos que o esperado: pode ser um aviso do provedor, e não o vídeo. Salvar o progresso dele mesmo assim?</string>
+  <string name="player_incomplete_discard">Não salvar</string>
+  <string name="player_incomplete_save">Salvar progresso</string>
+  <string name="player_incomplete_default_in">Não salva em %1$d s</string>
+  <string name="player_provider_downloading">O provedor está baixando este vídeo</string>
+  <string name="player_provider_downloading_body">Ele começa sozinho quando ficar pronto, o que pode levar alguns minutos.</string>
+  <string name="player_provider_gave_up">O provedor ainda não deixou este vídeo pronto, ou parou de responder. Tente outra fonte.</string>
+  <string name="player_choose_other_source">Escolher outra fonte</string>
+  <string name="settings_debug_logs">Registro de depuração</string>
+  <string name="settings_debug_logs_body">Escreve no registro do app o que ele faz ao procurar e preparar fontes, para descobrir por que uma não toca. Nunca endereços nem chaves.</string>
+  <string name="player_watching_now">Assistindo agora</string>
+  <string name="player_season_menu">Temporada</string>
+  <string name="player_close_episodes">Fechar episódios</string>
+  <string name="player_playback">Reprodução</string>
+  <string name="player_speed">Velocidade</string>
+  <string name="player_picture">Imagem</string>
+  <string name="player_picture_fit">Ajustar</string>
+  <string name="player_picture_fit_body">O vídeo inteiro, com faixas onde ele não ocupa a tela</string>
+  <string name="player_picture_fill">Preencher</string>
+  <string name="player_picture_fill_body">Sem faixas: as bordas do vídeo ficam de fora</string>
+  <string name="player_picture_stretch">Esticar</string>
+  <string name="player_picture_stretch_body">Sem faixas: o vídeo é esticado até a tela</string>
+  <string name="player_sub_sync">Sincronia da legenda</string>
+  <string name="player_sub_earlier">Mostrar a legenda 0,1 s antes</string>
+  <string name="player_sub_later">Mostrar a legenda 0,1 s depois</string>
+  <string name="player_sub_smaller">Legenda menor</string>
+  <string name="player_sub_larger">Legenda maior</string>
+  <string name="player_sub_size">Tamanho</string>
+  <string name="player_sub_position">Posição</string>
+  <string name="player_sub_up">Subir a legenda</string>
+  <string name="player_sub_down">Descer a legenda</string>
+  <string name="player_track_embedded">Embutida no arquivo</string>
+  <string name="player_track_external">Adicionada</string>
+  <string name="player_key_mute">M</string>
+  <string name="player_mute">Silenciar</string>
+  <string name="player_unmute">Ativar som</string>
   <string name="player_hdr_title">Ativar HDR?</string>
   <string name="player_hdr_body">A tela pode escurecer por um instante.</string>
   <string name="player_hdr_turn_on">Ativar</string>
@@ -343,6 +401,8 @@
   <string name="settings_refresh_body">Deixa filmes em 24 fps mais fluidos em telas de 60 Hz. A tela pode ficar preta por um segundo na troca.</string>
 
   <string name="player_preparing">Preparando a fonte</string>
+  <string name="player_resuming">Procurando a fonte que você escolheu antes</string>
+  <string name="player_waiting">Carregando o vídeo</string>
   <string name="torrent_finding_peers">Procurando pares…</string>
   <string name="torrent_checking">Verificando dados baixados…</string>
   <plurals name="torrent_peers">
@@ -378,12 +438,20 @@
   <string name="onboarding_debrid_failed">Não foi possível conectar. Confira a chave e tente de novo.</string>
   <string name="onboarding_skip">Pular</string>
   <string name="onboarding_connect">Conectar</string>
+  <string name="settings_general">Geral</string>
+  <string name="settings_language">Idioma do app</string>
+  <string name="settings_language_body">O idioma dos textos do próprio app. Títulos e sinopses vêm dos addons e continuam no idioma deles.</string>
+  <string name="settings_language_system">Padrão do sistema</string>
   <string name="settings_playback">Reprodução</string>
 
   <string name="profile_account_body">Seus addons, sua lista e seu progresso sincronizam com a sua conta do Stremio.</string>
   <string name="profile_sign_out">Sair da conta</string>
   <string name="profile_sign_out_title">Sair da conta do Stremio?</string>
   <string name="profile_sign_out_body">Seus addons, sua lista e seu progresso continuam neste aparelho, mas param de sincronizar.</string>
+  <string name="account_session_not_remembered_title">Conectado por enquanto</string>
+  <string name="account_session_not_remembered_body">O armazenamento seguro deste aparelho não conseguiu guardar sua sessão, então você vai precisar entrar de novo na próxima vez que abrir o app.</string>
+  <string name="account_session_not_cleared_title">Sessão ainda salva</string>
+  <string name="account_session_not_cleared_body">Você saiu da conta, mas o armazenamento seguro deste aparelho não conseguiu apagar a sessão salva, então o app pode entrar de novo na próxima vez que abrir.</string>
 
   <string name="player_skip_intro">Pular abertura</string>
   <string name="player_skip_recap">Pular recapitulação</string>
@@ -493,6 +561,56 @@
   <string name="settings_about_license">Software livre sob a Licença Pública Geral GNU, versão 3 ou posterior.</string>
   <string name="settings_about_source">Código-fonte</string>
   <string name="settings_about_report">Relatar um problema</string>
+  <string name="settings_update_ready">A versão %1$s está pronta</string>
+  <string name="settings_update_ready_body">Ela é instalada da próxima vez que você encerrar o StremioNow.</string>
+  <string name="settings_update_restart">Reiniciar e atualizar</string>
+
+  <string name="settings_sub_style">Estilo da legenda</string>
+  <string name="settings_sub_style_body">Vale a partir do próximo vídeo. Os botões do player continuam mudando o tamanho e a posição enquanto você assiste.</string>
+  <string name="settings_sub_preview">A legenda vai ficar assim.</string>
+  <string name="settings_sub_text_color">Cor do texto</string>
+  <string name="settings_sub_background_color">Fundo</string>
+  <string name="settings_sub_outline_color">Contorno</string>
+  <string name="settings_sub_file_styling">Usar o estilo do próprio arquivo de legenda</string>
+  <string name="settings_sub_file_styling_body">Legendas com estilo, comuns em animes, mantêm as próprias fontes, cores e posições. Desligado, as cores e a posição acima valem para elas também.</string>
+  <string name="settings_color_white">Branco</string>
+  <string name="settings_color_yellow">Amarelo</string>
+  <string name="settings_color_cyan">Ciano</string>
+  <string name="settings_color_green">Verde</string>
+  <string name="settings_color_black">Preto</string>
+  <string name="settings_color_translucent_black">Preto translúcido</string>
+  <string name="settings_color_none">Nenhum</string>
+
+  <string name="settings_esc_full_screen">Esc sai da tela cheia</string>
+  <string name="settings_esc_full_screen_body">No player, o Esc primeiro sai da tela cheia. Desligado, o Esc volta direto, como quando o player não está em tela cheia.</string>
+  <string name="settings_quit_on_close">Fechar a janela encerra o app</string>
+  <string name="settings_quit_on_close_body">Desligado, o StremioNow continua rodando na bandeja do sistema, para que outros aparelhos que ele atende continuem reproduzindo. Abra de novo ou encerre pelo ícone na bandeja.</string>
+  <string name="tray_open">Abrir o StremioNow</string>
+  <string name="tray_quit">Encerrar</string>
+
+  <string name="startup_error_title">Não foi possível iniciar o StremioNow</string>
+  <string name="startup_error_body">Uma parte do app está faltando ou danificada. Instalar o StremioNow de novo costuma resolver.</string>
+  <string name="core_unavailable_title">O StremioNow não consegue abrir os seus dados</string>
+  <string name="core_unavailable_body">Confira se esta pasta existe, se é possível gravar nela e se há espaço livre no disco, e abra o app de novo.</string>
+
+  <string name="settings_play_in">Reproduzir em</string>
+  <string name="settings_play_in_body">Outro app, como VLC, MX Player ou Just Player, pode reproduzir as fontes no lugar do StremioNow; você escolhe qual a cada vez. O StremioNow não acompanha o progresso lá, então Continuar assistindo e os episódios assistidos não são atualizados.</string>
+  <string name="settings_play_in_app">StremioNow</string>
+  <string name="settings_play_in_other_app">Outro app</string>
+  <string name="external_title">Abrindo em outro app</string>
+  <string name="external_chooser">Reproduzir com</string>
+  <string name="external_failed">Não foi possível preparar esta fonte. Tente outra.</string>
+  <string name="external_no_app">Nenhum app deste aparelho reproduz vídeos. Instale um, como o VLC, ou reproduza no StremioNow.</string>
+
+  <string name="settings_autoplay_next">Reproduzir o próximo episódio automaticamente</string>
+  <string name="settings_autoplay_next_body">O próximo episódio começa sozinho perto do fim deste. Desligado, o cartão do próximo episódio continua aparecendo, sem contagem regressiva.</string>
+  <string name="settings_up_next_countdown">Contagem para o próximo episódio</string>
+  <string name="settings_up_next_countdown_body">Quanto tempo o cartão do próximo episódio conta antes de ele começar. Desligado, o próximo episódio começa assim que este termina.</string>
+
+  <string name="settings_seek">Voltar e avançar</string>
+  <string name="settings_seek_body">Quanto os botões de voltar e avançar e as teclas de avançar e retroceder do controle remoto pulam.</string>
+  <string name="settings_seek_body_desktop">Quanto as setas do teclado e os botões de voltar e avançar pulam.</string>
+  <string name="settings_seek_short">Com Shift e as setas</string>
 
   <string name="settings_memory">Memória para o vídeo</string>
   <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>

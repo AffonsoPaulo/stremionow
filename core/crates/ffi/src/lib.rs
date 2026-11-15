@@ -20,6 +20,7 @@ mod sharing;
 mod skips;
 mod source_memory;
 mod streaming;
+mod track_memory;
 mod watched_sync;
 
 pub use crate::core::StremioCore;

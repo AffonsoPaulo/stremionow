@@ -57,6 +57,7 @@ import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.components.snLinkColor
 import io.github.affonsopaulo.stremionow.ui.components.snLinkDecoration
 import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
+import io.github.affonsopaulo.stremionow.ui.crash.KnownSecrets
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -213,7 +214,14 @@ internal class SignInFlow(
         result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
         val key = result.getOrNull()
         if (key != null) {
-            SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, key)
+            KnownSecrets.add(key)
+            // Signed in either way; a store that refuses only means signing in again next time.
+            if (!SecureStore.save(context, SecureStore.STREMIO_AUTH_KEY, key)) {
+                AccountNotices.show(AccountNotice.SessionNotRemembered)
+            }
+            // The first sync runs once the key is kept, so quitting during it stays signed in. A
+            // failed one is not a failed sign-in: the next sync retries.
+            runCatching { core.sync() }.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             AccountEvents.changed()
             onMain(mine) { onSignedIn() }
             return

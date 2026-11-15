@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -17,11 +19,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -34,6 +38,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
+import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -88,7 +93,7 @@ fun SnHeader(
                 if (onBack != null) {
                     SnIconButton(SnIcons.ChevronLeft, stringResource(Res.string.nav_back), onClick = onBack)
                 }
-                SnWordmark()
+                HomeWordmark(onClick = { onNavigate(TopDestination.Home) })
             }
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -195,6 +200,34 @@ internal fun TopDestination.label(): StringResource =
         TopDestination.Movies -> Res.string.nav_movies
         TopDestination.MyList -> Res.string.nav_my_list
     }
+
+/**
+ * The wordmark, which leads Home where a pointer drives the screen, as on most sites: the
+ * hand cursor and a slight fade on hover. On TV it stays text, since the Home pill is the
+ * next stop for the remote anyway.
+ */
+@Composable
+private fun HomeWordmark(onClick: () -> Unit) {
+    if (LocalIsTv.current) {
+        SnWordmark()
+        return
+    }
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val alpha by animateFloatAsState(if (hovered) WORDMARK_HOVER_ALPHA else 1f, label = "wordmark-hover")
+    SnWordmark(
+        Modifier
+            .snClickable(
+                RoundedCornerShape(SnRadius.radiusSm),
+                onClickLabel = stringResource(Res.string.nav_home),
+                highlight = false,
+                interactionSource = interaction,
+                onClick = onClick,
+            ).graphicsLayer { this.alpha = alpha },
+    )
+}
+
+private const val WORDMARK_HOVER_ALPHA = 0.8f
 
 /**
  * Top bar of the phone layout, where the tab bar holds the main destinations. It carries the

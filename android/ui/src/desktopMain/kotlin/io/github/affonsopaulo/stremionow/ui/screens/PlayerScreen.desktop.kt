@@ -16,12 +16,16 @@ import io.github.affonsopaulo.stremionow.player.MpvPlayer
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.DesktopWindowSettings
 import io.github.affonsopaulo.stremionow.ui.desktop.DisplayChoices
 import io.github.affonsopaulo.stremionow.ui.desktop.LocalDesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.MediaKeys
 import io.github.affonsopaulo.stremionow.ui.desktop.OverlayState
 import io.github.affonsopaulo.stremionow.ui.desktop.PlayerOverlay
 import io.github.affonsopaulo.stremionow.ui.desktop.ProvideDesktopInput
+import io.github.affonsopaulo.stremionow.ui.desktop.SessionPicture
+import io.github.affonsopaulo.stremionow.ui.desktop.SessionSubtitles
+import io.github.affonsopaulo.stremionow.ui.desktop.SessionVolume
 import io.github.affonsopaulo.stremionow.ui.desktop.VideoWindow
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowPair
 import io.github.affonsopaulo.stremionow.ui.desktop.WindowedPlayer
@@ -29,9 +33,14 @@ import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import io.github.affonsopaulo.stremionow.ui.desktop.handleMediaCommand
 import io.github.affonsopaulo.stremionow.ui.desktop.handlePlayerShortcut
 import io.github.affonsopaulo.stremionow.ui.desktop.playerBack
+import io.github.affonsopaulo.stremionow.ui.l10n.Res
+import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import kotlinx.coroutines.launch
 import java.awt.Dialog
+import java.awt.EventQueue
+import java.awt.Frame
+import java.awt.Rectangle
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import javax.swing.WindowConstants
@@ -46,7 +55,7 @@ import javax.swing.WindowConstants
 actual fun PlayerScreen(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
-    onOpenEpisode: (Episode) -> Unit,
+    onOpenEpisode: (episode: Episode, bingeGroup: String?) -> Unit,
 ) {
     // What this player opened with. Moving on to the next episode clears the session's source
     // before the player has finished leaving; read live, that made the leaving player press
@@ -59,13 +68,15 @@ actual fun PlayerScreen(
     }
     val host = LocalDesktopHost.current
     val context = LocalPlatformContext.current
+    val windowTitle = windowTitle(selection)
     val viewModel =
         viewModel(key = "player-${selection.videoId}-${source.url.hashCode()}") {
             PlayerViewModel(AppGraph.core(context), selection, source) { options ->
                 WindowedPlayer.open(
-                    title = "${selection.details.item.name} – StremioNow",
-                    bounds = host.playerBounds(),
+                    title = windowTitle,
+                    bounds = host.playerBounds(framed = VideoWindow.FRAMED),
                     icons = host.icons,
+                    maximized = host.isMaximized,
                 ) { canvas ->
                     MpvPlayer.create(
                         canvas = canvas,
@@ -77,6 +88,12 @@ actual fun PlayerScreen(
             }
         }
     val player = viewModel.player
+    // The next video starts at the volume, subtitle size and position of the previous one.
+    LaunchedEffect(player) {
+        SessionVolume.applyTo(player)
+        SessionSubtitles.applyTo(player, viewModel.subtitleStyle)
+        SessionPicture.applyTo(player)
+    }
     // HDR and refresh rate changes for this player, put back when it goes (Windows only).
     val display = remember(player) { DesktopDisplays.session(AppGraph.core(context), selection.details.item.id) }
     // One instance per player: the overlay restarts its display check when this changes.
@@ -86,14 +103,35 @@ actual fun PlayerScreen(
         }
     val state = remember { OverlayState() }
     val leave = remember(player) { Leave() }
-    val overlay = remember(player) { createOverlay(player.video, onCloseRequest = leave::back) }
+    // The window's close button, Alt+F4 and the taskbar's "Close window" close the app, as in
+    // the app's own window; Back and Esc are the way back to it. When closing keeps the app
+    // running, the player leaves first and the app's window closes once it is gone.
+    val overlay =
+        remember(player) {
+            createOverlay(player.video) {
+                if (DesktopWindowSettings.quitsOnClose()) {
+                    host.closeApp()
+                } else {
+                    player.pause()
+                    host.closeAfterPlayer = true
+                    leave.back()
+                }
+            }
+        }
     val pair = remember(player) { WindowPair(player.video.frame, overlay) }
     SideEffect {
         leave.onBack = onBack
         leave.restore = {
+            // Nothing more starts in a player on its way out, an episode lookup included.
+            viewModel.leave()
             player.mpv?.setColorspaceHint(false)
             display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
-            host.comeBack(if (pair.isFullScreen) null else player.video.frame.bounds)
+            val frame = player.video.frame
+            host.comeBack(
+                playerBounds = if (pair.isFullScreen) null else frame.bounds,
+                framed = player.video.isFramed,
+                maximized = frame.extendedState and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH,
+            )
             player.video.hide()
         }
     }
@@ -103,11 +141,33 @@ actual fun PlayerScreen(
         onDispose {
             display?.let { AppGraph.scope.launch(DesktopDisplays.dispatcher) { it.restore() } }
             player.video.hide()
+            if (host.closeAfterPlayer) {
+                host.closeAfterPlayer = false
+                // After this composition is applied, not in the middle of it.
+                EventQueue.invokeLater(host::closeApp)
+            }
         }
     }
 
-    val next = viewModel.selection.nextEpisode
-    val playNext: (() -> Unit)? = next?.let { episode -> { leave.to { onOpenEpisode(episode) } } }
+    // Another episode plays in this player, in place of this one; only when its source cannot
+    // be found does the title's page show its sources.
+    val openEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
+    // The next episode (its button, Up Next, N, the media keys): the one left counts as watched.
+    val playNextEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode, asNext = true) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
+    val playing = viewModel.selection
+    val playingTitle = windowTitle(playing)
+    LaunchedEffect(playingTitle) {
+        player.video.frame.title = playingTitle
+        overlay.title = playingTitle
+    }
+    // A panel open on the episode left (the episodes strip) closes with it.
+    LaunchedEffect(playing.videoId) { state.panel = null }
+    val next = playing.nextEpisode
+    val playNext: (() -> Unit)? = next?.let { episode -> { playNextEpisode(episode) } }
     val currentPlayNext by rememberUpdatedState(playNext)
     val input = remember { DesktopInput() }
     SwingDialog(
@@ -115,7 +175,19 @@ actual fun PlayerScreen(
         dispose = ComposeDialog::dispose,
         onPreviewKeyEvent = { event ->
             input.onPreviewKeyEvent(event)
-            handlePlayerShortcut(event, player, pair, state, onBack = leave::back, onNext = currentPlayNext)
+            handlePlayerShortcut(
+                event,
+                player,
+                pair,
+                state,
+                onBack = leave::back,
+                onNext = currentPlayNext,
+                hasEpisodes =
+                    viewModel.selection.details.episodes
+                        .isNotEmpty(),
+                seek = viewModel.seekSteps,
+                escLeavesFullScreen = viewModel.escLeavesFullScreen,
+            )
         },
     ) {
         DisposableEffect(pair) {
@@ -139,7 +211,8 @@ actual fun PlayerScreen(
                 display = displayChoices,
                 onBack = leave::back,
                 onChangeSource = { leave.to(onChangeSource) },
-                onOpenEpisode = { episode -> leave.to { onOpenEpisode(episode) } },
+                onOpenEpisode = openEpisode,
+                onPlayNext = playNextEpisode,
             )
         }
     }
@@ -177,10 +250,20 @@ private fun createOverlay(
         title = video.frame.title
         isUndecorated = true
         isTransparent = true
-        // Compose's own edge resizer would resize the overlay alone and has no minimum size; the
-        // overlay draws its own handles, which resize both windows in one step (WindowPair).
+        // Compose's own edge resizer would resize the overlay alone and has no minimum size. A
+        // framed video window is resized through its frame; otherwise the overlay draws its own
+        // handles, which resize both windows in one step (WindowPair).
         isResizable = false
-        bounds = video.frame.bounds
+        // Over the area inside a framed window's title bar and borders, or the whole window.
+        val outer = video.frame.bounds
+        val frame = video.frame.insets
+        bounds =
+            Rectangle(
+                outer.x + frame.left,
+                outer.y + frame.top,
+                outer.width - frame.left - frame.right,
+                outer.height - frame.top - frame.bottom,
+            )
         defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
         // Alt+F4 on the overlay, or "Close window" on the taskbar entry of the video window.
         val closeListener =
@@ -190,3 +273,15 @@ private fun createOverlay(
         addWindowListener(closeListener)
         video.frame.addWindowListener(closeListener)
     }
+
+/** The player windows' title: the title's name, the episode ("T1 E2") and the app's name. */
+@Composable
+private fun windowTitle(selection: PlaybackSession.Selection): String {
+    val episodeLabel =
+        selection.episode?.let { episode ->
+            val season = episode.season?.toInt()
+            val number = episode.episode?.toInt()
+            if (season != null && number != null) stringResource(Res.string.episode_short, season, number) else null
+        }
+    return listOfNotNull(selection.details.item.name, episodeLabel).joinToString(" · ") + " – StremioNow"
+}

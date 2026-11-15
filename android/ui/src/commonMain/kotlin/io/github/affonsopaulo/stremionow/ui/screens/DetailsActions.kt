@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.ColorFilter
@@ -67,6 +68,8 @@ internal class DetailActions(
     val rating: TitleRating,
     val onRate: (TitleRating) -> Unit,
     val onShare: (() -> Unit)?,
+    /** False when there is nothing to mark, as on a series with no episode out yet: the tile is dimmed. */
+    val canMarkWatched: Boolean = true,
 )
 
 /** The tiles of the action row. */
@@ -162,6 +165,7 @@ internal fun ActionRow(
                         label = stringResource(Res.string.action_watched),
                         description = stringResource(description),
                         active = actions.watched,
+                        enabled = actions.canMarkWatched,
                         onClick = actions.onWatched,
                     )
                 }
@@ -209,6 +213,7 @@ private fun ActionTile(
     onClick: () -> Unit,
     description: String = label,
     active: Boolean = false,
+    enabled: Boolean = true,
 ) {
     Column(
         modifier =
@@ -217,7 +222,14 @@ private fun ActionTile(
                 .semantics {
                     contentDescription = description
                     selected = active
-                }.snClickable(RoundedCornerShape(SnRadius.radiusMd), role = Role.Button, onClick = onClick),
+                }.snClickable(
+                    RoundedCornerShape(SnRadius.radiusMd),
+                    role = Role.Button,
+                    enabled = enabled,
+                    onClick = onClick,
+                )
+                // A tile with nothing to do is dimmed, as a disabled button is.
+                .alpha(if (enabled) 1f else 0.45f),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space1, Alignment.CenterVertically),
     ) {

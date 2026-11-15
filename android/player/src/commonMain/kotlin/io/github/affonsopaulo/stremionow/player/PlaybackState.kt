@@ -11,6 +11,26 @@ data class PlaybackState(
     val isPaused: Boolean = false,
     /** Playback is waiting for data. */
     val isBuffering: Boolean = false,
+    /**
+     * How far the wait in [isBuffering] has got, from 0 to 1 (how much of the data mpv waits
+     * for has arrived), or null where the player does not report it.
+     */
+    val bufferingProgress: Float? = null,
+    /** A seek is in progress: until it completes, no new frame shows. */
+    val isSeeking: Boolean = false,
+    /** Volume, from 0 to 100. */
+    val volume: Int = 100,
+    val isMuted: Boolean = false,
+    /** How much later subtitles show, in seconds; negative shows them earlier. */
+    val subtitleDelaySeconds: Double = 0.0,
+    /** Subtitle size, 1 being normal. */
+    val subtitleScale: Double = 1.0,
+    /** Subtitles' vertical place, from the top, in percent of the picture; 100 is the bottom. */
+    val subtitlePosition: Int = 100,
+    /** Playback rate, 1 being normal. */
+    val speed: Double = 1.0,
+    /** How the picture fills the screen. */
+    val videoScale: VideoScale = VideoScale.Fit,
     /** Seconds already downloaded ahead of the current position. */
     val bufferedAheadSeconds: Double = 0.0,
     val isEnded: Boolean = false,
@@ -73,3 +93,15 @@ enum class PlayerError {
     /** The player itself could not start, for example because libmpv is missing (desktop). */
     PlayerUnavailable,
 }
+
+/** A fresh state for the next video, keeping what the viewer set for the player itself. */
+fun PlaybackState.forNextVideo(): PlaybackState =
+    PlaybackState(
+        volume = volume,
+        isMuted = isMuted,
+        subtitleDelaySeconds = subtitleDelaySeconds,
+        subtitleScale = subtitleScale,
+        subtitlePosition = subtitlePosition,
+        speed = speed,
+        videoScale = videoScale,
+    )

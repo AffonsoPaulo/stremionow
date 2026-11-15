@@ -9,11 +9,17 @@ use serde::de::DeserializeOwned;
 use stremionow_protocol::{
     AddonUrl, CatalogDescriptor, CatalogResponse, Extra, Manifest, MetaDetail, MetaPreview,
     MetaResponse, Stream, StreamResponse, Subtitle, SubtitlesResponse, TransportError,
+    has_public_host,
 };
 
 /// Largest response accepted from an addon. Real catalogs are well under 1 MiB; the limit
 /// protects devices with little memory from broken or hostile addons.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+/// Redirects followed per request.
+const MAX_REDIRECTS: usize = 5;
+/// Longest parser message kept in an error. The message can quote what the addon sent, which
+/// is untrusted and has no length limit, and it ends up in the app's errors and logs.
+const MAX_REASON_CHARS: usize = 200;
 
 /// An addon the user installed, with its parsed manifest.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +51,12 @@ impl AddonError {
             Self::Timeout
         } else if let Some(status) = error.status() {
             Self::Status(status.as_u16())
+        } else if error.is_redirect() {
+            // The reason is one of the redirect policy's fixed texts, without the address.
+            let reason = std::error::Error::source(&error)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            Self::Network(format!("redirect not followed: {reason}"))
         } else {
             // Drop the URL: configured addons (debrid ones especially) keep the user's API key
             // in the path, and this message ends up in errors shown to the app and its logs.
@@ -83,7 +95,23 @@ impl AddonClient {
             .user_agent(concat!("StremioNow/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(timeout)
             .timeout(timeout)
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let previous = attempt.previous();
+                let refusal = if previous.len() > MAX_REDIRECTS {
+                    Some("too many redirects")
+                } else {
+                    match (previous.first(), previous.last()) {
+                        (Some(first), Some(last)) => {
+                            redirect_refusal(first.as_str(), last.as_str(), attempt.url().as_str())
+                        }
+                        _ => None,
+                    }
+                };
+                match refusal {
+                    Some(reason) => attempt.error(reason),
+                    None => attempt.follow(),
+                }
+            }))
             // Configured addons keep keys in their URLs; don't pass them on in Referer.
             .referer(false)
             .https_only(false)
@@ -101,6 +129,11 @@ impl AddonClient {
     pub async fn install(&self, url: &str) -> Result<InstalledAddon, AddonError> {
         let url = AddonUrl::parse(url)?;
         let manifest: Manifest = self.get_json(url.manifest_url()).await?;
+        // The id tells installed addons apart; one without it cannot be told from another
+        // (Discover leaves such addons out too).
+        if manifest.id.trim().is_empty() {
+            return Err(AddonError::InvalidResponse("the manifest has no id".into()));
+        }
         Ok(InstalledAddon { url, manifest })
     }
 
@@ -168,6 +201,34 @@ impl AddonClient {
         Ok(response.subtitles)
     }
 
+    /// The size of the file `url` leads to, following redirects and asking for its first
+    /// byte only, so nothing is downloaded. None when the server does not tell.
+    pub async fn file_size(&self, url: &str) -> Result<Option<u64>, AddonError> {
+        let response = self
+            .http
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(AddonError::from_reqwest)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AddonError::Status(status.as_u16()));
+        }
+        // "bytes 0-0/734003200": the whole size after the slash. A server that ignores ranges
+        // answers with the whole file, and its length; the body is dropped unread.
+        let total = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit('/').next())
+            .and_then(|total| total.trim().parse::<u64>().ok());
+        let whole = (status != reqwest::StatusCode::PARTIAL_CONTENT)
+            .then(|| response.content_length())
+            .flatten();
+        Ok(total.or(whole))
+    }
+
     /// Fetches `url` and returns the raw body, refusing bodies above the size limit.
     pub async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, AddonError> {
         let response = self
@@ -200,8 +261,40 @@ impl AddonClient {
     }
 
     async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, AddonError> {
-        let body = self.get_bytes(url).await?;
-        serde_json::from_slice(&body).map_err(|e| AddonError::InvalidResponse(e.to_string()))
+        parse_json(&self.get_bytes(url).await?)
+    }
+}
+
+/// Parses an addon's JSON response, ignoring a leading byte order mark (some addons served
+/// from Windows hosts send one). A parse error keeps only the start of the parser's message.
+pub fn parse_json<T: DeserializeOwned>(body: &[u8]) -> Result<T, AddonError> {
+    serde_json::from_slice(without_bom(body)).map_err(|e| {
+        let mut reason = e.to_string();
+        if let Some((cut, _)) = reason.char_indices().nth(MAX_REASON_CHARS) {
+            reason.truncate(cut);
+            reason.push('…');
+        }
+        AddonError::InvalidResponse(reason)
+    })
+}
+
+/// `body` without a leading UTF-8 byte order mark.
+pub fn without_bom(body: &[u8]) -> &[u8] {
+    body.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(body)
+}
+
+/// Why a redirect from `previous` to `next`, in a chain that started at `first`, is not
+/// followed, if it is not. HTTPS never leads to plain HTTP, which would send the addon's
+/// URL, and the key it often holds, in the clear; and an address on the internet never
+/// leads into the user's network (a router's page, a NAS), though an addon the user runs
+/// on their own network may redirect within it.
+fn redirect_refusal(first: &str, previous: &str, next: &str) -> Option<&'static str> {
+    if previous.starts_with("https:") && !next.starts_with("https:") {
+        Some("an HTTPS address redirected to plain HTTP")
+    } else if has_public_host(first) && !has_public_host(next) {
+        Some("a public address redirected into a private network")
+    } else {
+        None
     }
 }
 
@@ -317,6 +410,111 @@ mod tests {
             .install(&format!("{}/manifest.json", server.uri()))
             .await;
         assert!(matches!(result, Err(AddonError::TooLarge)), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn reads_manifests_with_a_byte_order_mark_and_refuses_ones_without_id() {
+        let server = MockServer::start().await;
+        let mut body = b"\xEF\xBB\xBF".to_vec();
+        body.extend_from_slice(manifest_json().to_string().as_bytes());
+        Mock::given(method("GET"))
+            .and(path("/bom/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/anonymous/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": " ", "version": "1.0.0", "name": "Nobody"
+            })))
+            .mount(&server)
+            .await;
+        let client = client();
+        let addon = client
+            .install(&format!("{}/bom/manifest.json", server.uri()))
+            .await
+            .expect("installs");
+        assert_eq!(addon.manifest.id, "test.addon");
+        let result = client
+            .install(&format!("{}/anonymous/manifest.json", server.uri()))
+            .await;
+        assert!(
+            matches!(result, Err(AddonError::InvalidResponse(_))),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_parse_errors_short() {
+        let hostile = format!(r#"{{"meta": "{}"}}"#, "x".repeat(10_000));
+        let Err(AddonError::InvalidResponse(reason)) =
+            parse_json::<MetaResponse>(hostile.as_bytes())
+        else {
+            panic!("not a meta response");
+        };
+        assert!(reason.chars().count() <= MAX_REASON_CHARS + 1, "{reason}");
+        assert!(reason.ends_with('…'));
+    }
+
+    #[test]
+    fn refuses_downgrades_and_redirects_into_private_networks() {
+        let refused = |first: &str, previous: &str, next: &str| {
+            redirect_refusal(first, previous, next).is_some()
+        };
+        let public = "https://addon.example/manifest.json";
+        assert!(!refused(
+            public,
+            public,
+            "https://cdn.example/manifest.json"
+        ));
+        assert!(refused(public, public, "http://cdn.example/manifest.json"));
+        assert!(refused(public, public, "https://192.168.1.1/manifest.json"));
+        assert!(refused(public, public, "https://localhost/manifest.json"));
+        assert!(
+            refused(public, "https://cdn.example/x", "https://10.0.0.1/x"),
+            "later hops are held to where the chain started"
+        );
+        // Addons the user runs on their own network keep working.
+        let lan = "http://192.168.1.20:7000/manifest.json";
+        assert!(!refused(
+            lan,
+            lan,
+            "http://192.168.1.20:7000/v2/manifest.json"
+        ));
+        assert!(!refused(lan, lan, "https://addon.example/manifest.json"));
+        let lan_https = "https://nas.local/manifest.json";
+        assert!(refused(
+            lan_https,
+            lan_https,
+            "http://nas.local/manifest.json"
+        ));
+        // Plain HTTP may move to HTTPS.
+        let plain = "http://addon.example/manifest.json";
+        assert!(!refused(
+            plain,
+            plain,
+            "https://addon.example/manifest.json"
+        ));
+    }
+
+    #[tokio::test]
+    async fn follows_redirects_of_addons_on_the_local_network() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "/v2/manifest.json"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v2/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(manifest_json()))
+            .mount(&server)
+            .await;
+        let addon = client()
+            .install(&format!("{}/manifest.json", server.uri()))
+            .await
+            .expect("follows the redirect");
+        assert_eq!(addon.manifest.name, "Test");
     }
 
     #[tokio::test]

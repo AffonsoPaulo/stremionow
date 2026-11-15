@@ -190,6 +190,12 @@ impl StremioApi {
         let (status, bytes) = self.get("link read", url).await?;
         match parse_envelope::<LinkAuthKey>("linkRead", &bytes, status) {
             Ok(key) if !key.auth_key.is_empty() => Ok(Some(key.auth_key)),
+            // The service's codes are not documented; a code it calls expired, or a page that
+            // is gone, will never be confirmed, so waiting on stops.
+            Err(SyncError::Server { message, .. }) if mentions_expiry(&message) => {
+                Err(SyncError::LinkCodeExpired)
+            }
+            Err(SyncError::Status(410)) => Err(SyncError::LinkCodeExpired),
             Ok(_) | Err(SyncError::Server { .. } | SyncError::SessionExpired) => Ok(None),
             Err(error) => Err(error),
         }
@@ -282,9 +288,10 @@ impl StremioApi {
 
     /// Every library item of the account, removed and temporary ones included.
     ///
-    /// Items that cannot be read (missing `_id`, `type` or `_mtime`) are skipped with a
-    /// warning, as stremio-core does, instead of failing the whole library.
-    pub async fn library(&self, auth_key: &str) -> Result<Vec<RemoteLibraryItem>, SyncError> {
+    /// Items that cannot be read (missing `type` or `_mtime`) do not fail the whole library,
+    /// as in stremio-core; they come back as raw JSON in [`AccountLibrary::unreadable`], so an
+    /// upload for the same title can keep their fields.
+    pub async fn library(&self, auth_key: &str) -> Result<AccountLibrary, SyncError> {
         let body = json!({
             "authKey": auth_key,
             "collection": LIBRARY_COLLECTION,
@@ -292,7 +299,11 @@ impl StremioApi {
             "all": true,
         });
         let items: Vec<Value> = self.call("datastoreGet", &body).await?;
-        Ok(items.into_iter().filter_map(parse_library_item).collect())
+        let mut library = AccountLibrary::default();
+        for item in items {
+            parse_library_item(item, &mut library);
+        }
+        Ok(library)
     }
 
     /// Creates or replaces `items` in the account library. To remove an item, upload it with
@@ -455,8 +466,18 @@ fn parse_envelope<T: DeserializeOwned>(
     }
 }
 
+/// Whether a link-code error message says the code expired.
+fn mentions_expiry(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("expire")
+}
+
+/// Methods that sign in: an error there that is not about the credentials is still a refused
+/// sign-in, not a network problem.
+const SIGN_IN_METHODS: &[&str] = &["login", "authWithApple"];
+
 fn map_api_error(method: &str, error: ApiError) -> SyncError {
-    let bad_login = method == "login"
+    let signing_in = SIGN_IN_METHODS.contains(&method);
+    let bad_login = signing_in
         && (matches!(error.code, CODE_USER_NOT_FOUND | CODE_WRONG_PASSWORD)
             || error.wrong_email
             || error.wrong_pass);
@@ -464,6 +485,8 @@ fn map_api_error(method: &str, error: ApiError) -> SyncError {
         SyncError::InvalidCredentials
     } else if error.code == CODE_SESSION_INVALID {
         SyncError::SessionExpired
+    } else if signing_in {
+        SyncError::SignInRefused { code: error.code }
     } else {
         SyncError::Server {
             code: error.code,
@@ -472,16 +495,30 @@ fn map_api_error(method: &str, error: ApiError) -> SyncError {
     }
 }
 
-fn parse_library_item(value: Value) -> Option<RemoteLibraryItem> {
+/// The account's library as [`StremioApi::library`] reads it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AccountLibrary {
+    pub items: Vec<RemoteLibraryItem>,
+    /// Items that could not be read (no `type` or `_mtime`, for example), as the server sent
+    /// them, by id. An upload for one of these ids should keep their fields
+    /// ([`RemoteLibraryItem::keep_fields_of`]) rather than replace them.
+    pub unreadable: std::collections::HashMap<String, Value>,
+}
+
+/// Reads one library item; one that cannot be read goes to `unreadable` (when it has an id).
+fn parse_library_item(value: Value, library: &mut AccountLibrary) {
     match RemoteLibraryItem::deserialize(&value) {
-        Ok(item) => Some(item),
+        Ok(item) => library.items.push(item),
         Err(error) => {
-            let id = value.get("_id").and_then(Value::as_str).unwrap_or("?");
+            let Some(id) = value.get("_id").and_then(Value::as_str).map(str::to_owned) else {
+                log::warn!("skipping a library item without an id");
+                return;
+            };
             log::warn!(
-                "skipping unreadable library item {id}: {}",
+                "kept an unreadable library item {id} as it is: {}",
                 SyncError::from_json(&error)
             );
-            None
+            library.unreadable.insert(id, value);
         }
     }
 }

@@ -4,6 +4,7 @@ package io.github.affonsopaulo.stremionow.ui.desktop.display
 import io.github.affonsopaulo.stremionow.core.DisplaySwitch
 import io.github.affonsopaulo.stremionow.core.StremioCore
 import io.github.affonsopaulo.stremionow.ui.data.DesktopPaths
+import io.github.affonsopaulo.stremionow.ui.data.SettingsWriter
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import java.io.File
@@ -62,6 +63,6 @@ private class CoreDisplayPreferences(
     }
 
     override fun alwaysHdr() {
-        runCatching { core.updateSettings(core.settings().copy(hdr = DisplaySwitch.ALWAYS)) }
+        SettingsWriter.post(core) { it.copy(hdr = DisplaySwitch.ALWAYS) }
     }
 }

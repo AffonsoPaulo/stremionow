@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.data
 
 import io.github.affonsopaulo.stremionow.core.Episode
+import io.github.affonsopaulo.stremionow.core.LastSource
 import io.github.affonsopaulo.stremionow.core.MetaDetails
 import io.github.affonsopaulo.stremionow.core.StreamSource
 
@@ -49,15 +50,58 @@ object PlaybackSession {
     @Volatile var continueWith: String? = null
 
     /**
+     * The next episode's source, found by the player while the episode before it plays, so
+     * moving on goes straight to the player, as in Stremio; see [NextUp].
+     */
+    @Volatile var nextUp: NextUp? = null
+
+    /** A source of [episodeId] of the same binge group as the one playing, from the same addon. */
+    data class NextUp(
+        val episodeId: String,
+        val source: StreamSource,
+    )
+
+    /**
      * Set by the player when it hands back to the details page to choose a source: "Change
      * source", or Up Next without a source of the same group. The page opens the sources of
      * [selection]'s video in place of its episodes, then clears it.
      */
     @Volatile var showSources: Boolean = false
 
+    /**
+     * "Resume" or a Continue watching card, going straight to the player with the source chosen
+     * before: the player's route shows its loading screen while it asks [last]'s addon for
+     * [videoId]'s sources again, then plays the one found or shows the video's sources (see
+     * ResumePlayback.kt). [details] is the title's, when the page asking already has it.
+     */
+    data class Resume(
+        val kind: String,
+        val titleId: String,
+        val name: String,
+        val videoId: String,
+        val last: LastSource,
+        val details: MetaDetails?,
+    )
+
+    /** The resume the player's route has to resolve before playing; see [Resume]. */
+    @Volatile var resume: Resume? = null
+
     fun select(selection: Selection) {
         this.selection = selection
         source = null
+        nextUp = null
+        resume = null
+    }
+
+    /** Starts [request]: the player's route looks its source up before playing. */
+    fun resume(request: Resume) {
+        selection = null
+        source = null
+        alternatives = emptyList()
+        nextUp = null
+        continueWith = null
+        showSources = false
+        resume = request
     }
 
     /** Asks the details page of [selection]'s title to show its sources; see [showSources]. */

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Plain data types shared with the app interfaces.
 
+use std::collections::HashSet;
+
 use stremionow_addons::{AddonError, InstalledAddon, manifest_fingerprint};
 use stremionow_library::StoreError;
 
@@ -115,16 +117,29 @@ pub struct MetaDetails {
 
 impl From<MetaDetail> for MetaDetails {
     fn from(detail: MetaDetail) -> Self {
-        let mut episodes: Vec<Episode> = detail.videos.into_iter().map(Episode::from).collect();
+        // The interface keys episode lists by id, so a repeated or missing id would crash it.
+        // Addons do send both; a video without an id cannot be asked for streams anyway.
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut episodes: Vec<Episode> = detail
+            .videos
+            .into_iter()
+            .filter(|video| !video.id.trim().is_empty() && seen.insert(video.id.clone()))
+            .map(Episode::from)
+            .collect();
+        // A stable sort, so episodes without numbers keep the addon's order.
         episodes.sort_by_key(|e| (e.season.unwrap_or(u32::MAX), e.episode.unwrap_or(u32::MAX)));
         let mut trailer_youtube_ids: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         let ids = detail
             .trailer_streams
             .into_iter()
             .filter_map(|t| t.yt_id)
             .chain(detail.trailers.into_iter().filter_map(|t| t.source));
         for id in ids {
-            if is_youtube_id(&id) && !trailer_youtube_ids.contains(&id) {
+            if trailer_youtube_ids.len() >= MAX_TRAILERS {
+                break;
+            }
+            if is_youtube_id(&id) && seen.insert(id.clone()) {
                 trailer_youtube_ids.push(id);
             }
         }
@@ -140,6 +155,10 @@ impl From<MetaDetail> for MetaDetails {
         }
     }
 }
+
+/// Most trailers kept for a title; a details page shows a handful, and an addon could send
+/// any number.
+const MAX_TRAILERS: usize = 50;
 
 /// Hosts of Stremio's public share pages.
 const SHARE_HOSTS: &[&str] = &["www.strem.io", "strem.io", "web.stremio.com"];
@@ -338,6 +357,8 @@ pub struct CatalogRow {
 pub struct AddonInfo {
     pub manifest_url: String,
     pub id: String,
+    /// Tells this install apart from others of the same addon (`StreamSource::addon_key`).
+    pub key: String,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -396,6 +417,7 @@ impl AddonInfo {
         Self {
             manifest_url: addon.url.manifest_url().to_owned(),
             id: manifest.id.clone(),
+            key: crate::playback::addon_key(addon.url.manifest_url()),
             name: if name.is_empty() {
                 truncate(&manifest.id, MAX_NAME_CHARS)
             } else {
@@ -614,6 +636,43 @@ mod tests {
         let order: Vec<_> = details.episodes.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(order, ["d", "a", "b", "c"]);
         assert_eq!(details.trailer_youtube_ids, ["abc"]);
+    }
+
+    #[test]
+    fn drops_episodes_without_an_id_and_repeats() {
+        let detail: MetaDetail = serde_json::from_value(serde_json::json!({
+            "id": "tt1", "type": "series", "name": "S",
+            "videos": [
+                {"id": "tt1:1:2", "title": "Second", "season": 1, "episode": 2},
+                {"id": "tt1:1:1", "title": "First", "season": 1, "episode": 1},
+                {"id": "tt1:1:1", "title": "First again", "season": 1, "episode": 1},
+                {"title": "No id", "season": 1, "episode": 3},
+                {"id": null, "title": "Null id", "season": 1, "episode": 4},
+                {"id": "  ", "title": "Blank id", "season": 1, "episode": 5}
+            ]
+        }))
+        .expect("valid");
+        let episodes = MetaDetails::from(detail).episodes;
+        let shown: Vec<_> = episodes
+            .iter()
+            .map(|e| (e.id.as_str(), e.title.as_str()))
+            .collect();
+        assert_eq!(shown, [("tt1:1:1", "First"), ("tt1:1:2", "Second")]);
+    }
+
+    #[test]
+    fn keeps_a_bounded_number_of_trailers() {
+        let many: Vec<_> = (0..10_000)
+            .map(|i| serde_json::json!({"source": format!("id{}", i % 500)}))
+            .collect();
+        let detail: MetaDetail = serde_json::from_value(serde_json::json!({
+            "id": "tt1", "type": "movie", "name": "M", "trailers": many
+        }))
+        .expect("valid");
+        let ids = MetaDetails::from(detail).trailer_youtube_ids;
+        assert_eq!(ids.len(), MAX_TRAILERS);
+        assert_eq!(ids[0], "id0");
+        assert_eq!(ids.iter().collect::<HashSet<_>>().len(), MAX_TRAILERS);
     }
 
     #[test]

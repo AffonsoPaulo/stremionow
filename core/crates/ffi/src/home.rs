@@ -19,7 +19,7 @@ use stremionow_curation::{
     self as curation, Candidate, EpisodeInfo, FoundBy, Title, Watched, dedupe_in_order,
 };
 use stremionow_library::{LibraryEntry, ProgressEntry, WatchedTitle};
-use stremionow_protocol::{CatalogDescriptor, Extra, MetaDetail, MetaResponse};
+use stremionow_protocol::{CatalogDescriptor, Extra, MetaDetail};
 
 use crate::core::{CATALOG_FRESHNESS, META_FRESHNESS, StremioCore, dedupe, now_millis};
 use crate::records::{CatalogInfo, CatalogRole, CoreError, Episode, MetaItem};
@@ -214,7 +214,7 @@ impl StremioCore {
 
 /// Where data may come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Fetch {
+pub(crate) enum Fetch {
     /// The response cache only, however old; nothing is requested.
     CacheOnly,
     /// The cache while fresh, else the addon (falling back to the stale cache offline).
@@ -386,6 +386,14 @@ struct WorkedOut {
     recommendations: Vec<HomeSection>,
     /// Why catalogs failed, when one did.
     catalog_error: Option<CoreError>,
+}
+
+/// A meta response in which `{"meta": null}`, or no meta at all, means the addon does not have
+/// the title, so the next addon can be asked.
+#[derive(Deserialize)]
+struct MaybeMeta {
+    #[serde(default)]
+    meta: Option<MetaDetail>,
 }
 
 /// A catalog response read with each title's people and episodes, which Cinemeta includes.
@@ -664,20 +672,46 @@ impl StremioCore {
         id: &str,
         fetch: Fetch,
     ) -> Option<MetaDetail> {
-        let url = meta_url(addons, kind, id)?;
-        self.cached_or_fetched::<MetaResponse>(&url, META_FRESHNESS, fetch)
+        self.first_meta(addons, kind, id, fetch)
             .await
             .ok()
             .flatten()
-            .map(|response| response.meta)
+    }
+
+    /// A title's details from the first of `addons` that has them, in addon order. An addon
+    /// that claims every id (`meta` without `idPrefixes`) may still not know this one, or fail,
+    /// so one that answers with an error, a 404 or `{"meta": null}` is passed over for the next.
+    /// None when no addon has the title (or, from the cache alone, none has it cached); the
+    /// first error when one failed and no other had it.
+    pub(crate) async fn first_meta(
+        &self,
+        addons: &[InstalledAddon],
+        kind: &str,
+        id: &str,
+        fetch: Fetch,
+    ) -> Result<Option<MetaDetail>, CoreError> {
+        let mut first_error = None;
+        for url in meta_urls(addons, kind, id) {
+            match self
+                .cached_or_fetched::<MaybeMeta>(&url, META_FRESHNESS, fetch)
+                .await
+            {
+                Ok(Some(MaybeMeta { meta: Some(meta) })) => return Ok(Some(meta)),
+                Ok(_) => {}
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(None), Err)
     }
 
     fn cached_meta(&self, addons: &[InstalledAddon], kind: &str, id: &str) -> Option<MetaDetail> {
-        let url = meta_url(addons, kind, id)?;
-        let (body, _) = self.store().ok()?.cached(&url).ok()??;
-        serde_json::from_slice::<MetaResponse>(&body)
-            .ok()
-            .map(|response| response.meta)
+        let store = self.store().ok()?;
+        meta_urls(addons, kind, id).find_map(|url| {
+            let (body, _) = store.cached(&url).ok()??;
+            serde_json::from_slice::<MaybeMeta>(&body).ok()?.meta
+        })
     }
 
     /// `url` from the response cache alone, or through it from the network.
@@ -852,10 +886,7 @@ fn new_episodes_section(
                 .map(|video| EpisodeInfo {
                     season: video.season,
                     episode: video.episode,
-                    released_ms: video
-                        .released
-                        .as_deref()
-                        .and_then(stremionow_sync::parse_timestamp),
+                    released_ms: video.released.as_deref().and_then(release_ms),
                 })
                 .collect();
             let index =
@@ -875,6 +906,24 @@ fn new_episodes_section(
         reason: HomeReason::NewEpisodes,
         entries: found.into_iter().map(|(_, entry)| entry).collect(),
         loading: false,
+    })
+}
+
+/// When a video came out, in Unix milliseconds: a full timestamp, as Cinemeta sends, or a date
+/// alone (`2024-05-01`), as other addons do, taken as that day's start in UTC.
+fn release_ms(released: &str) -> Option<i64> {
+    let released = released.trim();
+    stremionow_sync::parse_timestamp(released).or_else(|| {
+        let b = released.as_bytes();
+        let date_only = b.len() == 10
+            && b[4] == b'-'
+            && b[7] == b'-'
+            && b.iter()
+                .enumerate()
+                .all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit());
+        date_only
+            .then(|| stremionow_sync::parse_timestamp(&format!("{released}T00:00:00Z")))
+            .flatten()
     })
 }
 
@@ -977,8 +1026,11 @@ fn search_catalog<'a>(
 }
 
 /// Catalogs for the home rows, in addon order: every catalog that needs nothing to browse,
-/// and Cinemeta's new releases for the current year.
+/// and Cinemeta's new releases for the current year. A catalog a manifest lists twice, or an
+/// addon listed twice, shows once: the interface keys rows by addon, type and id, and a repeated
+/// key crashes it.
 fn home_catalogs(addons: &[InstalledAddon]) -> Vec<(CatalogInfo, Option<String>)> {
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
     addons
         .iter()
         .flat_map(|addon| {
@@ -994,6 +1046,13 @@ fn home_catalogs(addons: &[InstalledAddon]) -> Vec<(CatalogInfo, Option<String>)
                     None
                 }
             })
+        })
+        .filter(|(info, _)| {
+            seen.insert((
+                info.addon_manifest_url.clone(),
+                info.kind.clone(),
+                info.catalog_id.clone(),
+            ))
         })
         .take(MAX_CATALOG_ROWS)
         .collect()
@@ -1018,13 +1077,17 @@ fn catalog_url(
     addon.url.resource("catalog", kind, id, &extra)
 }
 
-/// The address of a title's details at the first addon that has them, as
+/// The addresses of a title's details at every addon that may have them, in addon order, as
 /// [`StremioCore::meta`] asks for them.
-fn meta_url(addons: &[InstalledAddon], kind: &str, id: &str) -> Option<String> {
+fn meta_urls<'a>(
+    addons: &'a [InstalledAddon],
+    kind: &'a str,
+    id: &'a str,
+) -> impl Iterator<Item = String> + 'a {
     addons
         .iter()
-        .find(|addon| addon.manifest.supports("meta", kind, id))
-        .map(|addon| addon.url.resource("meta", kind, id, &Extra::new()))
+        .filter(move |addon| addon.manifest.supports("meta", kind, id))
+        .map(move |addon| addon.url.resource("meta", kind, id, &Extra::new()))
 }
 
 /// A catalog's type and id, from either its descriptor or its [`CatalogInfo`].
@@ -1500,6 +1563,118 @@ mod tests {
                 .await,
             Err(CoreError::NotFound)
         ));
+    }
+
+    #[tokio::test]
+    async fn details_come_from_the_next_addon_when_one_does_not_have_them() {
+        // Listed first and claiming every id, as an addon with `meta` and no `idPrefixes` does,
+        // but it knows only one title: it says null for one and fails for the rest.
+        let greedy = MockServer::start().await;
+        serve(
+            &greedy,
+            "/manifest.json",
+            json!({
+                "id": "community.greedy", "version": "1.0.0", "name": "Greedy",
+                "resources": ["meta"], "types": ["movie", "series"], "catalogs": []
+            }),
+        )
+        .await;
+        serve(&greedy, "/meta/movie/ttnull.json", json!({ "meta": null })).await;
+        serve(
+            &greedy,
+            "/meta/movie/ttown.json",
+            json!({ "meta": meta("ttown", "movie", &["Drama"], 2020, json!({"name": "Own"})) }),
+        )
+        .await;
+        let cinemeta = cinemeta().await;
+        serve(
+            &cinemeta,
+            "/meta/movie/ttnull.json",
+            json!({ "meta": meta("ttnull", "movie", &["Drama"], 2020, json!({})) }),
+        )
+        .await;
+        let (core, _dir) = core_with(&greedy).await;
+        let url = format!("{}/manifest.json", cinemeta.uri());
+        let preview = core.preview_addon(url.clone()).await.expect("previews");
+        core.install_addon(url, preview.addon.fingerprint)
+            .await
+            .expect("installs");
+
+        let null = core.meta("movie".into(), "ttnull".into()).await;
+        assert_eq!(null.expect("from Cinemeta").item.id, "ttnull");
+        let failed = core.meta("movie".into(), "tt0063350".into()).await;
+        assert_eq!(
+            failed.expect("from Cinemeta").item.name,
+            "Night of the Living Dead"
+        );
+        let own = core.meta("movie".into(), "ttown".into()).await;
+        assert_eq!(own.expect("from the first").item.name, "Own");
+        assert!(
+            core.meta("movie".into(), "ttmissing".into()).await.is_err(),
+            "no addon has it"
+        );
+        assert!(
+            core.similar_titles("movie".into(), "ttnull".into())
+                .await
+                .is_ok(),
+            "the home's lookups pass it over too"
+        );
+    }
+
+    #[test]
+    fn a_catalog_listed_twice_makes_one_row() {
+        let addon = |url: &str| InstalledAddon {
+            url: stremionow_protocol::AddonUrl::parse(url).expect("valid url"),
+            manifest: serde_json::from_value(json!({
+                "id": "x", "version": "1", "name": "X", "resources": ["catalog"],
+                "catalogs": [
+                    {"type": "movie", "id": "top"},
+                    {"type": "series", "id": "top"},
+                    {"type": "movie", "id": "top", "name": "Again"}
+                ]
+            }))
+            .expect("valid manifest"),
+        };
+        let addons = [
+            addon("https://a.example/manifest.json"),
+            addon("https://a.example/manifest.json"),
+            addon("https://b.example/manifest.json"),
+        ];
+        let keys: Vec<_> = home_catalogs(&addons)
+            .into_iter()
+            .map(|(c, _)| format!("{}/{}/{}", c.addon_manifest_url, c.kind, c.catalog_id))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "https://a.example/manifest.json/movie/top",
+                "https://a.example/manifest.json/series/top",
+                "https://b.example/manifest.json/movie/top",
+                "https://b.example/manifest.json/series/top",
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_release_dates_with_or_without_a_time() {
+        let day = stremionow_sync::parse_timestamp("2024-05-01T00:00:00Z").expect("valid");
+        assert_eq!(release_ms("2024-05-01"), Some(day));
+        assert_eq!(release_ms(" 2024-05-01 "), Some(day));
+        assert_eq!(release_ms("2024-05-01T00:00:00.000Z"), Some(day));
+        assert_eq!(
+            release_ms("2024-05-01T12:00:00Z"),
+            Some(day + 12 * 3_600_000)
+        );
+        for bad in [
+            "",
+            "2024",
+            "2024-5-1",
+            "2024-13-01",
+            "2024-05-0x",
+            "01/05/2024",
+        ] {
+            assert_eq!(release_ms(bad), None, "{bad}");
+        }
     }
 
     #[test]

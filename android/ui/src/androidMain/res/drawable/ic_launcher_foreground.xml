@@ -1,13 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- Placeholder launcher mark until the brand has a symbol: a rounded play shape in the accent
-     color, centered in the adaptive icon safe zone (66 of 108 dp). -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-  <path
-      android:fillColor="@color/sn_accent"
-      android:pathData="M44,37.5C44,34.4 47.3,32.5 50,34L74.5,50.5C76.9,52.1 76.9,55.9 74.5,57.5L50,74C47.3,75.5 44,73.6 44,70.5Z" />
-</vector>
+<!-- The launcher's foreground: the mark (sn_mark.xml) over the 72 of 108 dp that launchers
+     show, so the system's mask plays the desktop icon's tile; the marks stay in the 66 dp
+     safe zone. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/sn_mark"
+    android:inset="18dp" />

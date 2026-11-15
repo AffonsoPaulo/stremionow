@@ -20,7 +20,7 @@
 //! .await?;
 //! let trackers = vec!["tracker:udp://tracker.opentrackr.org:1337/announce".to_owned()];
 //! let url = server
-//!     .torrent_url("08ada5a7a6183aae1e09d831df6748d566095a10", None, &trackers)
+//!     .torrent_url("08ada5a7a6183aae1e09d831df6748d566095a10", None, None, &trackers)
 //!     .await?;
 //! // Give `url` to the player; poll `server.status(..)` for the loading screen.
 //! # Ok(())
@@ -41,6 +41,7 @@ mod server;
 mod status;
 mod torrent;
 
+pub use address::{is_private_url, reaches_private_network, url_host};
 pub use error::TorrentError;
 pub use lan::{
     DiscoveredServer, LanConfig, LanServer, LanStatus, PairError, PairedDevice, PairingCode,

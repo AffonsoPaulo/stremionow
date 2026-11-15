@@ -37,6 +37,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterSection
 import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSearchField
 import io.github.affonsopaulo.stremionow.ui.components.SnSeeAll
+import io.github.affonsopaulo.stremionow.ui.components.titleOrigin
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -264,6 +265,7 @@ private fun SearchResults(
                         item.releaseInfo,
                         onClick = { onOpenTitle(item) },
                         width = null,
+                        origin = titleOrigin("grid", item),
                     )
                 }
             }
@@ -300,9 +302,11 @@ private fun ResultRows(
             contentPadding = PaddingValues(vertical = SnSpacing.space4),
             verticalArrangement = Arrangement.spacedBy(SnSpacing.space8),
         ) {
-            items(rows, key = { "${it.catalog.addonManifestUrl}/${it.catalog.kind}/${it.catalog.catalogId}" }) { row ->
+            // The core lists each catalog once; keys must be unique, so a repeat is dropped.
+            items(rows.distinctBy { it.key() }, key = { it.key() }) { row ->
                 val type = kindLabel(row.catalog.kind)
                 SnPosterSection(
+                    slot = row.key(),
                     title = type,
                     // Several catalogs of one type: tell them apart by their addon.
                     caption =
@@ -330,6 +334,9 @@ private fun ResultRows(
         }
     }
 }
+
+/** A row of results apart from the others: its addon, type and catalog. */
+private fun CatalogRow.key(): String = "${catalog.addonManifestUrl}/${catalog.kind}/${catalog.catalogId}"
 
 /**
  * Keeps a list at its top while results stream in. Catalogs answer in any order but rows keep

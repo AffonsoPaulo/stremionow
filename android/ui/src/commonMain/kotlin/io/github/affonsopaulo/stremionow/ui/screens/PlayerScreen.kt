@@ -11,11 +11,13 @@ import io.github.affonsopaulo.stremionow.core.Episode
  * [PlayerViewModel] and the parts in PlayerParts.kt.
  *
  * [onBack] leaves the player, [onChangeSource] returns to the title's sources and [onOpenEpisode]
- * moves on to another episode of the same series.
+ * shows the sources of another episode of the same series, whose source the player could not
+ * find, with the binge group of the source it left. Each is called once at most: the player is
+ * gone after any of them.
  */
 @Composable
 expect fun PlayerScreen(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
-    onOpenEpisode: (Episode) -> Unit,
+    onOpenEpisode: (episode: Episode, bingeGroup: String?) -> Unit,
 )

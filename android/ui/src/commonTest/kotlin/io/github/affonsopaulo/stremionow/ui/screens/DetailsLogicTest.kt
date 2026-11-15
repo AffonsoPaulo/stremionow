@@ -96,6 +96,73 @@ class DetailsLogicTest {
     }
 
     @Test
+    fun `a release date with an offset keeps the day the addon wrote`() {
+        val brazil = Locale.forLanguageTag("pt-BR")
+        // 23:00 at -03:00 is already the 12th in UTC.
+        assertEquals("11/09/2009", formatReleaseDate("2009-09-11T23:00:00-03:00", brazil))
+        assertEquals("11/09/2009", formatReleaseDate("2009-09-11T01:00:00+09:00", brazil))
+        assertEquals("11/09/2009", formatReleaseDate(" 2009-09-11T23:00:00.000Z ", brazil))
+    }
+
+    private fun unnumbered(id: String) =
+        Episode(
+            id = id,
+            title = id,
+            season = null,
+            episode = null,
+            released = null,
+            overview = null,
+            thumbnail = null,
+            runtimeMinutes = null,
+        )
+
+    @Test
+    fun `a movie whose addon lists videos is still a movie`() {
+        val itself = details(listOf(unnumbered("tt1")))
+        assertTrue(itself.asShown().episodes.isEmpty())
+        val movie = details(listOf(unnumbered("tt1:a"), unnumbered("tt1:b")))
+        assertTrue(
+            movie
+                .copy(item = movie.item.copy(kind = "movie"))
+                .asShown()
+                .episodes
+                .isEmpty(),
+        )
+        // A series, and a movie with numbered parts, keep their lists.
+        assertEquals(series, series.asShown())
+        assertEquals(2, movie.asShown().episodes.size)
+        val parts = details(listOf(episode(1, 1), episode(1, 2)))
+        assertEquals(
+            2,
+            parts
+                .copy(item = parts.item.copy(kind = "movie"))
+                .asShown()
+                .episodes.size,
+        )
+    }
+
+    @Test
+    fun `episodes without a season are a group of their own, before the specials`() {
+        val mixed = series.episodes + unnumbered("tt1:x") + unnumbered("tt1:y") + episode(1, 1)
+        val groups = seasonGroups(mixed)
+        assertEquals(listOf(1L, 2L, NO_SEASON, 0L), groups.keys.toList())
+        assertEquals("a repeated episode shows once", 3, groups.getValue(1L).size)
+        assertEquals(listOf("tt1:x", "tt1:y"), groups.getValue(NO_SEASON).map { it.id })
+        val show = details(mixed)
+        assertEquals(listOf("tt1:x", "tt1:y"), coveredVideos(show, WatchScope.Season, null, NO_SEASON, now))
+        assertEquals(listOf("tt1:0:1"), coveredVideos(show, WatchScope.Season, null, 0L, now))
+    }
+
+    @Test
+    fun `the details tab shows only with something in it`() {
+        val bare = details(emptyList())
+        assertFalse(hasInfo(bare))
+        assertTrue(hasInfo(bare.copy(runtime = "120 min")))
+        assertTrue(hasInfo(bare.copy(cast = listOf("Someone"))))
+        assertTrue(hasInfo(bare.copy(item = bare.item.copy(description = "A story."))))
+    }
+
+    @Test
     fun `episodes without a date count as released, future ones do not`() {
         assertTrue(episode(1, 1, released = null).isReleased(now))
         assertTrue(episode(1, 1, released = "2026-11-14T12:00:00Z").isReleased(now))
@@ -105,11 +172,11 @@ class DetailsLogicTest {
     @Test
     fun `a mark covers the released episodes of its scope`() {
         assertEquals(listOf("tt1:1:2"), coveredVideos(series, WatchScope.Episode, episode(1, 2), null, now))
-        assertEquals(listOf("tt1:1:1", "tt1:1:2", "tt1:1:3"), coveredVideos(series, WatchScope.Season, null, 1u, now))
+        assertEquals(listOf("tt1:1:1", "tt1:1:2", "tt1:1:3"), coveredVideos(series, WatchScope.Season, null, 1L, now))
         assertEquals(
             "not the unreleased one",
             listOf("tt1:2:1"),
-            coveredVideos(series, WatchScope.Season, null, 2u, now),
+            coveredVideos(series, WatchScope.Season, null, 2L, now),
         )
         assertEquals(
             listOf("tt1:0:1", "tt1:1:1", "tt1:1:2", "tt1:1:3", "tt1:2:1"),
@@ -129,7 +196,7 @@ class DetailsLogicTest {
 
     @Test
     fun `a mark toggles to unwatched once everything it covers is watched`() {
-        val season = coveredVideos(series, WatchScope.Season, null, 1u, now)
+        val season = coveredVideos(series, WatchScope.Season, null, 1L, now)
         assertFalse(allWatched(season, setOf("tt1:1:1", "tt1:1:2")))
         assertTrue(allWatched(season, setOf("tt1:1:1", "tt1:1:2", "tt1:1:3", "tt1:2:1")))
         assertFalse("nothing to mark is never all watched", allWatched(emptyList(), setOf("tt1:1:1")))
@@ -170,6 +237,27 @@ class DetailsLogicTest {
         assertNull(progress("tt1", duration = 0).fraction())
     }
 
+    @Test
+    fun `marking the episode in progress moves on to the next unwatched released one`() {
+        val now = Instant.parse("2024-01-01T00:00:00Z")
+        val show =
+            details(
+                listOf(
+                    episode(0, 1),
+                    episode(1, 1),
+                    episode(1, 2),
+                    episode(1, 3),
+                    episode(2, 1, released = "2030-01-01T00:00:00.000Z"),
+                ),
+            )
+        // E2 was watched before: it is skipped.
+        assertEquals("tt1:1:3", resumeAfterMarking(show, "tt1:1:1", setOf("tt1:1:1", "tt1:1:2"), now)?.id)
+        // Only an unreleased episode left, and specials stay apart from the seasons.
+        assertNull(resumeAfterMarking(show, "tt1:1:3", setOf("tt1:1:3"), now))
+        assertNull(resumeAfterMarking(show, "tt1:0:1", setOf("tt1:0:1"), now))
+        assertNull(resumeAfterMarking(show, "tt9:1:1", emptySet(), now))
+    }
+
     private fun source(
         addon: String,
         quality: String? = null,
@@ -177,6 +265,8 @@ class DetailsLogicTest {
         external: String? = null,
     ) = StreamSource(
         addonName = addon,
+        addonId = addon.lowercase(),
+        addonKey = "key-${addon.lowercase()}",
         name = addon,
         description = "",
         url = url,
@@ -201,6 +291,34 @@ class DetailsLogicTest {
         sizeBytes = null,
         cached = null,
     )
+
+    @Test
+    fun `an empty search for sources says why it found nothing`() {
+        assertNull("still searching", SourcesState(addonsAsked = 2).emptyReason)
+        assertEquals(SourcesEmpty.NoAddons, SourcesState(finished = true).emptyReason)
+        assertEquals(SourcesEmpty.AllFailed, SourcesState(finished = true, listFailed = true).emptyReason)
+        assertEquals(
+            SourcesEmpty.AllFailed,
+            SourcesState(addonsAsked = 2, addonsAnswered = 2, addonsFailed = 2, finished = true).emptyReason,
+        )
+        assertEquals(
+            SourcesEmpty.NoSources,
+            SourcesState(addonsAsked = 2, addonsAnswered = 2, addonsFailed = 1, finished = true).emptyReason,
+        )
+        assertNull(SourcesState(sources = listOf(source("A")), finished = true).emptyReason)
+    }
+
+    @Test
+    fun `only a search that found sources from every addon is kept for later`() {
+        val found = listOf(source("A"))
+        assertTrue("one still under way", SourcesState(addonsAsked = 2).reusable)
+        assertTrue(SourcesState(sources = found, addonsAsked = 1, addonsAnswered = 1, finished = true).reusable)
+        assertFalse(SourcesState(addonsAsked = 1, addonsAnswered = 1, finished = true).reusable)
+        assertFalse(
+            SourcesState(sources = found, addonsAsked = 2, addonsAnswered = 2, addonsFailed = 1, finished = true)
+                .reusable,
+        )
+    }
 
     @Test
     fun `4K is available only when a playable 4K source was found`() {

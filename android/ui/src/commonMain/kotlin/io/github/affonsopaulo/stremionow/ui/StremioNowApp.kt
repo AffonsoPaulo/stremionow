@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -24,6 +25,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -34,6 +36,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NamedNavArgument
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -51,8 +55,11 @@ import io.github.affonsopaulo.stremionow.ui.components.HeaderSearchState
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderInset
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderOverlay
 import io.github.affonsopaulo.stremionow.ui.components.LocalHeaderPage
+import io.github.affonsopaulo.stremionow.ui.components.PageMotion
+import io.github.affonsopaulo.stremionow.ui.components.ProvidePageMotion
 import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnHeaderSearch
+import io.github.affonsopaulo.stremionow.ui.components.SnPageTransitions
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
@@ -62,10 +69,15 @@ import io.github.affonsopaulo.stremionow.ui.crash.crashReportPrompt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.TitleLink
+import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
+import io.github.affonsopaulo.stremionow.ui.l10n.interfaceLocale
+import io.github.affonsopaulo.stremionow.ui.l10n.layoutDirectionFor
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
+import io.github.affonsopaulo.stremionow.ui.platform.playerHasOwnWindow
+import io.github.affonsopaulo.stremionow.ui.platform.rememberReducedMotion
 import io.github.affonsopaulo.stremionow.ui.screens.AccountMenuPopup
 import io.github.affonsopaulo.stremionow.ui.screens.AccountOverlays
 import io.github.affonsopaulo.stremionow.ui.screens.AccountUi
@@ -75,6 +87,7 @@ import io.github.affonsopaulo.stremionow.ui.screens.HomeScreen
 import io.github.affonsopaulo.stremionow.ui.screens.LibraryScreen
 import io.github.affonsopaulo.stremionow.ui.screens.OnboardingScreen
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerScreen
+import io.github.affonsopaulo.stremionow.ui.screens.ResumingPlayer
 import io.github.affonsopaulo.stremionow.ui.screens.SearchScreen
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsPage
 import io.github.affonsopaulo.stremionow.ui.screens.SettingsRoutes
@@ -141,9 +154,20 @@ fun StremioNowApp(
     onLinkOpened: () -> Unit = {},
     shortcuts: AppShortcuts? = null,
 ) {
-    CompositionLocalProvider(LocalIsTv provides isTv) {
+    // The layout runs the way the interface's language is written (see layoutDirectionFor).
+    CompositionLocalProvider(
+        LocalIsTv provides isTv,
+        LocalLayoutDirection provides layoutDirectionFor(interfaceLocale()),
+    ) {
         // Asks about the last crash report; in a crash loop, before the app starts.
         if (crashReportPrompt()) return@CompositionLocalProvider
+        // Opening the core reads the secret store, which can block (a keyring prompt), so it
+        // opens off the main thread with a plain page meanwhile.
+        val startRoute = rememberStartRoute()
+        if (startRoute == null) {
+            Box(Modifier.fillMaxSize().background(SnColors.bg))
+            return@CompositionLocalProvider
+        }
         val navController = rememberNavController()
         val entry by navController.currentBackStackEntryAsState()
         val current =
@@ -169,13 +193,6 @@ fun StremioNowApp(
         val phone = SnLayout.formFactor == FormFactor.Phone
         // The player owns the whole screen: no header, no tab bar, no insets.
         val immersive = entry?.destination?.route == Routes.PLAYER
-        // First run shows the setup instead of the app's navigation.
-        val context = LocalPlatformContext.current
-        val startRoute =
-            remember {
-                val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
-                if (onboarded) Routes.HOME else Routes.ONBOARDING
-            }
         val setup = entry?.destination?.route == Routes.ONBOARDING
         // What the avatar opens: a menu, a sheet on phones, Settings on TV.
         val accountUi = remember { AccountUi() }
@@ -275,7 +292,14 @@ fun StremioNowApp(
             // A link from outside (the TV home screen) opens its title over whatever is showing.
             LaunchedEffect(link, setup) {
                 if (link != null && !setup) {
-                    navController.navigate(Routes.details(link.kind, link.id)) { launchSingleTop = true }
+                    // Over another title's page it opens a page of its own, so Back returns to
+                    // that one; only the same title already on top is left as it is.
+                    val top = navController.currentBackStackEntry
+                    val showing =
+                        top?.destination?.route == Routes.DETAILS &&
+                            top.arguments?.read { getStringOrNull("kind") } == link.kind &&
+                            top.arguments?.read { getStringOrNull("id") } == link.id
+                    if (!showing) navController.navigate(Routes.details(link.kind, link.id))
                     onLinkOpened()
                 }
             }
@@ -288,10 +312,27 @@ fun StremioNowApp(
                 sheet = phone,
                 onOpenAddons = { openSettings(SettingsPage.Addons) },
                 // Phones show the list of sections; elsewhere, the first section after Addons.
-                onOpenSettings = { openSettings(if (phone) null else SettingsPage.Playback) },
+                onOpenSettings = { openSettings(if (phone) null else SettingsPage.General) },
             )
         }
     }
+}
+
+/**
+ * The first page, once the core is open: first run shows the setup instead of the app's
+ * navigation. Null while the core opens, off the main thread.
+ */
+@Composable
+private fun rememberStartRoute(): String? {
+    val context = LocalPlatformContext.current
+    val route = {
+        val onboarded = runCatching { AppGraph.core(context).settings().onboarded }.getOrDefault(true)
+        if (onboarded) Routes.HOME else Routes.ONBOARDING
+    }
+    // Already open (a new window or activity in the same process): no blank frame.
+    return produceState(if (AppGraph.isCoreOpen) route() else null) {
+        if (value == null) value = io(route)
+    }.value
 }
 
 /**
@@ -351,7 +392,7 @@ private fun AppHeader(
                     AccountMenuPopup(
                         ui = accountUi,
                         onOpenAddons = { openSettings(SettingsPage.Addons) },
-                        onOpenSettings = { openSettings(SettingsPage.Playback) },
+                        onOpenSettings = { openSettings(SettingsPage.General) },
                     )
                 },
             )
@@ -359,7 +400,10 @@ private fun AppHeader(
     }
 }
 
-/** The app's pages. Those with title art at the top (home, a title) run under the header. */
+/**
+ * The app's pages. Those with title art at the top (home, a title) run under the header, which
+ * stays outside and does not animate with them.
+ */
 @Composable
 private fun AppNavHost(
     navController: NavHostController,
@@ -369,12 +413,59 @@ private fun AppNavHost(
     headerQuery: String?,
     onSignIn: () -> Unit,
 ) {
-    NavHost(navController = navController, startDestination = startRoute, modifier = Modifier.fillMaxSize()) {
-        val openTitle = { kind: String, id: String -> navController.navigate(Routes.details(kind, id)) }
+    val reducedMotion = rememberReducedMotion()
+    val move = { scope: AnimatedContentTransitionScope<NavBackStackEntry>, back: Boolean ->
+        pageMove(
+            kindOf(scope.initialState.destination.route),
+            kindOf(scope.targetState.destination.route),
+            back,
+            playerHasOwnWindow,
+        )
+    }
+    // Title art flies between the pages within this layout, so under the header drawn over it.
+    SnPageTransitions(reducedMotion, Modifier.fillMaxSize()) {
+        AppPages(navController, startRoute, searchFocusRequests, openTab, headerQuery, onSignIn, reducedMotion, move)
+    }
+}
+
+/** The NavHost of [AppNavHost], with the transitions [move] picks. */
+@Composable
+private fun AppPages(
+    navController: NavHostController,
+    startRoute: String,
+    searchFocusRequests: Int,
+    openTab: (TopDestination) -> Unit,
+    headerQuery: String?,
+    onSignIn: () -> Unit,
+    reducedMotion: Boolean,
+    move: (AnimatedContentTransitionScope<NavBackStackEntry>, back: Boolean) -> PageMove,
+) {
+    NavHost(
+        navController = navController,
+        startDestination = startRoute,
+        modifier = Modifier.fillMaxSize(),
+        enterTransition = { move(this, false).enter(reducedMotion) },
+        exitTransition = { move(this, false).exit(reducedMotion) },
+        popEnterTransition = { move(this, true).enter(reducedMotion) },
+        popExitTransition = { move(this, true).exit(reducedMotion) },
+    ) {
+        // A link opens its page only from a page that has settled (resumed), as
+        // dropUnlessResumed does: a second click while the first one's page is still on its way
+        // in would open it twice.
+        val openPage = { route: String -> navController.ifSettled { navController.navigate(route) } }
+        val openTitle = { kind: String, id: String -> openPage(Routes.details(kind, id)) }
         page(Routes.HOME, underHeader = true) {
             HomeScreen(
                 onOpenTitle = { openTitle(it.kind, it.id) },
                 onOpenProgress = { openTitle(it.kind, it.id) },
+                // The title's page goes under the player, as when playing from it: Back, "Change
+                // source" and a source that cannot be found again all lead there.
+                onResume = {
+                    navController.ifSettled {
+                        navController.navigate(Routes.details(it.kind, it.id))
+                        navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+                    }
+                },
                 onOpenAddons = { navController.openSettings(SettingsPage.Addons) },
             )
         }
@@ -463,37 +554,50 @@ private fun AppNavHost(
                 kind = backStack.arguments?.read { getStringOrNull("kind") }.orEmpty(),
                 id = backStack.arguments?.read { getStringOrNull("id") }.orEmpty(),
                 onOpenTitle = { openTitle(it.kind, it.id) },
-                onOpenGenre = { kind, genre -> navController.navigate(Routes.genre(kind, genre)) },
-                onSearchPerson = { navController.navigate(Routes.person(it)) },
+                onOpenGenre = { kind, genre -> openPage(Routes.genre(kind, genre)) },
+                onSearchPerson = { openPage(Routes.person(it)) },
                 // The sources are on the title's page, so Back from the player returns there.
                 onPlay = { navController.navigate(Routes.PLAYER) { launchSingleTop = true } },
             )
         }
         page(Routes.PLAYER) {
-            PlayerScreen(
-                onBack = { navController.popBackStack() },
-                // Both return to the title's page, which shows the sources in place of the
-                // episodes; for the next episode it plays the source of the same binge group
-                // by itself when one shows up.
-                onChangeSource = {
-                    PlaybackSession.returnToSources()
-                    navController.popBackStack()
-                },
-                onOpenEpisode = { episode ->
-                    val current = PlaybackSession.selection ?: return@PlayerScreen
-                    PlaybackSession.continueWith = PlaybackSession.source?.bingeGroup
-                    PlaybackSession.select(current.copy(episode = episode))
-                    PlaybackSession.returnToSources()
-                    navController.popBackStack()
-                },
-            )
+            // Resuming, the source chosen before is looked up again under the player's loading
+            // screen first; when it cannot be, the title's page below shows the video's sources.
+            var resume by remember { mutableStateOf(PlaybackSession.resume) }
+            val request = resume
+            if (request != null) {
+                ResumingPlayer(request, onPlay = { resume = null }, onSources = { navController.popBackStack() })
+            } else {
+                PlayerScreen(
+                    onBack = { navController.popBackStack() },
+                    // Both return to the title's page, which shows the sources in place of the
+                    // episodes; for the next episode it plays the source of the same binge group
+                    // by itself when one shows up.
+                    onChangeSource = {
+                        PlaybackSession.returnToSources()
+                        navController.popBackStack()
+                    },
+                    // Another episode plays in the player itself (PlayerViewModel.openEpisode);
+                    // this is for when its source could not be found: its sources show. The
+                    // player gives the binge group of the source it left, since leaving the
+                    // video cleared the session's source.
+                    onOpenEpisode = { episode, group ->
+                        val current = PlaybackSession.selection ?: return@PlayerScreen
+                        PlaybackSession.select(current.copy(episode = episode))
+                        PlaybackSession.continueWith = group
+                        PlaybackSession.returnToSources()
+                        navController.popBackStack()
+                    },
+                )
+            }
         }
     }
 }
 
 /**
  * A destination of [AppNavHost]. Pages start below the header unless [underHeader] is set,
- * in which case they run under it and keep their own content clear of it.
+ * in which case they run under it and keep their own content clear of it. Each takes part in
+ * the page transitions through its [PageMotion].
  */
 private fun NavGraphBuilder.page(
     route: String,
@@ -502,11 +606,23 @@ private fun NavGraphBuilder.page(
     content: @Composable (NavBackStackEntry) -> Unit,
 ) {
     composable(route, arguments) { entry ->
-        CompositionLocalProvider(LocalHeaderPage provides entry) {
-            Box(if (underHeader) Modifier.fillMaxSize() else Modifier.fillMaxSize().belowHeader()) { content(entry) }
+        ProvidePageMotion(this) {
+            CompositionLocalProvider(LocalHeaderPage provides entry) {
+                Box(if (underHeader) Modifier.fillMaxSize() else Modifier.fillMaxSize().belowHeader()) {
+                    content(entry)
+                }
+            }
         }
     }
 }
+
+/** What [route] is to the page transitions. */
+private fun kindOf(route: String?): PageKind =
+    when (route) {
+        in TopRoutes -> PageKind.Tab
+        Routes.PLAYER -> PageKind.Player
+        else -> PageKind.Page
+    }
 
 /**
  * Lays the header over the pages, measuring it first so the pages learn its height through
@@ -611,6 +727,15 @@ private fun NavHostController.openSettings(page: SettingsPage?) {
     popBackStack(Routes.SETTINGS_SECTION, inclusive = true)
     popBackStack(Routes.SETTINGS, inclusive = true)
     navigate(page?.let(SettingsRoutes::of) ?: Routes.SETTINGS) { launchSingleTop = true }
+}
+
+/**
+ * Runs [block] only while the page on top has settled, as `dropUnlessResumed` does for the
+ * page itself: from the moment a navigation starts, the page coming in stays short of resumed
+ * until its transition ends, so a second click in the meantime is dropped.
+ */
+private inline fun NavHostController.ifSettled(block: () -> Unit) {
+    if (currentBackStackEntry?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true) block()
 }
 
 /**

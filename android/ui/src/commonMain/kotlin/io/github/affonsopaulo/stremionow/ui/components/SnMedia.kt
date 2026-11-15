@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +49,34 @@ private val CardShape = RoundedCornerShape(SnRadius.radiusMd)
 
 /** How much a poster's picture zooms, inside its frame, under the pointer. */
 private const val POSTER_ZOOM = 1.06f
+
+/** How much a focused card grows (see `snCardMotion`), for the poster's sharpness. */
+private const val CARD_GROWTH = 1.08f
+
+/**
+ * A copy of a poster sharp enough for [widthPx] pixels, when its host offers several sizes;
+ * the poster itself otherwise. Cinemeta's posters come from metahub at 300, 500 and 780
+ * pixels wide (small, medium and large), and catalogs link the small one, which turns soft on
+ * wide cards and scaled screens. Never a smaller copy than the one linked.
+ */
+fun sharperPoster(
+    url: String,
+    widthPx: Float,
+): String {
+    if (!url.startsWith(METAHUB_POSTERS)) return url
+    val rest = url.removePrefix(METAHUB_POSTERS)
+    val linked = rest.substringBefore('/', missingDelimiterValue = "")
+    val sizes = POSTER_SIZES.keys.toList()
+    if (linked !in sizes) return url
+    val wanted = POSTER_SIZES.entries.firstOrNull { it.value >= widthPx }?.key ?: sizes.last()
+    val size = if (sizes.indexOf(wanted) > sizes.indexOf(linked)) wanted else linked
+    return "$METAHUB_POSTERS$size/${rest.substringAfter('/')}"
+}
+
+private const val METAHUB_POSTERS = "https://images.metahub.space/poster/"
+
+/** Metahub's poster sizes, smallest first, with their width in pixels. */
+private val POSTER_SIZES = linkedMapOf("small" to 300, "medium" to 500, "large" to 780)
 
 /**
  * Artwork with a fallback: while the image loads, or when there is none, the box shows the
@@ -87,6 +117,9 @@ val EpisodeCardWidth = 280.dp
  * 2:3 poster card with the title and a short line underneath, and a progress bar along the
  * bottom of the picture when [progress] is given. Under the pointer it grows, lifts and zooms
  * its picture a little; with reduced motion it stays still.
+ *
+ * A card that opens a title gives its [origin]: its picture then flies into the title's page
+ * and back, and on TV the focus returns to it (see [titleCard]).
  */
 @Composable
 fun SnPosterCard(
@@ -97,11 +130,13 @@ fun SnPosterCard(
     modifier: Modifier = Modifier,
     width: Dp? = PosterCardWidth,
     progress: Float? = null,
+    origin: TitleOrigin? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
     val motion = snCardMotion(state, growOnFocus = true, liftOnHover = true, reducedMotion = rememberReducedMotion())
     val zoom by animateFloatAsState(if (motion.lift) POSTER_ZOOM else 1f, tween(FEEDBACK_MS), label = "poster-zoom")
+    val card = titleCard(origin)
     Column(
         modifier = (if (width != null) modifier.width(width) else modifier),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space2),
@@ -111,23 +146,32 @@ fun SnPosterCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .semantics { contentDescription = title }
+                .then(card.focus)
                 .snClickable(
                     CardShape,
                     grow = true,
                     highlight = false,
                     interactionSource = interaction,
-                    onClick = onClick,
+                    onClick = {
+                        card.onOpen()
+                        onClick()
+                    },
                 ).clip(CardShape),
         ) {
-            SnArtwork(
-                url = poster,
-                fallbackTitle = title,
-                modifier =
-                    Modifier.fillMaxSize().graphicsLayer {
-                        scaleX = zoom
-                        scaleY = zoom
-                    },
-            )
+            // A copy as sharp as the card is wide on this screen, grown under the pointer.
+            val density = LocalDensity.current
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val pixels = with(density) { maxWidth.toPx() } * POSTER_ZOOM * CARD_GROWTH
+                SnArtwork(
+                    url = remember(poster, pixels) { poster?.let { sharperPoster(it, pixels) } },
+                    fallbackTitle = title,
+                    modifier =
+                        Modifier.fillMaxSize().then(card.art).graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                        },
+                )
+            }
             if (progress != null && progress > 0f) {
                 ProgressBar(progress, Modifier.align(Alignment.BottomStart))
             }
@@ -151,7 +195,8 @@ fun SnPosterCard(
 
 /**
  * 16:9 card for episodes, with an optional progress bar, and a "Watched" badge when
- * [watchedLabel] is given. Under the pointer it grows, lifts and gets a light border.
+ * [watchedLabel] is given. Under the pointer it grows, lifts and gets a light border. With
+ * [keepMetaLine], the meta line keeps its room when empty, so cards in a row stay one size.
  */
 @Composable
 fun SnEpisodeCard(
@@ -164,6 +209,7 @@ fun SnEpisodeCard(
     progress: Float? = null,
     highlighted: Boolean = false,
     watchedLabel: String? = null,
+    keepMetaLine: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val state = interaction.collectSnInteraction()
@@ -226,11 +272,12 @@ fun SnEpisodeCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-        if (!meta.isNullOrBlank()) {
+        if (!meta.isNullOrBlank() || keepMetaLine) {
             BasicText(
-                text = meta,
+                text = meta.orEmpty(),
                 style = SnTypography.caption.copy(color = if (highlighted) SnColors.accentText else SnColors.fgMuted),
                 maxLines = 1,
+                minLines = 1,
             )
         }
         if (!overview.isNullOrBlank()) {

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The interface's translations, for the per-app language in Android's settings (Android 13
+     and later). Keep in step with l10n/res and InterfaceLanguages in AppLanguage.kt; a test
+     checks both. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+  <locale android:name="en" />
+  <locale android:name="pt-BR" />
+</locale-config>

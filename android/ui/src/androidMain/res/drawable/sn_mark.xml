@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The app's mark, "play, now": a white play shape with round corners and a dot in the accent
+     color, as the wordmark sets "Stremio" in white and "Now" in the accent. The viewport is the
+     icon's tile, so the marks sit where the desktop icon (AppIcon.kt) has them. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+  <!-- A triangle grown back from its inset by a round-joined stroke 12 wide: round corners of 6. -->
+  <path
+      android:fillColor="@color/sn_fg"
+      android:pathData="M31,38.93L31,61.07L50.06,50Z"
+      android:strokeColor="@color/sn_fg"
+      android:strokeLineJoin="round"
+      android:strokeWidth="12" />
+  <path
+      android:fillColor="@color/sn_accent"
+      android:pathData="M67.5,50a8,8 0,1 0,16 0a8,8 0,1 0,-16 0Z" />
+</vector>

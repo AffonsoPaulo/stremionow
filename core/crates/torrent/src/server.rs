@@ -7,7 +7,7 @@ use std::fmt;
 use std::io;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hyper::body::Incoming;
@@ -16,6 +16,7 @@ use hyper::{Method, Request, Response};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
+use crate::files::{self, FileRequest};
 use crate::http::{self, Body};
 use crate::lan::{RemoteError, RemoteServer, RemoteTorrent, TorrentRoute};
 use crate::magnet::{self, InfoHash};
@@ -29,7 +30,8 @@ pub struct ServerConfig {
     /// Folder for downloaded torrent data and the DHT routing table. Should be the app's
     /// cache directory: everything in it can be deleted and downloaded again.
     pub cache_dir: PathBuf,
-    /// Disk space [`StreamServer::prune_cache`] trims downloaded data to.
+    /// Disk space [`StreamServer::prune_cache`] trims downloaded data to; see also
+    /// [`StreamServer::set_max_cache_bytes`].
     pub max_cache_bytes: u64,
 }
 
@@ -55,7 +57,10 @@ pub(crate) struct Shared {
     secret: String,
     /// `http://127.0.0.1:<port>/<secret>`, the prefix of every URL handed out.
     base_url: String,
-    max_cache_bytes: u64,
+    /// Changed by Settings while the server runs.
+    max_cache_bytes: AtomicU64,
+    /// Held while the cache is pruned, so two prunes never plan from the same scan.
+    pruning: Mutex<()>,
     pub(crate) engine: LazyEngine,
     proxy: Proxy,
     /// Who uses each torrent in the engine: this device's player, paired devices or both.
@@ -117,7 +122,8 @@ impl StreamServer {
             port,
             base_url: format!("http://127.0.0.1:{port}/{secret}"),
             secret,
-            max_cache_bytes: config.max_cache_bytes,
+            max_cache_bytes: AtomicU64::new(config.max_cache_bytes),
+            pruning: Mutex::new(()),
             engine,
             proxy,
             holders: Mutex::default(),
@@ -144,25 +150,29 @@ impl StreamServer {
     ///
     /// `info_hash` is the 40-digit hex hash. `trackers` are the stream's `sources` as
     /// Stremio addons send them: `tracker:<url>` entries are announced to, `dht:` entries
-    /// are ignored (the DHT is on whenever it can start). The call waits until peers send the file list, for a
-    /// minute at most, then downloads only the chosen file: `file_idx` when it names a file
-    /// of the torrent, otherwise the largest video.
+    /// are ignored (the DHT is on whenever it can start). The call waits until peers send the
+    /// file list, for a minute at most, then downloads only the chosen file: `file_idx`, which
+    /// must name a file of the torrent ([`TorrentError::NoSuchFile`] otherwise); without one,
+    /// the video `file_hint` names (the source's title, which often holds the file name or the
+    /// episode), or else the largest video.
     ///
-    /// Calling it again for a torrent already added switches it to the newly chosen file;
-    /// URLs of the previous file then answer 404. The URL has the form
+    /// Calling it again for a torrent already added switches this device's player to the
+    /// newly chosen file; URLs of the previous file then answer 404, unless a paired device
+    /// plays it. The URL has the form
     /// `http://127.0.0.1:<port>/<secret>/torrent/<info hash>/<file index>`.
     pub async fn torrent_url(
         &self,
         info_hash: &str,
         file_idx: Option<u32>,
+        file_hint: Option<&str>,
         trackers: &[String],
     ) -> Result<String, TorrentError> {
         let hash = parse_hash(info_hash)?;
-        let requested = file_idx.and_then(|index| usize::try_from(index).ok());
+        let request = file_request(file_idx, file_hint)?;
         let trackers = magnet::tracker_urls(trackers);
         let index = self
             .shared
-            .add_for(hash, Holder::Local, requested, &trackers)
+            .add_for(hash, Holder::Local, request, &trackers)
             .await?;
         Ok(format!("{}/torrent/{hash}/{index}", self.shared.base_url))
     }
@@ -179,6 +189,7 @@ impl StreamServer {
         server: &RemoteServer,
         info_hash: &str,
         file_idx: Option<u32>,
+        file_hint: Option<&str>,
         trackers: &[String],
     ) -> Result<String, RemoteError> {
         let hash =
@@ -192,7 +203,11 @@ impl StreamServer {
             previous.stopped.cancel();
         }
         torrent.start_polling();
-        let added = server.add(hash, file_idx, &torrent.trackers).await;
+        // Once the server chose the file, the relay asks for it by index alone.
+        let file_hint = file_hint.map(files::bounded_hint);
+        let added = server
+            .add(hash, file_idx, file_hint, &torrent.trackers)
+            .await;
         // The player may have closed, and stopped the torrent, while it was being added.
         let current = {
             let remote = self.shared.remote();
@@ -227,7 +242,18 @@ impl StreamServer {
         if let Some(torrent) = self.shared.remote().get(&hash) {
             return Some(torrent.route());
         }
-        self.shared.engine.status(hash).map(|_| TorrentRoute::Local)
+        self.shared
+            .engine
+            .status(hash, &Holder::Local)
+            .map(|_| TorrentRoute::Local)
+    }
+
+    /// Changes the size [`Self::prune_cache`] trims the cache to, as when the user changes it
+    /// in Settings.
+    pub fn set_max_cache_bytes(&self, max_cache_bytes: u64) {
+        self.shared
+            .max_cache_bytes
+            .store(max_cache_bytes, Ordering::Relaxed);
     }
 
     /// Whether this device may download torrents itself right now. The app turns it off
@@ -242,10 +268,15 @@ impl StreamServer {
     ///
     /// GET and HEAD requests to it are forwarded with their `Range` header, following
     /// redirects, and the answer is streamed back with its status and its `Content-Type`,
-    /// `Content-Length`, `Content-Range`, `Accept-Ranges` and `Last-Modified` headers. The
-    /// most recent 64 registrations stay valid.
-    pub fn proxy_url(&self, remote_url: &str) -> Result<String, TorrentError> {
-        let token = self.shared.proxy.register(remote_url)?;
+    /// `Content-Length`, `Content-Range`, `Content-Encoding`, `Accept-Ranges` and
+    /// `Last-Modified` headers. The 64 most recently registered or used stay valid.
+    ///
+    /// `allow_private` lets the URL point at this device or the home network, which only a
+    /// source the user placed there should: an addon on the home network. Otherwise such a URL
+    /// is refused with [`TorrentError::PrivateAddress`], and a public one may neither resolve
+    /// nor redirect into a private network.
+    pub fn proxy_url(&self, remote_url: &str, allow_private: bool) -> Result<String, TorrentError> {
+        let token = self.shared.proxy.register(remote_url, allow_private)?;
         Ok(format!("{}/proxy/{token}", self.shared.base_url))
     }
 
@@ -256,7 +287,7 @@ impl StreamServer {
         let remote = self.shared.remote().get(&hash).cloned();
         match remote {
             Some(torrent) if !torrent.fell_back.load(Ordering::Relaxed) => torrent.last_status(),
-            _ => self.shared.engine.status(hash),
+            _ => self.shared.engine.status(hash, &Holder::Local),
         }
     }
 
@@ -276,7 +307,8 @@ impl StreamServer {
     }
 
     /// Deletes cached torrent data, least recently played first, until the cache fits in
-    /// [`ServerConfig::max_cache_bytes`]. Torrents that have not been stopped are kept even
+    /// [`ServerConfig::max_cache_bytes`] (or the size set since with
+    /// [`Self::set_max_cache_bytes`]). Torrents that have not been stopped are kept even
     /// when that leaves the cache over the limit. Returns the number of bytes freed.
     pub async fn prune_cache(&self) -> Result<u64, TorrentError> {
         let shared = Arc::clone(&self.shared);
@@ -350,14 +382,18 @@ impl Shared {
         &self,
         hash: InfoHash,
         holder: Holder,
-        requested: Option<usize>,
+        request: FileRequest<'_>,
         trackers: &[String],
     ) -> Result<usize, TorrentError> {
-        self.holders().entry(hash).or_default().insert(holder);
-        self.engine.add(hash, requested, trackers).await
+        self.holders()
+            .entry(hash)
+            .or_default()
+            .insert(holder.clone());
+        self.engine.add(hash, &holder, request, trackers).await
     }
 
-    /// Lets go of a torrent for `holder`, stopping it if nobody else uses it.
+    /// Lets go of a torrent for `holder`, stopping it if nobody else uses it, and otherwise
+    /// only the file `holder` played.
     pub(crate) async fn release(&self, hash: InfoHash, holder: &Holder) {
         let unused = {
             let mut holders = self.holders();
@@ -375,6 +411,8 @@ impl Shared {
         };
         if unused {
             self.engine.stop(hash).await;
+        } else {
+            self.engine.let_go(hash, holder).await;
         }
     }
 
@@ -399,23 +437,40 @@ impl Shared {
     }
 
     fn prune_cache(&self) -> Result<u64, TorrentError> {
+        // Prunes run after every stop, from this device's player and from paired devices.
+        let _pruning = self.pruning.lock().unwrap_or_else(PoisonError::into_inner);
         let entries = cache::scan(self.engine.data_dir())?;
-        let doomed = cache::plan(entries, self.max_cache_bytes, |name| {
-            self.engine.in_use(name)
-        });
+        let max_bytes = self.max_cache_bytes.load(Ordering::Relaxed);
+        let doomed = cache::plan(entries, max_bytes, |name| self.engine.in_use(name));
         let mut freed = 0u64;
         for entry in doomed {
-            // The torrent may have been played again since the plan was made.
-            if self.engine.in_use(&entry.name) {
+            // The torrent may have been played again since the plan was made; while the
+            // folder is claimed, playing it again waits for the removal to finish.
+            let Some(_claim) = self.engine.claim_removal(&entry.name) else {
                 continue;
-            }
+            };
             match cache::remove(&entry) {
                 Ok(()) => freed = freed.saturating_add(entry.bytes),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => log::warn!("cache: cannot remove {}: {error}", entry.name),
             }
         }
         Ok(freed)
     }
+}
+
+/// What [`StreamServer::torrent_url`] asks the engine for.
+fn file_request(
+    file_idx: Option<u32>,
+    file_hint: Option<&str>,
+) -> Result<FileRequest<'_>, TorrentError> {
+    let index = file_idx
+        .map(|index| usize::try_from(index).map_err(|_| TorrentError::NoSuchFile(usize::MAX)))
+        .transpose()?;
+    Ok(FileRequest {
+        index,
+        hint: file_hint.map(files::bounded_hint),
+    })
 }
 
 fn is_read(method: &Method) -> bool {

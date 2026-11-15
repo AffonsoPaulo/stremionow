@@ -2,7 +2,6 @@
 package io.github.affonsopaulo.stremionow.ui.screens
 
 import io.github.affonsopaulo.stremionow.core.AppSettings
-import io.github.affonsopaulo.stremionow.core.DisplaySwitch
 import io.github.affonsopaulo.stremionow.core.StreamMemoryChoice
 import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.player.StreamMemorySizes
@@ -15,18 +14,7 @@ class VideoMemoryTest {
         choice: StreamMemoryChoice,
         ahead: UInt = 128u,
         behind: UInt = 128u,
-    ) = AppSettings(
-        torrentWifiOnly = false,
-        torrentCacheMb = 2048u,
-        audioLanguage = "",
-        subtitleLanguage = "",
-        maxResolution = 0u,
-        onboarded = true,
-        aniskip = true,
-        hdr = DisplaySwitch.ASK,
-        matchRefreshRate = false,
-        serveToDevices = false,
-        serveName = "",
+    ) = defaultSettings().copy(
         streamMemory = choice,
         streamMemoryAheadMib = ahead,
         streamMemoryBehindMib = behind,
@@ -108,5 +96,14 @@ class VideoMemoryTest {
         assertNull(parseMiB("1e3", StreamMemorySizes.AHEAD_RANGE))
         assertNull(parseMiB("99999999999", StreamMemorySizes.AHEAD_RANGE))
         assertEquals(8, parseMiB("8", StreamMemorySizes.BEHIND_RANGE))
+    }
+
+    @Test
+    fun onlyValidChangedSizesWaitToBeSaved() {
+        val effective = StreamMemorySizes(128, 128)
+        assertNull(pendingSizes(128, 128, effective))
+        assertNull(pendingSizes(null, 64, effective))
+        assertNull(pendingSizes(256, null, effective))
+        assertEquals(StreamMemorySizes(256, 64), pendingSizes(256, 64, effective))
     }
 }

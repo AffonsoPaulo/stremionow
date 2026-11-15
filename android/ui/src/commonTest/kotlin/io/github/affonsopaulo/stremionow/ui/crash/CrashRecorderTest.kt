@@ -28,15 +28,18 @@ class CrashRecorderTest {
         )
     private val store by lazy { ReportStore(temporary.root) { clock } }
 
-    private fun recorder(log: List<String> = emptyList()) =
-        CrashRecorder(
-            store = store,
-            environment = environment,
-            startedAt = clock - 5_000,
-            errorsEndProcess = true,
-            recentLog = { log },
-            now = { clock },
-        )
+    private fun recorder(
+        log: List<String> = emptyList(),
+        secrets: () -> Collection<String> = { emptyList() },
+    ) = CrashRecorder(
+        store = store,
+        environment = environment,
+        startedAt = clock - 5_000,
+        errorsEndProcess = true,
+        recentLog = { log },
+        now = { clock },
+        secrets = secrets,
+    )
 
     private fun saved() = store.load(homeFolder = home)
 
@@ -60,6 +63,31 @@ class CrashRecorderTest {
             assertFalse("'$secret' leaked:\n$text", text.contains(secret))
         }
         assertTrue(text.contains("https://torrentio.strem.fun/[redacted]"))
+    }
+
+    @Test
+    fun `known secrets go wherever they appear`() {
+        // Plain words the patterns alone keep: only knowing them removes them.
+        recorder(
+            log = listOf("W refused sessionwordsecret"),
+            secrets = { listOf("sessionwordsecret", "plaindebridword") },
+        ).recordCrash(Thread("main"), IllegalStateException("debrid key plaindebridword rejected"))
+        val text = saved().single().report.format()
+        assertTrue(text, text.contains("debrid key"))
+        assertFalse(text, text.contains("sessionwordsecret"))
+        assertFalse(text, text.contains("plaindebridword"))
+    }
+
+    @Test
+    fun `a failing source of secrets stops nothing`() {
+        recorder(secrets = { error("no secrets now") }).recordCrash(Thread("main"), IllegalStateException("plain"))
+        assertTrue(
+            saved()
+                .single()
+                .report
+                .format()
+                .contains("plain"),
+        )
     }
 
     @Test

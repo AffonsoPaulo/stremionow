@@ -7,10 +7,11 @@ import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.player.forThisComputer
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.desktop.AppUpdates
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.awt.Desktop
-import java.net.URI
 
 /** The desktop has no per-window context; services are process-wide, so a single instance stands in. */
 actual abstract class PlatformContext private constructor() {
@@ -30,13 +31,16 @@ internal actual fun logWarning(
     RecentLog.add('W', message, error)
 }
 
+internal actual fun logInfo(message: String) {
+    log.log(System.Logger.Level.INFO, message)
+}
+
 /** Web pages only: links come from addons, and other schemes could start any program. */
 internal actual fun openExternalLink(
     context: PlatformContext,
     url: String,
 ) {
-    val uri = runCatching { URI(url) }.getOrNull() ?: return
-    if (uri.scheme?.lowercase() !in setOf("http", "https")) return
+    val uri = webUri(url) ?: return
     if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) return
     // Starting the browser can take a moment; keep it off the interface thread.
     AppGraph.scope.launch {
@@ -50,3 +54,18 @@ internal actual fun appVersion(context: PlatformContext): String? = System.getPr
 internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSupported
 
 internal actual fun automaticStreamMemory(): StreamMemory? = StreamMemory.forThisComputer()
+
+internal actual fun isDesktopApp(): Boolean = true
+
+internal actual fun downloadedUpdate(): StateFlow<String?> = AppUpdates.readyVersion
+
+internal actual fun installUpdateNow() = AppUpdates.restartNow()
+
+internal actual fun externalPlayerSupported(): Boolean = false
+
+internal actual fun openInExternalPlayer(
+    context: PlatformContext,
+    url: String,
+    title: String,
+    chooserTitle: String,
+): Boolean = false

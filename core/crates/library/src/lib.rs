@@ -168,6 +168,30 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (id, video_id)
     );
     ",
+    // 5: watched videos keyed by title and video. Keyed by the video alone, a video id shared
+    // by two titles (a special listed under two series, a movie under two ids) was filed under
+    // whichever title marked it first.
+    r"
+    CREATE TABLE watched_by_title (
+        id TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        watched_at INTEGER NOT NULL,
+        PRIMARY KEY (id, video_id)
+    );
+    INSERT INTO watched_by_title (id, video_id, watched_at)
+    SELECT id, video_id, watched_at FROM watched;
+    DROP TABLE watched;
+    ALTER TABLE watched_by_title RENAME TO watched;
+    ",
+    // 6: when each title last left Continue watching here (dismissed, finished or marked
+    // watched), so the next sync takes it out of the account's too instead of bringing the
+    // account's progress back.
+    r"
+    CREATE TABLE progress_removed (
+        id TEXT PRIMARY KEY,
+        removed_at INTEGER NOT NULL
+    );
+    ",
 ];
 
 /// The local database. Not thread-safe; wrap it in a mutex to share it.
@@ -223,6 +247,21 @@ impl Store {
         Ok(())
     }
 
+    /// Writes several settings in one transaction, so a reader never sees half of them and a
+    /// failure leaves the earlier values whole.
+    pub fn set_settings<V: AsRef<str>>(&mut self, entries: &[(&str, V)]) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        for (key, value) in entries {
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value.as_ref()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Number of settings whose key starts with `prefix`.
     pub fn count_settings_with_prefix(&self, prefix: &str) -> Result<u32, StoreError> {
         Ok(self.connection.query_row(
@@ -230,6 +269,15 @@ impl Store {
             [prefix],
             |row| row.get(0),
         )?)
+    }
+
+    /// Every setting whose key starts with `prefix`, as `(key, value)`, by key.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+        )?;
+        let rows = statement.query_map([prefix], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Removes every setting whose key starts with `prefix`; returns how many there were.
@@ -298,6 +346,36 @@ impl Store {
                 "INSERT INTO addons (manifest_url, manifest_json, position)
                  VALUES (?1, ?2, (SELECT COALESCE(MAX(position), -1) + 1 FROM addons))",
                 params![new_url, manifest_json],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Replaces the whole addon list with `addons` (manifest URL and manifest JSON, in order),
+    /// in one transaction so an interruption never leaves a half-replaced list. An addon that
+    /// stays keeps its enabled state; the others start enabled. A URL listed twice is kept
+    /// once, at its first place, with the last manifest.
+    pub fn replace_addons(&mut self, addons: &[(String, String)]) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        let disabled: std::collections::HashSet<String> = {
+            let mut statement =
+                transaction.prepare("SELECT manifest_url FROM addons WHERE enabled = 0")?;
+            let rows = statement.query_map([], |row| row.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        transaction.execute("DELETE FROM addons", [])?;
+        for (position, (url, manifest)) in addons.iter().enumerate() {
+            transaction.execute(
+                "INSERT INTO addons (manifest_url, manifest_json, position, enabled)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (manifest_url) DO UPDATE SET manifest_json = excluded.manifest_json",
+                params![
+                    url,
+                    manifest,
+                    i64::try_from(position).unwrap_or(i64::MAX),
+                    !disabled.contains(url)
+                ],
             )?;
         }
         transaction.commit()?;
@@ -417,6 +495,9 @@ impl Store {
                 entry.updated_at
             ],
         )?;
+        // Back in progress: an earlier removal no longer needs to reach the account.
+        self.connection
+            .execute("DELETE FROM progress_removed WHERE id = ?1", [&entry.id])?;
         Ok(())
     }
 
@@ -440,9 +521,62 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Takes a title out of "Continue watching" here (dismissed, finished, marked watched) and
+    /// remembers when, so the next sync takes it out of the account's too. The time is the
+    /// database's clock, the same system clock the rest of the app reads.
     pub fn remove_progress(&self, id: &str) -> Result<(), StoreError> {
+        let removed = self
+            .connection
+            .execute("DELETE FROM progress WHERE id = ?1", [id])?;
+        if removed > 0 {
+            self.connection.execute(
+                "INSERT INTO progress_removed (id, removed_at)
+                 VALUES (?1, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                 ON CONFLICT (id) DO UPDATE SET removed_at = excluded.removed_at",
+                [id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Takes a title out of "Continue watching" because the account says so, without
+    /// recording a removal to send back.
+    pub fn forget_progress(&self, id: &str) -> Result<(), StoreError> {
         self.connection
             .execute("DELETE FROM progress WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Titles taken out of "Continue watching" here since the last sync, with when.
+    pub fn progress_removals(&self) -> Result<Vec<(String, i64)>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id, removed_at FROM progress_removed ORDER BY id")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Forgets the given removals once the account has them; one made again since (another
+    /// time) stays for the next sync.
+    pub fn clear_progress_removals(
+        &mut self,
+        removals: &[(String, i64)],
+    ) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        for (id, at) in removals {
+            transaction.execute(
+                "DELETE FROM progress_removed WHERE id = ?1 AND removed_at = ?2",
+                params![id, at],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Forgets every removal, as when another account signs in.
+    pub fn clear_all_progress_removals(&self) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM progress_removed", [])?;
         Ok(())
     }
 
@@ -450,7 +584,7 @@ impl Store {
     pub fn mark_watched(&self, id: &str, video_id: &str, at: i64) -> Result<(), StoreError> {
         self.connection.execute(
             "INSERT INTO watched (video_id, id, watched_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT (video_id) DO UPDATE SET watched_at = excluded.watched_at",
+             ON CONFLICT (id, video_id) DO UPDATE SET watched_at = excluded.watched_at",
             params![video_id, id, at],
         )?;
         Ok(())
@@ -550,6 +684,19 @@ impl Store {
              ON CONFLICT (id) DO UPDATE SET
                 times_watched = 0, updated_at = MAX(updated_at, excluded.updated_at),
                 reset_at = excluded.reset_at",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
+    /// Records that title `id` changed at `at` without new numbers, as when a sync sends the
+    /// account a copy changed at `at`, so the next sync does not take that copy for a change
+    /// made elsewhere.
+    pub fn note_synced_change(&self, id: &str, at: i64) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO watch_stats (id, times_watched, last_watched, updated_at)
+             VALUES (?1, 0, NULL, ?2)
+             ON CONFLICT (id) DO UPDATE SET updated_at = MAX(updated_at, excluded.updated_at)",
             params![id, at],
         )?;
         Ok(())
@@ -713,6 +860,23 @@ mod tests {
         let store = Store::open(&path).expect("reopens");
         assert_eq!(store.setting("k").expect("reads").as_deref(), Some("v"));
         assert_eq!(store.setting("missing").expect("reads"), None);
+        store.set_setting("p:b", "2").expect("writes");
+        store.set_setting("p:a", "1").expect("writes");
+        assert_eq!(
+            store.settings_with_prefix("p:").expect("lists"),
+            [("p:a".into(), "1".into()), ("p:b".into(), "2".into())]
+        );
+    }
+
+    #[test]
+    fn writes_several_settings_together() {
+        let mut store = Store::open_in_memory().expect("opens");
+        store.set_setting("a", "old").expect("writes");
+        store
+            .set_settings(&[("a", "1"), ("b", "2")])
+            .expect("writes both");
+        assert_eq!(store.setting("a").expect("reads").as_deref(), Some("1"));
+        assert_eq!(store.setting("b").expect("reads").as_deref(), Some("2"));
     }
 
     #[test]
@@ -894,6 +1058,88 @@ mod tests {
     }
 
     #[test]
+    fn a_video_id_shared_by_two_titles_counts_for_both() {
+        let store = Store::open_in_memory().expect("store");
+        store.mark_watched("a", "special", 1).expect("marks");
+        store.mark_watched("b", "special", 2).expect("marks");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["special"]);
+        assert_eq!(store.watched_videos("b").expect("reads"), ["special"]);
+        store.unmark_watched("a", "special").expect("unmarks");
+        assert!(store.watched_videos("a").expect("reads").is_empty());
+        assert_eq!(store.watched_videos("b").expect("reads"), ["special"]);
+        assert_eq!(store.watched_titles(10).expect("lists").len(), 1);
+    }
+
+    #[test]
+    fn replacing_the_addon_list_keeps_what_was_disabled() {
+        let mut store = Store::open_in_memory().expect("store");
+        for url in ["a", "b", "c"] {
+            store.upsert_addon(url, "{}").expect("adds");
+        }
+        store.set_addon_enabled("b", false).expect("disables");
+        let list = |urls: &[&str]| -> Vec<(String, String)> {
+            urls.iter()
+                .map(|url| ((*url).to_owned(), format!("{{\"{url}\":1}}")))
+                .collect()
+        };
+        store
+            .replace_addons(&list(&["d", "b", "a", "d"]))
+            .expect("replaces");
+        let addons = store.addons().expect("lists");
+        let urls: Vec<_> = addons.iter().map(|a| a.manifest_url.as_str()).collect();
+        assert_eq!(urls, ["d", "b", "a"]);
+        assert!(addons[0].enabled, "a new addon starts enabled");
+        assert!(!addons[1].enabled, "a disabled one stays disabled");
+        assert!(addons[2].enabled);
+        assert_eq!(addons[1].manifest_json, r#"{"b":1}"#);
+    }
+
+    #[test]
+    fn remembers_titles_taken_out_of_continue_watching() {
+        let mut store = Store::open_in_memory().expect("store");
+        store.remove_progress("none").expect("nothing to remove");
+        store
+            .save_progress(&progress("a", "a:1:1", 1))
+            .expect("saves");
+        store
+            .save_progress(&progress("b", "b:1:1", 1))
+            .expect("saves");
+        store.remove_progress("a").expect("removes");
+        store.forget_progress("b").expect("forgets");
+        let removals = store.progress_removals().expect("lists");
+        assert_eq!(
+            removals.len(),
+            1,
+            "only the removal made here: {removals:?}"
+        );
+        assert_eq!(removals[0].0, "a");
+        assert!(removals[0].1 > 1_600_000_000_000, "a time in milliseconds");
+
+        store
+            .clear_progress_removals(&[("a".into(), removals[0].1 - 1)])
+            .expect("clears another removal");
+        assert_eq!(store.progress_removals().expect("lists").len(), 1);
+        store.clear_progress_removals(&removals).expect("clears");
+        assert!(store.progress_removals().expect("lists").is_empty());
+
+        store.remove_progress("a").expect("nothing left to remove");
+        store
+            .save_progress(&progress("a", "a:1:2", 2))
+            .expect("saves");
+        store.remove_progress("a").expect("removes");
+        store
+            .save_progress(&progress("a", "a:1:3", 3))
+            .expect("plays again");
+        assert!(
+            store.progress_removals().expect("lists").is_empty(),
+            "playing again cancels the removal"
+        );
+        store.remove_progress("a").expect("removes");
+        store.clear_all_progress_removals().expect("clears");
+        assert!(store.progress_removals().expect("lists").is_empty());
+    }
+
+    #[test]
     fn unmarking_forgets_only_that_video() {
         let store = Store::open_in_memory().expect("store");
         store.mark_watched("a", "a:1:1", 1).expect("marks");
@@ -1036,17 +1282,19 @@ mod tests {
         connection
             .pragma_update(None, "user_version", 2)
             .expect("versions");
-        let store = Store { connection };
-        store.mark_watched("tt1", "tt1:1:1", 10).expect("marks");
-        store.mark_watched("tt1", "tt1:1:2", 30).expect("marks");
-        store
-            .save_progress(&progress("tt1", "tt1:1:3", 20))
-            .expect("saves");
-        store
-            .save_progress(&progress("tt2", "tt2:1:1", 40))
-            .expect("saves");
+        // Written as version 2 wrote them: the store's methods expect the latest schema.
+        connection
+            .execute_batch(
+                "INSERT INTO watched (video_id, id, watched_at) VALUES ('tt1:1:1', 'tt1', 10);
+                 INSERT INTO watched (video_id, id, watched_at) VALUES ('tt1:1:2', 'tt1', 30);
+                 INSERT INTO progress (id, kind, name, video_id, position_ms, duration_ms, updated_at)
+                 VALUES ('tt1', 'series', 'One', 'tt1:1:3', 1, 2, 20);
+                 INSERT INTO progress (id, kind, name, video_id, position_ms, duration_ms, updated_at)
+                 VALUES ('tt2', 'series', 'Two', 'tt2:1:1', 1, 2, 40);",
+            )
+            .expect("writes");
 
-        let store = Store::migrate(store.connection).expect("migrates to 3");
+        let store = Store::migrate(connection).expect("migrates to the latest");
         let stats = store.all_watch_stats().expect("lists");
         assert_eq!(
             stats,
@@ -1089,6 +1337,11 @@ mod tests {
                 .expect("marks");
         }
         let store = Store::open(&path).expect("migrates to the latest");
+        assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
+        assert_eq!(store.watched_titles(10).expect("lists")[0].watched_at, 1);
+        store
+            .mark_watched("b", "a:1:1", 2)
+            .expect("marks under another title");
         assert_eq!(store.watched_videos("a").expect("reads"), ["a:1:1"]);
         assert_eq!(
             store.watched_sync("a").expect("reads"),

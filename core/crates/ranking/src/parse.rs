@@ -17,17 +17,20 @@ pub fn parse(text: &SourceText<'_>) -> Traits {
         .map(|field| truncate(field, MAX_INSPECTED_BYTES))
         .join("\n");
     let tokens = tokenize(&joined);
+    let tags = tag_tokens(&joined);
     let lower = joined.to_lowercase();
+    let (languages, subtitle_languages) = languages(&joined, &tags);
     Traits {
         resolution: resolution(&tokens),
         hdr: sorted_unique(scan(&tokens, hdr)),
         codec: scan(&tokens, codec).into_iter().next(),
         audio: sorted_unique(scan(&tokens, audio)),
-        quality: quality(&tokens),
+        quality: quality(&tags),
         size_bytes: first_size(&joined),
         seeders: seeders(&lower),
-        cached: cached(&joined, &tokens),
-        languages: languages(&joined, &tokens),
+        cached: cached(truncate(text.name, MAX_INSPECTED_BYTES), &joined, &tokens),
+        languages,
+        subtitle_languages,
         multi_audio: multi_audio(&tokens),
         provider: provider(&joined),
         release_group: release_group(&joined),
@@ -70,6 +73,52 @@ fn group_of(word: &str) -> Option<String> {
         && group.bytes().any(|b| b.is_ascii_alphabetic())
         && !NOT_GROUPS.contains(&group.to_ascii_lowercase().as_str());
     plausible.then(|| group.to_owned())
+}
+
+/// The tokens that can be tags, line by line. On a line with a release name, only those after
+/// its year or episode tag: release names put the title first, and title words are not tags
+/// ("The.Italian.Job.2003" is not in Italian, "Charlottes.Web.2006" is no WEB-DL). They are
+/// marked [`Token::after_title`]. Every token of a line without a year or episode tag counts
+/// ("🌐 English, Spanish", "Movie PT-BR 720p").
+fn tag_tokens(text: &str) -> Vec<Token<'_>> {
+    let mut tags = Vec::new();
+    for line in text.split('\n') {
+        let mut tokens = tokenize(line);
+        // The first word may be a title that is a year ("1917.2019.1080p", "2012.2009").
+        match tokens.iter().skip(1).position(ends_title) {
+            Some(before) => {
+                let end = before + 1;
+                for token in &mut tokens[end..] {
+                    token.after_title = true;
+                }
+                tags.extend(tokens.into_iter().skip(end));
+            }
+            None => tags.extend(tokens),
+        }
+    }
+    tags
+}
+
+/// A release year (`2003`) or an episode tag (`S01`, `S01E02`, `1x02`), which end the title of
+/// a release name. The token itself is kept as a tag.
+fn ends_title(token: &Token<'_>) -> bool {
+    let digits = |s: &str| (1..=3).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit());
+    let lower = token.lower.as_str();
+    let year = lower.len() == 4
+        && lower.bytes().all(|b| b.is_ascii_digit())
+        && lower
+            .parse::<u32>()
+            .is_ok_and(|y| (1900..=2099).contains(&y));
+    let episode = match lower.strip_prefix('s') {
+        Some(rest) => match rest.split_once('e') {
+            Some((season, episode)) => digits(season) && digits(episode),
+            None => digits(rest),
+        },
+        None => lower.split_once('x').is_some_and(|(season, episode)| {
+            digits(season) && digits(episode) && episode.len() >= 2
+        }),
+    };
+    year || episode
 }
 
 fn sorted_unique<T: Ord>(mut values: Vec<T>) -> Vec<T> {
@@ -260,18 +309,80 @@ const DEBRID_TAGS: &[&str] = &[
     "offcloud",
 ];
 
-fn cached(text: &str, tokens: &[Token<'_>]) -> Option<bool> {
+/// Debrid cache state. Addons say it in the stream name (`[RD+] Torrentio`, `[RD⚡] Comet`,
+/// `MediaFusion | RD ⏳`, `Jackettio Instant`) or spell it out (`Not cached`, `Cached: Yes`).
+/// Words and emoji that also turn up in release names and descriptions (`Instant.Family.2018`,
+/// a `⏳` before a duration) are only trusted in the name or right next to a debrid service.
+fn cached(name: &str, text: &str, tokens: &[Token<'_>]) -> Option<bool> {
     if let Some(state) = bracket_tags(text).find_map(debrid_tag_state) {
         return Some(state);
     }
-    let has_token = |words: &[&str]| tokens.iter().any(|t| words.contains(&t.lower.as_str()));
-    if text.contains('⏳') || has_token(&["uncached", "notcached"]) {
+    if let Some(state) = tokens.windows(2).find_map(stated_cache).or_else(|| {
+        // A spelled-out state as the very last word ("... Uncached").
+        tokens
+            .last()
+            .and_then(|t| stated_cache(std::slice::from_ref(t)))
+    }) {
+        return Some(state);
+    }
+    if let Some(state) = emoji_next_to_service(text) {
+        return Some(state);
+    }
+    let name_has = |words: &[&str]| {
+        tokenize(name).iter().any(|t| {
+            words.contains(&t.lower.as_str())
+                || t.lower
+                    .strip_suffix('+')
+                    .is_some_and(|service| DEBRID_TAGS.contains(&service))
+        })
+    };
+    if name.contains(['⏳', '⬇']) {
         Some(false)
-    } else if text.contains('⚡') || has_token(&["instant", "cached"]) {
+    } else if name.contains('⚡') || name_has(&["instant", "cached"]) {
         Some(true)
     } else {
         None
     }
+}
+
+/// A cache state spelled out at the start of `pair`: `uncached`, `not cached`, `cached: no`,
+/// `cached: yes`, or a debrid service followed by `cached`, `instant` or `download`. The
+/// positive words alone say nothing here; see [`cached`].
+fn stated_cache(pair: &[Token<'_>]) -> Option<bool> {
+    let a = pair.first().map_or("", |t| t.lower.as_str());
+    let b = pair.get(1).map_or("", |t| t.lower.as_str());
+    match [a, b] {
+        ["uncached" | "notcached" | "noncached", _] => Some(false),
+        ["not" | "non", "cached"] => Some(false),
+        ["cached", "no" | "false" | "0"] => Some(false),
+        ["cached", "yes" | "true" | "1"] => Some(true),
+        [service, state] if DEBRID_TAGS.contains(&service) => match state {
+            "cached" | "instant" => Some(true),
+            "uncached" | "download" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A `⚡` or `⏳` right after or before a debrid service, as in `RD ⚡️` or `⏳RD`.
+fn emoji_next_to_service(text: &str) -> Option<bool> {
+    let is_service = |word: &str| DEBRID_TAGS.contains(&word.to_lowercase().as_str());
+    let filler = |c: char| c.is_whitespace() || matches!(c, '\u{fe0f}' | '\u{200d}');
+    text.match_indices(['⚡', '⏳', '⬇'])
+        .find_map(|(at, emoji)| {
+            let before = text[..at].trim_end_matches(filler);
+            let word_before = before
+                .rsplit(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or_default();
+            let after = text[at + emoji.len()..].trim_start_matches(filler);
+            let word_after = after
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or_default();
+            (is_service(word_before) || is_service(word_after)).then_some(emoji == "⚡")
+        })
 }
 
 /// Contents of short `[...]` groups in `text`.
@@ -299,25 +410,153 @@ fn debrid_tag_state(tag: &str) -> Option<bool> {
     }
 }
 
-fn languages(text: &str, tokens: &[Token<'_>]) -> Vec<String> {
-    let from_flags = flag_countries(text)
-        .into_iter()
-        .filter_map(language_of_country);
-    let from_words = scan(tokens, language_word);
-    let mut languages: Vec<String> = Vec::new();
-    for code in from_flags.chain(from_words) {
-        if !languages.iter().any(|known| known == code) {
-            languages.push(code.to_owned());
+/// Words that say the languages next to them are subtitles: "Sub.Ita", "Subs: English",
+/// "English Subtitles", "Napisy PL".
+const SUBTITLE_MARKERS: &[&str] = &[
+    "sub",
+    "subs",
+    "subbed",
+    "subtitle",
+    "subtitles",
+    "subtitled",
+    "legenda",
+    "legendas",
+    "subtitulado",
+    "subtitulos",
+    "subtítulos",
+    "sottotitoli",
+    "untertitel",
+    "napisy",
+];
+
+/// Codes of India's languages, which its flag stands for.
+const INDIAN_LANGUAGES: &[&str] = &["hi", "ta", "te", "ml", "kn", "bn", "mr", "pa", "gu", "ur"];
+
+/// Audio and subtitle languages, each as ISO 639-1 codes (`fil` for Filipino, which has none
+/// that Android uses), deduplicated, in order of discovery. Flags are read as audio.
+///
+/// India's flag stands for any of its languages: Torrentio shows it for Hindi, Tamil and
+/// Telugu alike. It adds Hindi, the most common, only when the text names none of India's
+/// languages; with `Tam` or `Telugu` in the name, those are the languages.
+fn languages(text: &str, tags: &[Token<'_>]) -> (Vec<String>, Vec<String>) {
+    let mut audio: Vec<&'static str> = Vec::new();
+    let mut subtitles: Vec<&'static str> = Vec::new();
+    let push = |list: &mut Vec<&'static str>, code: &'static str| {
+        if !list.contains(&code) {
+            list.push(code);
+        }
+    };
+    let mut indian_flag = false;
+    for country in flag_countries(text) {
+        if country == ['i', 'n'] {
+            indian_flag = true;
+        } else if let Some(code) = language_of_country(country) {
+            push(&mut audio, code);
         }
     }
-    languages
+    for found in scan(tags, language_at) {
+        let list = if found.subtitles {
+            &mut subtitles
+        } else {
+            &mut audio
+        };
+        for code in found.codes {
+            push(list, code);
+        }
+    }
+    if indian_flag && !audio.iter().any(|code| INDIAN_LANGUAGES.contains(code)) {
+        push(&mut audio, "hi");
+    }
+    let owned = |list: Vec<&str>| list.into_iter().map(str::to_owned).collect();
+    (owned(audio), owned(subtitles))
+}
+
+/// Languages found together, and whether they are subtitles.
+struct FoundLanguages {
+    codes: Vec<&'static str>,
+    subtitles: bool,
+}
+
+fn language_at(t: &[Token<'_>]) -> Option<(FoundLanguages, usize)> {
+    let [a, ..] = lookahead(t);
+    if SUBTITLE_MARKERS.contains(&a) {
+        // "Sub.Ita", "Subs: English, Spanish": the languages that follow.
+        let mut codes = Vec::new();
+        let mut i = 1;
+        while let Some((code, consumed)) = language_word(&t[i..]) {
+            codes.push(code);
+            i += consumed;
+        }
+        return (!codes.is_empty()).then_some((
+            FoundLanguages {
+                codes,
+                subtitles: true,
+            },
+            i,
+        ));
+    }
+    if let Some(code) = subtitle_tag(a) {
+        let found = FoundLanguages {
+            codes: vec![code],
+            subtitles: true,
+        };
+        return Some((found, 1));
+    }
+    let (code, consumed) = language_word(t)?;
+    // "English Subtitles" and "Eng.Sub" are subtitles, but in "Eng.Sub.Ita" English is the
+    // audio and the subtitles are Italian.
+    let then = t.get(consumed..).unwrap_or_default();
+    let subtitles = then.first().is_some_and(|marker| {
+        SUBTITLE_MARKERS.contains(&marker.lower.as_str()) && language_word(&then[1..]).is_none()
+    });
+    let found = FoundLanguages {
+        codes: vec![code],
+        subtitles,
+    };
+    Some((found, consumed + usize::from(subtitles)))
+}
+
+/// Single-word subtitle tags: `VOSTFR` (original audio, French subtitles), `VOSE`,
+/// `Legendado` (Portuguese subtitles), and `Sub` joined to a language (`SubIta`, `SubEng`).
+fn subtitle_tag(token: &str) -> Option<&'static str> {
+    Some(match token {
+        "vostfr" | "stfr" | "subfrench" => "fr",
+        "vose" => "es",
+        "legendado" | "legendada" => "pt",
+        _ => {
+            let language = token.strip_prefix("sub")?;
+            return word_language(language, true).or_else(|| short_code(language));
+        }
+    })
+}
+
+/// Two-letter codes, trusted only joined to a marker (`SubPt`).
+fn short_code(code: &str) -> Option<&'static str> {
+    const CODES: &[&str] = &[
+        "en", "pt", "es", "fr", "de", "it", "nl", "pl", "ru", "ja", "ko", "zh", "ar", "tr", "el",
+        "he", "hi", "sv", "da", "fi", "cs", "hu", "ro", "uk", "bg", "hr", "sr", "vi", "th", "id",
+    ];
+    CODES.iter().find(|c| **c == code).copied()
 }
 
 fn language_of_country([a, b]: [char; 2]) -> Option<&'static str> {
     Some(match [a, b] {
         ['g', 'b'] | ['u', 's'] | ['a', 'u'] | ['n', 'z'] | ['i', 'e'] => "en",
-        ['b', 'r'] | ['p', 't'] => "pt",
-        ['e', 's'] | ['m', 'x'] | ['a', 'r'] | ['c', 'o'] | ['c', 'l'] | ['p', 'e'] => "es",
+        ['b', 'r'] | ['p', 't'] | ['a', 'o'] | ['m', 'z'] => "pt",
+        ['e', 's']
+        | ['m', 'x']
+        | ['a', 'r']
+        | ['c', 'o']
+        | ['c', 'l']
+        | ['p', 'e']
+        | ['v', 'e']
+        | ['u', 'y']
+        | ['e', 'c']
+        | ['b', 'o']
+        | ['p', 'y']
+        | ['c', 'u']
+        | ['g', 't']
+        | ['c', 'r'] => "es",
         ['i', 't'] => "it",
         ['f', 'r'] => "fr",
         ['d', 'e'] | ['a', 't'] => "de",
@@ -325,7 +564,6 @@ fn language_of_country([a, b]: [char; 2]) -> Option<&'static str> {
         ['k', 'r'] => "ko",
         ['r', 'u'] => "ru",
         ['c', 'n'] | ['t', 'w'] | ['h', 'k'] => "zh",
-        ['i', 'n'] => "hi",
         ['n', 'l'] => "nl",
         ['p', 'l'] => "pl",
         ['t', 'r'] => "tr",
@@ -335,67 +573,186 @@ fn language_of_country([a, b]: [char; 2]) -> Option<&'static str> {
         ['f', 'i'] => "fi",
         ['g', 'r'] => "el",
         ['c', 'z'] => "cs",
+        ['s', 'k'] => "sk",
         ['h', 'u'] => "hu",
         ['r', 'o'] => "ro",
+        ['b', 'g'] => "bg",
+        ['r', 's'] => "sr",
+        ['h', 'r'] => "hr",
+        ['s', 'i'] => "sl",
+        ['b', 'a'] => "bs",
+        ['m', 'k'] => "mk",
+        ['a', 'l'] => "sq",
+        ['l', 't'] => "lt",
+        ['l', 'v'] => "lv",
+        ['e', 'e'] => "et",
+        ['i', 's'] => "is",
         ['u', 'a'] => "uk",
+        ['b', 'y'] => "be",
+        ['g', 'e'] => "ka",
+        ['a', 'm'] => "hy",
+        ['k', 'z'] => "kk",
+        ['a', 'z'] => "az",
+        ['u', 'z'] => "uz",
         ['i', 'l'] => "he",
-        ['s', 'a'] | ['a', 'e'] | ['e', 'g'] => "ar",
+        ['s', 'a']
+        | ['a', 'e']
+        | ['e', 'g']
+        | ['m', 'a']
+        | ['d', 'z']
+        | ['t', 'n']
+        | ['i', 'q']
+        | ['j', 'o']
+        | ['l', 'b']
+        | ['s', 'y']
+        | ['k', 'w']
+        | ['q', 'a'] => "ar",
+        ['i', 'r'] => "fa",
+        ['p', 'k'] => "ur",
+        ['b', 'd'] => "bn",
+        ['n', 'p'] => "ne",
+        ['l', 'k'] => "si",
         ['t', 'h'] => "th",
         ['v', 'n'] => "vi",
         ['i', 'd'] => "id",
+        ['m', 'y'] => "ms",
+        ['p', 'h'] => "fil",
+        ['k', 'h'] => "km",
+        ['m', 'm'] => "my",
+        ['m', 'n'] => "mn",
         _ => return None,
     })
 }
 
-/// Language names and release-name tags, for the audio and the subtitles alike. Two-letter
-/// codes alone ("It", "De") are too ambiguous to trust and are ignored, except for the `PT-BR`
-/// pair; so are three-letter codes that are also common words in titles ("por", "fra", "chi",
-/// "vie", "rum").
+/// A language named at the start of `t`, and how many tokens name it: the `PT-BR` pair, a
+/// language name or a release-name tag (see [`word_language`]).
 fn language_word(t: &[Token<'_>]) -> Option<(&'static str, usize)> {
     let [a, b, _] = lookahead(t);
     if [a, b] == ["pt", "br"] {
         return Some(("pt", 2));
     }
-    let code = match a {
-        "english" | "eng" | "subeng" => "en",
+    let token = t.first()?;
+    Some((word_language(a, token.after_title)?, 1))
+}
+
+/// Language names, in English and in the language itself, and release-name tags. Two-letter
+/// codes alone ("It", "De") are too ambiguous to trust and are ignored; so are three-letter
+/// codes that are also common words in titles ("por", "fra", "chi", "vie", "rum").
+/// Three-letter tags that are names or words too (`Ben`, `Mar`, `Tam`, `Fin`) count only among
+/// a release name's tags, after its year (`after_title`).
+fn word_language(word: &str, after_title: bool) -> Option<&'static str> {
+    let code = match word {
+        "english" | "eng" | "inglés" | "ingles" | "inglês" | "anglais" | "englisch" => "en",
         "portuguese" | "português" | "portugues" | "dublado" | "dublada" | "ptbr" | "brazilian"
-        | "legendado" => "pt",
+        | "brasileiro" => "pt",
         "spanish" | "español" | "espanol" | "castellano" | "castilian" | "latino" | "latam"
-        | "spa" | "esp" => "es",
-        "french" | "français" | "francais" | "truefrench" | "vff" | "vfq" | "vostfr" | "fre" => {
-            "fr"
+        | "spa" | "esp" | "espanhol" | "espagnol" => "es",
+        "french" | "français" | "francais" | "francés" | "francês" | "truefrench" | "vff"
+        | "vfq" | "fre" => "fr",
+        "german" | "deutsch" | "ger" | "deu" | "alemán" | "aleman" | "alemão" | "allemand" => {
+            "de"
         }
-        "german" | "deutsch" | "ger" | "deu" => "de",
-        "italian" | "italiano" | "ita" | "subita" => "it",
-        "japanese" | "jpn" => "ja",
-        "korean" | "kor" => "ko",
-        "russian" | "rus" => "ru",
-        "chinese" | "mandarin" | "cantonese" | "chs" | "cht" => "zh",
+        "italian" | "italiano" | "ita" | "italien" => "it",
+        "japanese" | "jpn" | "japonês" | "japones" | "日本語" => "ja",
+        "korean" | "kor" | "한국어" => "ko",
+        "russian" | "rus" | "русский" | "ruso" | "russe" => "ru",
+        "chinese" | "mandarin" | "cantonese" | "chs" | "cht" | "zho" | "中文" | "国语" | "粤语" => {
+            "zh"
+        }
         "hindi" => "hi",
-        "dutch" | "nederlands" | "nld" => "nl",
-        "polish" | "polski" => "pl",
+        "dutch" | "nederlands" | "nld" | "flemish" => "nl",
+        "polish" | "polski" | "lektor" => "pl",
         "turkish" | "türkçe" | "turkce" => "tr",
         "swedish" | "svenska" | "swe" => "sv",
         "norwegian" | "norsk" => "no",
         "danish" | "dansk" => "da",
         "finnish" | "suomi" => "fi",
-        "greek" => "el",
-        "czech" | "cesky" | "česky" => "cs",
+        "greek" | "ελληνικά" => "el",
+        "czech" | "cesky" | "česky" | "cze" | "ces" => "cs",
+        "slovak" | "slovakian" | "slk" => "sk",
+        "slovenian" | "slovene" | "slv" => "sl",
         "hungarian" | "magyar" => "hu",
         "romanian" | "romana" | "română" => "ro",
-        "ukrainian" | "ukr" => "uk",
-        "hebrew" => "he",
-        "arabic" => "ar",
+        "bulgarian" | "български" => "bg",
+        "serbian" | "srpski" | "srp" => "sr",
+        "croatian" | "hrvatski" | "hrv" => "hr",
+        "bosnian" => "bs",
+        "macedonian" => "mk",
+        "albanian" => "sq",
+        "lithuanian" => "lt",
+        "latvian" => "lv",
+        "estonian" => "et",
+        "icelandic" => "is",
+        "ukrainian" | "ukr" | "українська" => "uk",
+        "belarusian" => "be",
+        "georgian" => "ka",
+        "armenian" => "hy",
+        "kazakh" => "kk",
+        "azerbaijani" => "az",
+        "uzbek" => "uz",
+        "hebrew" | "heb" | "עברית" => "he",
+        "arabic" | "العربية" => "ar",
+        "persian" | "farsi" => "fa",
+        "urdu" => "ur",
+        "tamil" => "ta",
+        "telugu" => "te",
+        "malayalam" => "ml",
+        "kannada" => "kn",
+        "bengali" | "bangla" => "bn",
+        "marathi" => "mr",
+        "punjabi" => "pa",
+        "gujarati" => "gu",
+        "nepali" => "ne",
+        "sinhala" => "si",
         "thai" => "th",
         "vietnamese" => "vi",
         "indonesian" => "id",
-        "tamil" => "ta",
-        "telugu" => "te",
-        "bengali" => "bn",
-        "persian" | "farsi" => "fa",
+        "malay" | "melayu" | "msa" => "ms",
+        "filipino" | "tagalog" => "fil",
+        "khmer" => "km",
+        "burmese" => "my",
+        "mongolian" => "mn",
+        "catalan" | "català" | "catala" => "ca",
+        "basque" | "euskera" => "eu",
+        "galician" | "galego" => "gl",
+        "welsh" => "cy",
+        "swahili" => "sw",
+        "afrikaans" => "af",
+        _ if after_title => match word {
+            "hin" => "hi",
+            "tam" => "ta",
+            "tel" => "te",
+            "mal" => "ml",
+            "kan" => "kn",
+            "ben" => "bn",
+            "mar" => "mr",
+            "pun" | "pan" => "pa",
+            "guj" => "gu",
+            "urd" => "ur",
+            "bul" => "bg",
+            "pol" => "pl",
+            "tur" => "tr",
+            "gre" | "ell" => "el",
+            "hun" => "hu",
+            "fin" => "fi",
+            "dan" => "da",
+            "nor" => "no",
+            "dut" => "nl",
+            "jap" => "ja",
+            "ara" => "ar",
+            "tha" => "th",
+            "ind" => "id",
+            "fil" => "fil",
+            "est" => "et",
+            "lit" => "lt",
+            "cat" => "ca",
+            "lav" => "lv",
+            "per" | "fas" => "fa",
+            _ => return None,
+        },
         _ => return None,
     };
-    Some((code, 1))
+    Some(code)
 }
 
 fn multi_audio(tokens: &[Token<'_>]) -> bool {
@@ -529,6 +886,70 @@ mod tests {
     #[test]
     fn instant_marker() {
         assert_eq!(parse3("Jackettio Instant 720p", "", "").cached, Some(true));
+    }
+
+    #[test]
+    fn spelled_out_cache_states() {
+        for (name, title, description, expected) in [
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nNot cached",
+                Some(false),
+            ),
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nCached: No",
+                Some(false),
+            ),
+            ("Addon", "Cached: false", "", Some(false)),
+            (
+                "TorBox\n1080p",
+                "",
+                "Movie.2020.1080p.WEB\nCached: Yes",
+                Some(true),
+            ),
+            ("Addon 1080p", "Movie.2020.1080p Uncached", "", Some(false)),
+            ("Addon", "", "Movie.2020 | TB instant", Some(true)),
+            ("Addon", "", "Movie.2020 | RD download", Some(false)),
+            ("Not cached", "", "", Some(false)),
+            ("RD+ Torrentio", "", "", Some(true)),
+            ("TorBox Cached\n4K", "", "", Some(true)),
+        ] {
+            assert_eq!(
+                parse3(name, title, description).cached,
+                expected,
+                "{name} / {title} / {description}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_names_and_descriptions_do_not_fake_a_cache_state() {
+        for (name, title, description) in [
+            (
+                "Torrentio\n1080p",
+                "Instant.Family.2018.1080p.BluRay.x264",
+                "",
+            ),
+            ("Torrentio\n1080p", "Cached.2005.1080p.BluRay", ""),
+            ("Addon", "", "Movie.2020.1080p\n⏳ 2h 10m"),
+            ("Addon", "Movie ⚡ Lightning.2019.720p", ""),
+            ("Addon", "", "💾 1.2 GB ⚡ fast mirror"),
+        ] {
+            assert_eq!(
+                parse3(name, title, description).cached,
+                None,
+                "{name} / {title} / {description}"
+            );
+        }
+    }
+
+    #[test]
+    fn emoji_next_to_a_debrid_service_count_anywhere() {
+        assert_eq!(parse3("MediaFusion", "", "RD ⚡️ 4K").cached, Some(true));
+        assert_eq!(parse3("MediaFusion", "", "⏳ TB 4K").cached, Some(false));
     }
 
     #[test]
@@ -683,11 +1104,138 @@ mod tests {
     }
 
     #[test]
-    fn more_language_names_and_subtitle_tags() {
+    fn subtitle_tags_are_not_audio() {
+        let cases: [(&str, &[&str], &[&str]); 11] = [
+            ("Hokum.2026.4K.HDR.BDRemux.Eng.Sub.Ita", &["en"], &["it"]),
+            ("Movie.2023.1080p.WEB.SubIta.SubEng", &[], &["it", "en"]),
+            ("Film 2023 VOSTFR 1080p", &[], &["fr"]),
+            ("Filme.2023.1080p.Legendado", &[], &["pt"]),
+            ("Película 2023 1080p VOSE", &[], &["es"]),
+            ("Movie.2023.1080p.ITA.ENG.Subs", &["it"], &["en"]),
+            ("Movie 2023 1080p English Subtitles", &[], &["en"]),
+            (
+                "Movie 2023\nSubs: English, Spanish, PT-BR",
+                &[],
+                &["en", "es", "pt"],
+            ),
+            ("Film.2023.1080p.Lektor.PL.Napisy.PL", &["pl"], &[]),
+            ("Film 2023 1080p Napisy Polski", &[], &["pl"]),
+            (
+                "Movie.2023.1080p.Dual.Audio.Hindi.English.ESub",
+                &["hi", "en"],
+                &[],
+            ),
+        ];
+        for (title, audio, subtitles) in cases {
+            let t = parse_title(title);
+            assert_eq!(t.languages, audio, "{title}: audio");
+            assert_eq!(t.subtitle_languages, subtitles, "{title}: subtitles");
+        }
+    }
+
+    #[test]
+    fn languages_of_every_region() {
         let cases: [(&str, &[&str]); 9] = [
-            ("Hokum.2026.4K.HDR.BDRemux.Eng.Sub.Ita", &["en", "it"]),
-            ("Movie.2023.1080p.WEB.SubIta.SubEng", &["it", "en"]),
-            ("Film 2023 VOSTFR 1080p", &["fr"]),
+            (
+                "🇧🇬 🇷🇸 🇭🇷 🇸🇰 🇸🇮 🇱🇹 🇱🇻 🇪🇪",
+                &["bg", "sr", "hr", "sk", "sl", "lt", "lv", "et"],
+            ),
+            ("🇮🇷 🇲🇾 🇵🇭 🇧🇩", &["fa", "ms", "fil", "bn"]),
+            (
+                "🇺🇦 🇹🇭 🇻🇳 🇮🇩 🇹🇷 🇬🇷 🇮🇱 🇨🇿",
+                &["uk", "th", "vi", "id", "tr", "el", "he", "cs"],
+            ),
+            (
+                "🇭🇺 🇷🇴 🇵🇱 🇳🇱 🇸🇪 🇳🇴 🇩🇰 🇫🇮",
+                &["hu", "ro", "pl", "nl", "sv", "no", "da", "fi"],
+            ),
+            (
+                "🌐 Bulgarian, Serbian, Croatian, Malay, Catalan",
+                &["bg", "sr", "hr", "ms", "ca"],
+            ),
+            (
+                "Movie.2023.1080p.WEB.Hin.Tam.Tel.Mal.Kan",
+                &["hi", "ta", "te", "ml", "kn"],
+            ),
+            ("Movie.2023.720p.Ben.Mar.Pun", &["bn", "mr", "pa"]),
+            ("Movie.2023.1080p.Rus.Ukr.Eng", &["ru", "uk", "en"]),
+            ("Película.2023.1080p.Castellano.Cat", &["es", "ca"]),
+        ];
+        for (title, expected) in cases {
+            assert_eq!(parse_title(title).languages, expected, "{title}");
+        }
+    }
+
+    #[test]
+    fn the_flag_of_india_means_hindi_only_without_another_indian_language() {
+        assert_eq!(parse_title("Movie.2023.1080p\n🇮🇳").languages, ["hi"]);
+        assert_eq!(
+            parse_title("Movie.2023.1080p.Tamil\n🇬🇧 / 🇮🇳").languages,
+            ["en", "ta"]
+        );
+        assert_eq!(
+            parse_title("Movie.2023.1080p.Tel.Hin\n🇮🇳").languages,
+            ["te", "hi"]
+        );
+    }
+
+    #[test]
+    fn title_words_are_not_tags() {
+        for (title, languages, quality) in [
+            (
+                "The.Italian.Job.2003.1080p.BluRay.x264",
+                &[][..],
+                Some(ReleaseQuality::BluRay),
+            ),
+            (
+                "The.Danish.Girl.2015.720p.HDTV",
+                &[],
+                Some(ReleaseQuality::Hdtv),
+            ),
+            (
+                "My.Big.Fat.Greek.Wedding.2002.DVDRip",
+                &[],
+                Some(ReleaseQuality::Dvd),
+            ),
+            (
+                "Charlottes.Web.2006.720p.HDTV.x264",
+                &[],
+                Some(ReleaseQuality::Hdtv),
+            ),
+            ("Charlotte's Web (2006) 1080p", &[], None),
+            (
+                "The.French.Dispatch.2021.1080p.WEB-DL.French",
+                &["fr"],
+                Some(ReleaseQuality::WebDl),
+            ),
+            (
+                "Ben.Hur.1959.1080p.BluRay",
+                &[],
+                Some(ReleaseQuality::BluRay),
+            ),
+            ("Mar.Adentro.2004.1080p.Spanish", &["es"], None),
+            (
+                "1917.2019.1080p.WEB.Hin",
+                &["hi"],
+                Some(ReleaseQuality::WebDl),
+            ),
+            (
+                "The.Office.US.S01E01.720p.WEB.Eng",
+                &["en"],
+                Some(ReleaseQuality::WebDl),
+            ),
+        ] {
+            let t = parse_title(title);
+            assert_eq!(t.languages, languages, "{title}");
+            assert_eq!(t.quality, quality, "{title}");
+        }
+        // Without a year the whole line counts, as in a short label.
+        assert_eq!(parse_title("Tam 1080p").languages, Vec::<String>::new());
+    }
+
+    #[test]
+    fn more_language_names_and_subtitle_tags() {
+        let cases: [(&str, &[&str]); 5] = [
             ("Movie 2023 LATAM 1080p", &["es"]),
             (
                 "🌐 Dutch, Polish, Turkish, Swedish, Norwegian",
@@ -705,7 +1253,6 @@ mod tests {
                 "Tamil Telugu Bengali Farsi CHS",
                 &["ta", "te", "bn", "fa", "zh"],
             ),
-            ("Filme.2023.1080p.Legendado", &["pt"]),
         ];
         for (title, expected) in cases {
             assert_eq!(parse_title(title).languages, expected, "{title}");

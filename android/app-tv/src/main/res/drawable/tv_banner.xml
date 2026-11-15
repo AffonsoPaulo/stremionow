@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<!-- Launcher banner for Android TV and Fire TV (320 x 180). A plain placeholder until the
-     brand has an image mark: the app background with an accent bar. -->
+<!-- Launcher banner for Android TV and Fire TV (320 x 180): the app's mark (sn_mark.xml) on
+     the app background. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
   <item>
     <shape android:shape="rectangle">
@@ -12,12 +12,8 @@
     </shape>
   </item>
   <item
-      android:width="120dp"
-      android:height="8dp"
-      android:gravity="center">
-    <shape android:shape="rectangle">
-      <solid android:color="@color/sn_accent" />
-      <corners android:radius="4dp" />
-    </shape>
-  </item>
+      android:width="160dp"
+      android:height="160dp"
+      android:drawable="@drawable/sn_mark"
+      android:gravity="center" />
 </layer-list>

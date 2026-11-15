@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.l10n
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import io.github.affonsopaulo.stremionow.ui.data.DesktopPaths
+import java.io.File
 import java.io.InputStreamReader
 import java.util.Locale
 import java.util.Properties
@@ -10,20 +15,55 @@ import kotlin.math.abs
  * The interface strings on the desktop, read from the tables that `generateStrings` builds out
  * of `l10n/res` (docs/adr/0003-strings-format.md).
  *
- * The language is the system's, chosen as Android does: the exact locale (`pt_BR`), then the
- * language alone (`pt`), then another region of the same language, then English. A string
- * missing from a translation falls back along the same chain; a plurals resource comes whole
- * from the first table that has it.
+ * The language is the one picked in Settings › General ([AppLanguage]), or else the system's,
+ * chosen as Android does: the exact locale (`pt_BR`), then the language alone (`pt`), then
+ * another region of the same language, then English. A string missing from a translation
+ * falls back along the same chain; a plurals resource comes whole from the first table that
+ * has it.
+ *
+ * The tables are composition state, so a new choice redraws the interface at once. The JVM's
+ * default locale follows the choice too, for dates, numbers and sorting elsewhere.
  */
 internal object DesktopStrings {
     private const val FOLDER = "io/github/affonsopaulo/stremionow/ui/l10n"
     private val log = System.getLogger("StremioNow")
 
+    /** The system's locale, before any choice replaced the JVM's default. */
+    private val systemLocale: Locale = Locale.getDefault()
+
+    /** Where the choice is kept: one tag, or nothing for the system's language. */
+    private val choiceFile: File by lazy { File(DesktopPaths.appData, "interface-language") }
+
+    /** The language picked in Settings, a tag of [InterfaceLanguages], or "" for the system's. */
+    var chosen: String by mutableStateOf(readChoice())
+        private set
+
     /** The tables to read, most specific first, ending with English; and the locale of the first. */
-    private val chain: Pair<List<Properties>, Locale> by lazy { resolve(Locale.getDefault()) }
+    private var chain: Pair<List<Properties>, Locale> by mutableStateOf(tablesFor(chosen))
 
     /** The locale the strings are shown in, for plural rules and number formatting. */
     val locale: Locale get() = chain.second
+
+    /** Shows the interface in [tag] from now on ("" for the system's language), and keeps it. */
+    fun choose(tag: String) {
+        val language = tag.takeIf { it in InterfaceLanguages }.orEmpty()
+        runCatching { choiceFile.writeText(language) }
+            .onFailure { log.log(System.Logger.Level.WARNING, "Could not keep the language", it) }
+        chosen = language
+        chain = tablesFor(language)
+    }
+
+    private fun tablesFor(language: String): Pair<List<Properties>, Locale> {
+        val wanted = if (language.isEmpty()) systemLocale else Locale.forLanguageTag(language)
+        Locale.setDefault(wanted)
+        return resolve(wanted)
+    }
+
+    private fun readChoice(): String =
+        runCatching { choiceFile.takeIf(File::isFile)?.readText()?.trim() }
+            .getOrNull()
+            ?.takeIf { it in InterfaceLanguages }
+            .orEmpty()
 
     fun string(key: String): String = chain.first.firstNotNullOfOrNull { it.getProperty(key) } ?: missing(key)
 

@@ -12,15 +12,19 @@ import com.sun.jna.platform.win32.WinNT.HANDLE
 import com.sun.jna.platform.win32.WinUser
 import com.sun.jna.win32.StdCallLibrary
 import com.sun.jna.win32.W32APIOptions
+import io.github.affonsopaulo.stremionow.ui.data.DesktopPaths
 import java.awt.Image
 import java.awt.Window
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.SwingUtilities
 
@@ -78,21 +82,30 @@ object WindowIcon {
 
     @Volatile private var file: Pair<List<Image>, File>? = null
 
-    /** The .ico of [images], written once to a temporary file for Windows to load. */
+    /**
+     * The .ico of [images], for Windows to load from a file. It lives at a fixed place in the
+     * app's data folder and is written again only when the icon changed: a temporary file per
+     * launch stayed behind whenever the app did not exit normally (a crash, a kill, the system
+     * shutting down), since `deleteOnExit` never ran.
+     */
     @Synchronized
     private fun icoFile(images: List<Image>): File? {
         file?.takeIf { it.first === images }?.let { return it.second }
         val square = images.filterIsInstance<BufferedImage>()
         if (square.isEmpty()) return null
-        val written =
-            File.createTempFile("stremionow-icon", ".ico").apply {
-                deleteOnExit()
-                outputStream().use { IcoFile.write(square, it) }
-            }
-        file = images to written
+        val bytes = ByteArrayOutputStream().also { IcoFile.write(square, it) }.toByteArray()
+        val target = File(DesktopPaths.appData, ICON_FILE)
+        if (!target.isFile || !target.readBytes().contentEquals(bytes)) {
+            val temporary = File(DesktopPaths.appData, "$ICON_FILE.tmp")
+            temporary.writeBytes(bytes)
+            Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        file = images to target
         loaded.clear()
-        return written
+        return target
     }
+
+    private const val ICON_FILE = "window-icon.ico"
 
     private fun load(
         file: File,

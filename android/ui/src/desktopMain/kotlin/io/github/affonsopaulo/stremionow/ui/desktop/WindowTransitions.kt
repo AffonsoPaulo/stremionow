@@ -22,14 +22,30 @@ internal object WindowTransitions {
     /** How long after a swap the animations come back, once the system has shown or hidden the windows. */
     private const val RESTORE_DELAY_MS = 500
 
+    /**
+     * The pending [enableSoon] of each window. One per window, and cancelled by [disable]: a
+     * swap back within the delay (leaving the player at once) would otherwise have the earlier
+     * timer turn animations on in the middle of it, and the flash would show. A timer leaves
+     * when it fires; touched on the event thread only.
+     */
+    private val pending = HashMap<Window, Timer>()
+
     /** Turns [window]'s animations off; it must be displayable. */
-    fun disable(window: Window) = set(window, enabled = false)
+    fun disable(window: Window) {
+        pending.remove(window)?.stop()
+        set(window, enabled = false)
+    }
 
     /** Turns [window]'s animations back on shortly, after the show or hide in progress. */
     fun enableSoon(window: Window) {
-        Timer(RESTORE_DELAY_MS) { set(window, enabled = true) }
-            .apply { isRepeats = false }
-            .start()
+        pending.remove(window)?.stop()
+        val timer =
+            Timer(RESTORE_DELAY_MS) {
+                pending.remove(window)
+                set(window, enabled = true)
+            }.apply { isRepeats = false }
+        pending[window] = timer
+        timer.start()
     }
 
     private fun set(

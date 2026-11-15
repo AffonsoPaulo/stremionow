@@ -39,24 +39,25 @@ internal fun AppSettings?.playsInOtherApp(): Boolean =
 /**
  * The torrent last handed to another app. Nothing tells the app when that app is done with it,
  * so it keeps downloading until the next one is handed over, which lets it go, or the app quits.
- * Meanwhile it counts as one of the torrent's players in [TorrentUsers], so closing this app's
+ * Its playback counts in the core until then, so closing this app's
  * own player on the same torrent does not cut the other app's stream.
  */
 internal object ExternalPlayback {
     @Volatile var torrent: String? = null
         private set
 
-    /** [hash] is the torrent the other app now plays: it takes it, and lets the previous one go. */
+    /**
+     * [hash] is the torrent the other app now plays, whose playback was just started: the one
+     * handed over before is stopped, whatever its hash, since each playback is stopped once.
+     */
     @Synchronized
     fun handOver(
         hash: String?,
         core: StremioCore,
     ) {
         val previous = torrent
-        if (previous == hash) return
-        hash?.let(TorrentUsers::take)
         torrent = hash
-        previous?.let { TorrentUsers.release(core, it) }
+        previous?.let { TorrentStops.later(core, it) }
     }
 }
 
@@ -91,9 +92,6 @@ internal fun ExternalPlayerDialog(
     val core = remember(context) { AppGraph.core(context) }
     LaunchedEffect(source) {
         val hash = source.torrentHash()
-        // Another torrent goes to the other app: the one it had is let go, which stops it
-        // unless this app's player plays it too.
-        if (ExternalPlayback.torrent != hash) ExternalPlayback.handOver(null, core)
         val url =
             orNull({ logWarning("Could not prepare the source for another app", it) }) { core.playbackUrl(source) }
         state =
@@ -117,9 +115,9 @@ internal fun ExternalPlayerDialog(
     // player does when it closes, unless a player (this app's, or the other app with an earlier
     // hand-over) plays it.
     val cancel = {
-        source.torrentHash()?.takeUnless(TorrentUsers::inUse)?.let { hash ->
-            AppGraph.scope.launch { orNull { core.stopTorrent(hash) } }
-        }
+        // The playback started for it is stopped; the core keeps the torrent while another
+        // playback (this app's player, or the other app's earlier one) still counts.
+        source.torrentHash()?.let { hash -> AppGraph.scope.launch { orNull { core.stopTorrent(hash) } } }
         currentOnDone()
     }
     val buttonFocus = remember { FocusRequester() }

@@ -68,7 +68,7 @@ private const val PROVIDER_WAIT_MAX_MS = 30 * 60_000L
 private const val LENGTH_WAIT_MS = 10_000L
 
 /** After the last player of a torrent goes, how long before it is stopped, in case another takes it. */
-private const val TORRENT_STOP_DELAY_MS = 3_000L
+private const val TORRENT_STOP_DELAY_MS = 10_000L
 
 /**
  * Plays [selection] with [source]: asks the core for the address to play, picks subtitles in
@@ -205,8 +205,12 @@ class PlayerViewModel<out P : VideoPlayer>(
     private var pickedAudio = false
     private var pickedSubtitle = false
 
-    /** The torrent the video playing holds in [TorrentUsers], if it plays one. */
-    private var heldTorrent: String? = null
+    /**
+     * The torrent this player asked the core to play for the video playing, if any. The core
+     * counts each `playbackUrl` of a torrent and stops it only when every one was matched by a
+     * `stopTorrent`, so this player stops exactly what it started, once (see [TorrentStops]).
+     */
+    private var playedTorrent: String? = null
 
     init {
         startVideo()
@@ -228,9 +232,9 @@ class PlayerViewModel<out P : VideoPlayer>(
         val turn = turns.next()
         pickedAudio = false
         pickedSubtitle = false
-        val previous = heldTorrent
-        heldTorrent = source.torrentHash()?.also(TorrentUsers::take)
-        previous?.let(::releaseTorrent)
+        // The previous video's torrent stops a little later: the next episode of a season pack
+        // plays from the same one, and the core keeps it while that playback counts.
+        releasePlayedTorrent()
         videoWork =
             viewModelScope.launch {
                 launch {
@@ -269,6 +273,9 @@ class PlayerViewModel<out P : VideoPlayer>(
             return
         }
         val began = System.currentTimeMillis()
+        if (!turns.isCurrent(turn)) return
+        // Counted by the core from the call on, whether it succeeds or not: stopped once later.
+        source.torrentHash()?.let { playedTorrent = it }
         // Every source plays through the local server, so the player never sees debrid keys.
         val url = orNull({ logWarning("Could not prepare the source", it) }) { core.playbackUrl(source) }
         // A video left meanwhile: its address must not replace the one playing now.
@@ -320,6 +327,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                 if (!turns.isCurrent(turn)) return false
                 failuresInARow = if (check == null) failuresInARow + 1 else 0
                 val ready = check?.ready == true
+                val failed = check?.failed == true
                 val waited = System.currentTimeMillis() - began
                 DebugLog.log {
                     val size = check?.sizeBytes?.let { "${it.toLong() / BYTES_PER_MB} MB" } ?: "size unknown"
@@ -329,7 +337,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                     "provider check: $outcome, $size, answered in ${System.currentTimeMillis() - asked} ms, " +
                         "waiting ${waited / 1000} s"
                 }
-                when (providerWait(ready, failuresInARow, waited)) {
+                when (providerWait(ready, failuresInARow, waited, failed)) {
                     ProviderWait.Ready -> {
                         return true
                     }
@@ -492,7 +500,7 @@ class PlayerViewModel<out P : VideoPlayer>(
             return
         }
         if (group == null) {
-            releaseHeldTorrent()
+            releasePlayedTorrent()
             onNotFound(null)
             return
         }
@@ -512,7 +520,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                 if (found != null) {
                     start(target, found)
                 } else {
-                    releaseHeldTorrent()
+                    releasePlayedTorrent()
                     onNotFound(group)
                 }
             }
@@ -708,15 +716,13 @@ class PlayerViewModel<out P : VideoPlayer>(
         }
         player.release()
         // The screen is gone, so finish on the app's scope: stop the download and trim the cache.
-        releaseHeldTorrent()
+        releasePlayedTorrent()
     }
 
-    private fun releaseHeldTorrent() {
-        heldTorrent?.let(::releaseTorrent)
-        heldTorrent = null
+    private fun releasePlayedTorrent() {
+        playedTorrent?.let { TorrentStops.later(core, it) }
+        playedTorrent = null
     }
-
-    private fun releaseTorrent(hash: String) = TorrentUsers.release(core, hash)
 }
 
 /** ISO 639-2 English, always offered besides the viewer's language. */
@@ -726,17 +732,20 @@ private const val ENGLISH = "eng"
 internal enum class ProviderWait { Ready, Wait, GiveUp }
 
 /**
- * After a check of a downloading source: play once [ready]; give up after
- * [PROVIDER_CHECK_FAILURES] failed checks in a row, which a failure that lasts gives within
- * a minute or so, or after [PROVIDER_WAIT_MAX_MS] [waitedMs] in all; else check again later.
+ * After a check of a downloading source: play once [ready]; give up at once when the addon
+ * refused the source for good ([failed], a 4xx), after [PROVIDER_CHECK_FAILURES] failed checks
+ * in a row, which a failure that lasts gives within a minute or so, or after
+ * [PROVIDER_WAIT_MAX_MS] [waitedMs] in all; else check again later.
  */
 internal fun providerWait(
     ready: Boolean,
     failuresInARow: Int,
     waitedMs: Long,
+    failed: Boolean = false,
 ): ProviderWait =
     when {
         ready -> ProviderWait.Ready
+        failed -> ProviderWait.GiveUp
         failuresInARow >= PROVIDER_CHECK_FAILURES || waitedMs >= PROVIDER_WAIT_MAX_MS -> ProviderWait.GiveUp
         else -> ProviderWait.Wait
     }
@@ -779,42 +788,19 @@ internal class LeaveOnce(
 }
 
 /**
- * How many players play each torrent: this app's player and another app it was handed to
- * (ExternalPlayer.kt). A player that goes stops its torrent only when no other took it
- * meanwhile: resuming right after leaving, or the next episode of a season pack, plays the same
- * torrent, which stopping would cut.
+ * Stopping the torrents this app played. The core counts every `playbackUrl` of a torrent and
+ * stops it only once each was matched by a `stopTorrent`, so each player stops exactly what it
+ * started, once. The stop waits a little: resuming right after leaving, or the next episode of a
+ * season pack, starts the same torrent again, and the core keeps it while that playback counts.
  */
-internal object TorrentUsers {
-    private val counts = HashMap<String, Int>()
-
-    @Synchronized
-    fun take(hash: String) {
-        counts[hash] = (counts[hash] ?: 0) + 1
-    }
-
-    /** Lets [hash] go; true when no player plays it any more. */
-    @Synchronized
-    fun give(hash: String): Boolean {
-        val left = (counts[hash] ?: 1) - 1
-        if (left <= 0) counts.remove(hash) else counts[hash] = left
-        return left <= 0
-    }
-
-    @Synchronized
-    fun inUse(hash: String): Boolean = (counts[hash] ?: 0) > 0
-
-    /**
-     * Lets [hash] go and, once no player uses it any more, stops it after a short while, on
-     * the app's scope, in case another player takes it meanwhile.
-     */
-    fun release(
+internal object TorrentStops {
+    fun later(
         core: StremioCore,
         hash: String,
     ) {
-        if (!give(hash)) return
         AppGraph.scope.launch {
             delay(TORRENT_STOP_DELAY_MS)
-            if (!inUse(hash)) orNull { core.stopTorrent(hash) }
+            orNull { core.stopTorrent(hash) }
         }
     }
 }

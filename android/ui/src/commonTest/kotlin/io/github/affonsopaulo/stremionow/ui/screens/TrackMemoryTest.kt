@@ -231,15 +231,4 @@ class TrackMemoryTest {
         )
         assertEquals(memory, withAudioPicked(memory, emptyList(), 2))
     }
-
-    @Test
-    fun `a torrent stops only when its last player lets it go`() {
-        val hash = "0123456789abcdef0123456789abcdef01234567"
-        TorrentUsers.take(hash)
-        TorrentUsers.take(hash)
-        assertFalse(TorrentUsers.give(hash))
-        assertTrue(TorrentUsers.inUse(hash))
-        assertTrue(TorrentUsers.give(hash))
-        assertFalse(TorrentUsers.inUse(hash))
-    }
 }

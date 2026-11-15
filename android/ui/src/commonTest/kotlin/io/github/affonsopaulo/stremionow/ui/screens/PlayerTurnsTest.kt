@@ -47,13 +47,7 @@ class PlayerTurnsTest {
     }
 
     @Test
-    fun `a torrent handed to another app still counts as played`() {
-        val hash = "fedcba9876543210fedcba9876543210fedcba98"
-        // The other app took it, then this app's player opened the same torrent and closed.
-        TorrentUsers.take(hash)
-        TorrentUsers.take(hash)
-        assertFalse("the other app still plays it", TorrentUsers.give(hash))
-        assertTrue(TorrentUsers.inUse(hash))
-        assertTrue(TorrentUsers.give(hash))
+    fun `a source refused for good ends the wait at once`() {
+        assertEquals(ProviderWait.GiveUp, providerWait(ready = false, failuresInARow = 0, waitedMs = 0, failed = true))
     }
 }

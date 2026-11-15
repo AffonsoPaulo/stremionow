@@ -5,10 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -22,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.PlaybackState
 import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
@@ -35,6 +32,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
+import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 
 /** Seasons in the order the strip offers them: regular ones in order, specials (season 0) last. */
@@ -77,9 +75,8 @@ internal fun EpisodesStrip(
             .padding(top = SnSpacing.space6, bottom = SnSpacing.space8),
         verticalArrangement = Arrangement.spacedBy(SnSpacing.space4),
     ) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(SnColors.border))
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = SnSpacing.space10),
+            Modifier.fillMaxWidth().padding(horizontal = SnLayout.gutter),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (seasons.size > 1 && season != null) {
@@ -107,14 +104,12 @@ internal fun EpisodesStrip(
                 background = SnColors.surfaceMuted,
             )
         }
-        // A row like Home's: buttons at its ends to page through it under the pointer, and the
-        // mouse can drag it or turn it with Shift and the wheel.
+        // The same row as Home's episode rows, page buttons and margins included: buttons in its
+        // margins page through it under the pointer, and the mouse can drag it or turn it with
+        // Shift and the wheel.
         SnRow(
             state = listState,
-            contentPadding = PaddingValues(horizontal = SnSpacing.space10, vertical = SnSpacing.space2),
-            spacing = SnSpacing.space4,
             controlsCenter = EpisodeRowControlsCenter,
-            overContent = true,
         ) {
             items(shown, key = { it.id }) { episode ->
                 val playing = episode.id == selection.videoId

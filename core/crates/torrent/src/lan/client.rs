@@ -245,12 +245,14 @@ impl RemoteServer {
         &self,
         hash: InfoHash,
         file_idx: Option<u32>,
+        file_hint: Option<&str>,
         trackers: &[String],
     ) -> Result<usize, RemoteError> {
         let body = wire::AddTorrent {
             info_hash: hash.to_string(),
             file_idx,
             trackers: trackers.to_vec(),
+            file_hint: file_hint.map(str::to_owned),
         };
         let response = self
             .request(Method::POST, "/v1/torrents")
@@ -458,6 +460,13 @@ fn torrent_failure(code: &str) -> RemoteError {
             RemoteError::Torrent("no peer sent the torrent's file list in time".to_owned())
         }
         "no_video_file" => RemoteError::Torrent("the torrent contains no video file".to_owned()),
+        "no_such_file" => RemoteError::Torrent("the torrent has no such file".to_owned()),
+        "unsafe_file_name" => RemoteError::Torrent(
+            "the torrent has a file name the other device cannot store safely".to_owned(),
+        ),
+        "not_enough_space" => {
+            RemoteError::Torrent("the other device has not enough free space".to_owned())
+        }
         "stopped" => RemoteError::Stopped,
         _ => RemoteError::Torrent("the torrent failed on the other device".to_owned()),
     }

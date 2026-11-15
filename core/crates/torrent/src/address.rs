@@ -36,6 +36,14 @@ fn is_private_v6(ip: Ipv6Addr) -> bool {
         || ip.is_multicast()
         || (segments[0] & 0xfe00) == 0xfc00
         || (segments[0] & 0xffc0) == 0xfe80
+        // Site-local (`fec0::/10`): deprecated, but still routed inside some networks.
+        || (segments[0] & 0xffc0) == 0xfec0
+        // IPv4-compatible (`::a.b.c.d`), deprecated: some systems still reach the IPv4
+        // address inside, and no public host has one.
+        || segments[..6] == [0; 6]
+        // Teredo (`2001::/32`) tunnels to an IPv4 host, with the address obfuscated inside;
+        // telling which one takes more than the address, so none is trusted.
+        || segments[..2] == [0x2001, 0]
         || ip.to_ipv4_mapped().is_some_and(is_private_v4)
         || embedded_v4(ip).is_some_and(is_private_v4)
 }
@@ -87,9 +95,68 @@ pub(crate) fn is_private_host(url: &url::Url) -> bool {
     }
 }
 
+/// Whether `url` points at this device or a private network by its text alone (see
+/// [`is_private_host`]); unparsable addresses count as private. For the app to tell an addon
+/// on the home network from one on the internet.
+pub fn is_private_url(url: &str) -> bool {
+    url::Url::parse(url).map_or(true, |url| is_private_host(&url))
+}
+
+/// The host of `url` in lowercase, to tell whether two addresses are on the same host.
+pub fn url_host(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    Some(url.host_str()?.to_ascii_lowercase())
+}
+
+/// Whether a request to `url` could reach this device or a private network: by its text, or
+/// because its name resolves to such an address now. For requests made outside the relay,
+/// whose client does not vet the addresses it connects to. Fails when the name does not
+/// resolve, which may pass.
+pub async fn reaches_private_network(url: &str) -> std::io::Result<bool> {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Ok(true);
+    };
+    if is_private_host(&parsed) {
+        return Ok(true);
+    }
+    let Some(url::Host::Domain(name)) = parsed.host() else {
+        return Ok(false);
+    };
+    let port = parsed.port_or_known_default().unwrap_or(0);
+    let mut addresses = tokio::net::lookup_host((name, port)).await?;
+    Ok(addresses.any(|address| is_private_ip(address.ip())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn requests_reaching_private_networks_are_recognized() {
+        for private in [
+            "http://localhost:8080/x",
+            "http://192.168.1.1/x",
+            "http://[::1]/x",
+            "not a url",
+        ] {
+            assert!(
+                reaches_private_network(private).await.expect("no lookup"),
+                "{private}"
+            );
+        }
+        // IP literals need no lookup.
+        assert!(
+            !reaches_private_network("https://8.8.8.8/x")
+                .await
+                .expect("no lookup")
+        );
+        assert!(is_private_url("http://nas.local:7000/manifest.json"));
+        assert!(!is_private_url("https://torrentio.strem.fun/manifest.json"));
+        assert_eq!(
+            url_host("https://NAS.local:7000/a").as_deref(),
+            Some("nas.local")
+        );
+    }
 
     #[test]
     fn recognizes_private_hosts() {
@@ -114,6 +181,11 @@ mod tests {
             "http://[::ffff:169.254.0.1]/x",
             "http://[64:ff9b::c0a8:101]/x",
             "http://[2002:c0a8:101::1]/x",
+            "http://[::192.168.1.1]/x",
+            "http://[::8.8.8.8]/x",
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/x",
+            "http://[fec0::1]/x",
+            "http://[feff::1]/x",
             // Opaque hosts: the URL standard leaves these as text.
             "udp://127.0.0.1:6969/announce",
             "udp://192.168.1.1:80/announce",
@@ -133,6 +205,9 @@ mod tests {
             "https://cdn.example.org/x",
             "http://8.8.8.8/x",
             "http://[2606:4700::1]/x",
+            // Other 2001: networks are ordinary public ones.
+            "http://[2001:4860:4860::8888]/x",
+            "http://[2001:db9::1]/x",
             "udp://tracker.opentrackr.org:1337/announce",
             "udp://8.8.8.8:1337/announce",
             "udp://tracker.example.org.:1337/announce",

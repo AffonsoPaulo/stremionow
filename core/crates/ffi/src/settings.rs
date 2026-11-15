@@ -482,8 +482,9 @@ impl StremioCore {
         store.set_setting(ESC_EXITS_FULL_SCREEN, flag(settings.esc_exits_full_screen))?;
         store.set_setting(QUIT_ON_CLOSE, flag(settings.quit_on_close))?;
         drop(store);
-        // "Only on Wi-Fi" may have changed.
+        // "Only on Wi-Fi" and the cache size may have changed.
         self.apply_network_policy();
+        self.apply_cache_limit();
         Ok(())
     }
 

@@ -2,7 +2,7 @@
 //! The librqbit session: adding torrents, choosing the file to play, reporting progress and
 //! streaming the file over HTTP.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{self, SeekFrom};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -16,12 +16,12 @@ use hyper::{Method, Response, StatusCode};
 use librqbit::api::TorrentIdOrHash;
 use librqbit::dht::DhtPersistenceConfig;
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, ByteBufOwned, DhtSessionConfig,
-    ListOnlyResponse, ListenerOptions, ManagedTorrent, ManagedTorrentState, Session,
-    SessionOptions, TorrentStatsState, ValidatedTorrentMetaV1Info,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, DhtSessionConfig, ListOnlyResponse,
+    ListenerOptions, ManagedTorrent, ManagedTorrentState, Session, SessionOptions,
+    TorrentStatsState, ValidatedTorrentMetaV1Info,
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
@@ -29,7 +29,8 @@ use crate::files::{self, TorrentFile};
 use crate::http::{self, Body};
 use crate::magnet::{self, InfoHash};
 use crate::range::{self, RangeRequest};
-use crate::{TorrentError, TorrentState, TorrentStatus};
+use crate::server::Holder;
+use crate::{TorrentError, TorrentState, TorrentStatus, cache};
 
 /// Folder under the cache directory holding one folder of data per torrent.
 pub(crate) const DATA_DIR: &str = "torrents";
@@ -96,12 +97,39 @@ struct Metadata {
     peers: Vec<SocketAddr>,
 }
 
-/// A torrent in the session and the file being played from it.
+/// A torrent in the session and the files being played from it. Two players can use one
+/// torrent for different files (two episodes of a season pack, on this device and on a paired
+/// one), so every file someone uses stays selected and served until they let go of it.
 #[derive(Clone)]
 struct Selection {
     handle: Arc<ManagedTorrent>,
+    /// Every file of the torrent, in torrent order.
+    files: Arc<Vec<TorrentFile>>,
+    /// The file each holder plays.
+    uses: HashMap<Holder, usize>,
+    /// The file chosen last, whose progress is shown to someone who holds none.
+    latest: usize,
+}
+
+/// A file being served: the torrent, its index and what it is.
+struct Served {
+    handle: Arc<ManagedTorrent>,
     index: usize,
     file: TorrentFile,
+}
+
+/// Cache folders being deleted, by name. A torrent being added waits until its folder is
+/// gone, so the engine never writes into a folder while it is removed.
+#[derive(Default)]
+pub(crate) struct Removals {
+    names: Mutex<HashSet<String>>,
+    done: Notify,
+}
+
+/// A cache folder claimed for deletion; adding its torrent waits until this is dropped.
+pub(crate) struct RemovalClaim<'a> {
+    removals: &'a Removals,
+    name: String,
 }
 
 /// How the session's DHT starts.
@@ -137,6 +165,7 @@ pub(crate) struct LazyEngine {
     data_dir: PathBuf,
     shutdown: CancellationToken,
     network: Network,
+    removals: Removals,
 }
 
 impl LazyEngine {
@@ -147,6 +176,7 @@ impl LazyEngine {
             data_dir: cache_dir.join(DATA_DIR),
             shutdown: shutdown.clone(),
             network,
+            removals: Removals::default(),
         }
     }
 
@@ -174,20 +204,24 @@ impl LazyEngine {
     pub(crate) async fn add(
         &self,
         hash: InfoHash,
-        requested: Option<usize>,
+        holder: &Holder,
+        request: files::FileRequest<'_>,
         trackers: &[String],
     ) -> Result<usize, TorrentError> {
-        self.get().await?.add(hash, requested, trackers).await
+        self.get()
+            .await?
+            .add(hash, holder, request, trackers, &self.removals)
+            .await
     }
 
     /// See [`Engine::status`].
-    pub(crate) fn status(&self, hash: InfoHash) -> Option<TorrentStatus> {
-        self.started()?.status(hash)
+    pub(crate) fn status(&self, hash: InfoHash, holder: &Holder) -> Option<TorrentStatus> {
+        self.started()?.status(hash, holder)
     }
 
-    /// See [`Engine::selected_index`].
-    pub(crate) fn selected_index(&self, hash: InfoHash) -> Option<usize> {
-        self.started()?.selected_index(hash)
+    /// See [`Engine::serves`].
+    pub(crate) fn serves(&self, hash: InfoHash, index: usize) -> Option<bool> {
+        self.started()?.serves(hash, index)
     }
 
     /// See [`Engine::stop`].
@@ -197,9 +231,31 @@ impl LazyEngine {
         }
     }
 
+    /// See [`Engine::let_go`].
+    pub(crate) async fn let_go(&self, hash: InfoHash, holder: &Holder) {
+        if let Some(engine) = self.started() {
+            engine.let_go(hash, holder).await;
+        }
+    }
+
     /// See [`Engine::in_use`].
     pub(crate) fn in_use(&self, name: &str) -> bool {
         self.started().is_some_and(|engine| engine.in_use(name))
+    }
+
+    /// Claims the cache folder `name` for deletion, unless its torrent is in use. Adding the
+    /// torrent waits until the claim is dropped. The check and the claim happen under one
+    /// lock, which [`Engine::add`] takes after registering the torrent, so either the prune
+    /// sees the torrent in use or the add sees the claim.
+    pub(crate) fn claim_removal(&self, name: &str) -> Option<RemovalClaim<'_>> {
+        let mut names = lock(&self.removals.names);
+        if self.in_use(name) || !names.insert(name.to_owned()) {
+            return None;
+        }
+        Some(RemovalClaim {
+            removals: &self.removals,
+            name: name.to_owned(),
+        })
     }
 
     /// The folder holding one folder of data per torrent. Known before the engine starts, so
@@ -287,18 +343,26 @@ impl Engine {
         })
     }
 
-    /// Adds the torrent if needed, selects the file to play and returns its index.
+    /// Adds the torrent if needed, selects the file `holder` asked for and returns its index.
+    /// Files other holders play stay selected.
     pub(crate) async fn add(
         &self,
         hash: InfoHash,
-        requested: Option<usize>,
+        holder: &Holder,
+        request: files::FileRequest<'_>,
         trackers: &[String],
+        removals: &Removals,
     ) -> Result<usize, TorrentError> {
+        // Registered as in use before anything else, so a prune starting now leaves the folder
+        // alone, and one already deleting it is waited for.
         let entry = self.entry_or_insert(hash);
         let _adding = entry.adding.lock().await;
         let result = tokio::select! {
             () = entry.stopped.cancelled() => Err(TorrentError::Stopped),
-            result = self.select(hash, &entry, requested, trackers) => result,
+            result = async {
+                removals.wait_for(&hash.to_string()).await;
+                self.select(hash, &entry, holder, request, trackers).await
+            } => result,
         };
         if entry.stopped.is_cancelled() {
             // `stop` ran meanwhile and may have missed a torrent added since. If the app has
@@ -311,7 +375,7 @@ impl Engine {
         }
         match result {
             Ok(selection) => {
-                let index = selection.index;
+                let index = selection.file_of(holder);
                 entry.set_state(EntryState::Ready(selection));
                 self.mark_used(hash).await;
                 Ok(index)
@@ -328,13 +392,15 @@ impl Engine {
         &self,
         hash: InfoHash,
         entry: &Entry,
-        requested: Option<usize>,
+        holder: &Holder,
+        request: files::FileRequest<'_>,
         trackers: &[String],
     ) -> Result<Selection, TorrentError> {
         if let Some(handle) = self.session.get(TorrentIdOrHash::Hash(hash.id20())) {
             let failed = handle.with_state(|state| matches!(state, ManagedTorrentState::Error(_)));
             if !failed {
-                return self.reselect(handle, requested).await;
+                let uses = entry.uses_of(&handle);
+                return self.reselect(hash, handle, uses, holder, request).await;
             }
             // Asking again for a failed torrent retries it from scratch.
             self.delete_from_session(hash).await;
@@ -346,19 +412,27 @@ impl Engine {
             torrent: listing.torrent_bytes,
             peers: listing.seen_peers,
         };
-        self.download(hash, metadata, requested).await
+        self.download(hash, entry, metadata, holder, request).await
     }
 
     /// Adds a torrent whose metadata is known, downloading only the chosen file.
     async fn download(
         &self,
         hash: InfoHash,
+        entry: &Entry,
         metadata: Metadata,
-        requested: Option<usize>,
+        holder: &Holder,
+        request: files::FileRequest<'_>,
     ) -> Result<Selection, TorrentError> {
         let files = metadata.files;
-        let index = files::pick_file(&files, requested).ok_or(TorrentError::NoVideoFile)?;
-        let file = files.get(index).cloned().ok_or(TorrentError::NoVideoFile)?;
+        // librqbit creates every file of a torrent when it adds it, chosen or not, and refuses
+        // only `..` and separators in names: on Windows a name such as `C:x` or `CON` would
+        // still be created outside the torrent's folder, or open a device.
+        if !files::paths_are_safe(&files) {
+            return Err(TorrentError::UnsafeFileName);
+        }
+        let index = files::pick_file(&files, request)?;
+        self.ensure_space(hash, &files[index])?;
         let options = AddTorrentOptions {
             only_files: Some(vec![index]),
             // Data left in the cache by an earlier run is verified and reused.
@@ -375,11 +449,17 @@ impl Engine {
         match added {
             AddTorrentResponse::Added(_, handle) => Ok(Selection {
                 handle,
-                index,
-                file,
+                files: Arc::new(files),
+                uses: HashMap::from([(holder.clone(), index)]),
+                latest: index,
             }),
             AddTorrentResponse::AlreadyManaged(_, handle) => {
-                self.reselect(handle, Some(index)).await
+                let uses = entry.uses_of(&handle);
+                let request = files::FileRequest {
+                    index: Some(index),
+                    hint: None,
+                };
+                self.reselect(hash, handle, uses, holder, request).await
             }
             AddTorrentResponse::ListOnly(_) => Err(TorrentError::engine(
                 "the torrent was listed instead of added",
@@ -415,11 +495,15 @@ impl Engine {
         }
     }
 
-    /// Points a torrent already in the session at the requested file.
+    /// Points `holder` at the requested file of a torrent already in the session, keeping the
+    /// files of the other holders in `uses` selected.
     async fn reselect(
         &self,
+        hash: InfoHash,
         handle: Arc<ManagedTorrent>,
-        requested: Option<usize>,
+        mut uses: HashMap<Holder, usize>,
+        holder: &Holder,
+        request: files::FileRequest<'_>,
     ) -> Result<Selection, TorrentError> {
         // librqbit refuses to change the file selection while it checks existing data.
         handle
@@ -429,36 +513,73 @@ impl Engine {
         let files = handle
             .with_metadata(|metadata| torrent_files(&metadata.info))
             .map_err(TorrentError::engine)?;
-        let index = files::pick_file(&files, requested).ok_or(TorrentError::NoVideoFile)?;
-        let file = files.get(index).cloned().ok_or(TorrentError::NoVideoFile)?;
-        if handle.only_files() != Some(vec![index]) {
+        let index = files::pick_file(&files, request)?;
+        let downloading = handle.only_files().is_none_or(|only| only.contains(&index));
+        if !downloading {
+            self.ensure_space(hash, &files[index])?;
+        }
+        uses.insert(holder.clone(), index);
+        let selection = Selection {
+            handle,
+            files: Arc::new(files),
+            uses,
+            latest: index,
+        };
+        self.apply(&selection).await?;
+        Ok(selection)
+    }
+
+    /// Has librqbit download exactly the files of `selection`.
+    async fn apply(&self, selection: &Selection) -> Result<(), TorrentError> {
+        let wanted = selection.selected();
+        let current: Option<BTreeSet<usize>> = selection
+            .handle
+            .only_files()
+            .map(|only| only.into_iter().collect());
+        if current.as_ref() != Some(&wanted) {
+            let wanted: HashSet<usize> = wanted.into_iter().collect();
             self.session
-                .update_only_files(&handle, &HashSet::from([index]))
+                .update_only_files(&selection.handle, &wanted)
                 .await
                 .map_err(TorrentError::engine)?;
         }
-        Ok(Selection {
-            handle,
-            index,
-            file,
-        })
+        Ok(())
     }
 
-    /// Progress of a torrent the app asked for, if it has not been stopped.
-    pub(crate) fn status(&self, hash: InfoHash) -> Option<TorrentStatus> {
+    /// Fails when the disk holding the cache has less free space than `file` still needs.
+    /// Data an earlier run left in the cache counts as already there.
+    fn ensure_space(&self, hash: InfoHash, file: &TorrentFile) -> Result<(), TorrentError> {
+        let path = self.data_dir.join(hash.to_string()).join(&file.path);
+        let present = cache::allocated_len(&path).unwrap_or(0);
+        let needed = file.len.saturating_sub(present);
+        match cache::free_bytes(&self.data_dir) {
+            Ok(free) if free < needed => Err(TorrentError::NotEnoughSpace { needed, free }),
+            Ok(_) => Ok(()),
+            Err(error) => {
+                // Not knowing is no reason to refuse: writing fails later if it must.
+                log::warn!("torrent: cannot read the free disk space: {error}");
+                Ok(())
+            }
+        }
+    }
+
+    /// Progress of a torrent the app asked for, if it has not been stopped: of the file
+    /// `holder` plays, or of the one chosen last if it plays none.
+    pub(crate) fn status(&self, hash: InfoHash, holder: &Holder) -> Option<TorrentStatus> {
         let entry = self.torrents().get(&hash).cloned()?;
         Some(match entry.state() {
             EntryState::FetchingMetadata => TorrentStatus::fetching_metadata(),
             EntryState::Failed(error) => TorrentStatus::failed(error),
-            EntryState::Ready(selection) => selection.status(),
+            EntryState::Ready(selection) => selection.status(selection.file_of(holder)),
         })
     }
 
-    /// The index of the file being streamed from a torrent, once it is chosen.
-    pub(crate) fn selected_index(&self, hash: InfoHash) -> Option<usize> {
+    /// Whether file `index` of a torrent is being served; `None` while the torrent has no
+    /// file chosen: it is gone, failed or still fetching its metadata.
+    pub(crate) fn serves(&self, hash: InfoHash, index: usize) -> Option<bool> {
         let entry = self.torrents().get(&hash).cloned()?;
         match entry.state() {
-            EntryState::Ready(selection) => Some(selection.index),
+            EntryState::Ready(selection) => Some(selection.selected().contains(&index)),
             _ => None,
         }
     }
@@ -472,14 +593,41 @@ impl Engine {
         self.delete_from_session(hash).await;
     }
 
+    /// Lets go of the file `holder` played while others still use the torrent: it stops
+    /// downloading, and its URL answers 404, unless another holder plays it too.
+    pub(crate) async fn let_go(&self, hash: InfoHash, holder: &Holder) {
+        let Some(entry) = self.torrents().get(&hash).cloned() else {
+            return;
+        };
+        let _adding = entry.adding.lock().await;
+        let EntryState::Ready(mut selection) = entry.state() else {
+            return;
+        };
+        let Some(index) = selection.uses.remove(holder) else {
+            return;
+        };
+        if selection
+            .uses
+            .values()
+            .all(|&other| other != selection.latest)
+        {
+            // With nobody left, the file stays chosen until the torrent is stopped.
+            selection.latest = selection.uses.values().copied().max().unwrap_or(index);
+        }
+        if let Err(error) = self.apply(&selection).await {
+            log::warn!("torrent: cannot deselect a file of {hash}: {error}");
+            return;
+        }
+        entry.set_state(EntryState::Ready(selection));
+    }
+
     /// Whether the cache entry called `name` belongs to a torrent the app is using.
     pub(crate) fn in_use(&self, name: &str) -> bool {
         InfoHash::parse(name).is_some_and(|hash| self.torrents().contains_key(&hash))
     }
 
-    /// Folder holding the downloaded data of all torrents.
     /// Answers a player request for file `index` of torrent `hash`, ranges included. Only
-    /// the selected file of a torrent the app added is served; anything else is 404.
+    /// the files someone plays from a torrent the app added are served; anything else is 404.
     pub(crate) async fn respond(
         &self,
         hash: &str,
@@ -487,10 +635,10 @@ impl Engine {
         method: &Method,
         range: Option<&str>,
     ) -> Response<Body> {
-        let Some((selection, stopped)) = self.selected(hash, index) else {
+        let Some((served, stopped)) = self.selected(hash, index) else {
             return http::not_found();
         };
-        let total = selection.file.len;
+        let total = served.file.len;
         let part = match range::resolve(range, total) {
             RangeRequest::Full => None,
             RangeRequest::Partial(part) => Some(part),
@@ -503,7 +651,7 @@ impl Engine {
         let mut response = if method == Method::HEAD {
             http::empty(status)
         } else {
-            match self.open(&selection, start, len, stopped).await {
+            match self.open(&served, start, len, stopped).await {
                 Ok(body) => {
                     let mut response = Response::new(body);
                     *response.status_mut() = status;
@@ -515,7 +663,7 @@ impl Engine {
         let headers = response.headers_mut();
         headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static(files::content_type(&selection.file.path)),
+            HeaderValue::from_static(files::content_type(&served.file.path)),
         );
         headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
@@ -527,25 +675,32 @@ impl Engine {
         response
     }
 
-    /// The selected file, if `hash` and `index` name it.
-    fn selected(&self, hash: &str, index: &str) -> Option<(Selection, CancellationToken)> {
+    /// The file `hash` and `index` name, if someone plays it.
+    fn selected(&self, hash: &str, index: &str) -> Option<(Served, CancellationToken)> {
         let hash = InfoHash::parse(hash)?;
         let index: usize = index.parse().ok()?;
         let entry = self.torrents().get(&hash).cloned()?;
-        match entry.state() {
-            EntryState::Ready(selection) if selection.index == index => {
-                Some((selection, entry.stopped.clone()))
-            }
-            _ => None,
+        let EntryState::Ready(selection) = entry.state() else {
+            return None;
+        };
+        if !selection.selected().contains(&index) {
+            return None;
         }
+        let file = selection.files.get(index)?.clone();
+        let served = Served {
+            handle: selection.handle,
+            index,
+            file,
+        };
+        Some((served, entry.stopped.clone()))
     }
 
-    /// A body streaming `len` bytes of the selected file from `start`. Reads wait for pieces
+    /// A body streaming `len` bytes of the served file from `start`. Reads wait for pieces
     /// that are not downloaded yet, and librqbit fetches pieces ahead of the read position
     /// first. The body ends early if the torrent is stopped.
     async fn open(
         &self,
-        selection: &Selection,
+        served: &Served,
         start: u64,
         len: u64,
         stopped: CancellationToken,
@@ -557,10 +712,10 @@ impl Engine {
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-        let mut stream = selection
+        let mut stream = served
             .handle
             .clone()
-            .stream(selection.index)
+            .stream(served.index)
             .await
             .map_err(|error| {
                 log::warn!("torrent: cannot open stream: {error:#}");
@@ -581,7 +736,8 @@ impl Engine {
         Ok(http::stream_body(chunks))
     }
 
-    /// Adds a torrent from a torrent file, without fetching metadata from peers.
+    /// Adds a torrent from a torrent file, without fetching metadata from peers, for this
+    /// device's player.
     #[cfg(test)]
     pub(crate) async fn add_torrent_file(
         &self,
@@ -595,8 +751,11 @@ impl Engine {
             files,
             peers: Vec::new(),
         };
-        let selection = self.download(hash, metadata, None).await?;
-        let index = selection.index;
+        let request = files::FileRequest::default();
+        let selection = self
+            .download(hash, &entry, metadata, &Holder::Local, request)
+            .await?;
+        let index = selection.latest;
         selection
             .handle
             .wait_until_initialized()
@@ -650,36 +809,85 @@ impl Engine {
     }
 
     fn torrents(&self) -> MutexGuard<'_, HashMap<InfoHash, Arc<Entry>>> {
-        // Every update leaves the map consistent, so a panic elsewhere cannot corrupt it.
-        self.torrents.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.torrents)
     }
 }
 
 impl Entry {
     fn state(&self) -> EntryState {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        lock(&self.state).clone()
     }
 
     fn set_state(&self, state: EntryState) {
-        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = state;
+        *lock(&self.state) = state;
     }
 
     /// Shows the error in the status, unless an earlier selection is still playing.
     fn record_failure(&self, error: &TorrentError) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = lock(&self.state);
         if !matches!(*state, EntryState::Ready(_)) {
             *state = EntryState::Failed(error.to_string());
         }
     }
+
+    /// Who plays which file of `handle`; nobody if the entry is about another handle, from
+    /// before the torrent was added again.
+    fn uses_of(&self, handle: &Arc<ManagedTorrent>) -> HashMap<Holder, usize> {
+        match self.state() {
+            EntryState::Ready(selection) if Arc::ptr_eq(&selection.handle, handle) => {
+                selection.uses
+            }
+            _ => HashMap::new(),
+        }
+    }
+}
+
+impl Removals {
+    /// Waits until the cache folder `name` is not being deleted.
+    async fn wait_for(&self, name: &str) {
+        loop {
+            let done = self.done.notified();
+            tokio::pin!(done);
+            // Registered before the check, so a removal ending in between is not missed.
+            done.as_mut().enable();
+            if !lock(&self.names).contains(name) {
+                return;
+            }
+            done.await;
+        }
+    }
+}
+
+impl Drop for RemovalClaim<'_> {
+    fn drop(&mut self) {
+        lock(&self.removals.names).remove(&self.name);
+        self.removals.done.notify_waiters();
+    }
 }
 
 impl Selection {
-    fn status(&self) -> TorrentStatus {
+    /// The files being downloaded and served: those someone plays, or the last one chosen
+    /// while nobody does.
+    fn selected(&self) -> BTreeSet<usize> {
+        let mut selected: BTreeSet<usize> = self.uses.values().copied().collect();
+        if selected.is_empty() {
+            selected.insert(self.latest);
+        }
+        selected
+    }
+
+    /// The file `holder` plays, or the one chosen last.
+    fn file_of(&self, holder: &Holder) -> usize {
+        self.uses.get(holder).copied().unwrap_or(self.latest)
+    }
+
+    fn status(&self, index: usize) -> TorrentStatus {
         let stats = self.handle.stats();
-        let downloaded = stats.file_progress.get(self.index).copied().unwrap_or(0);
+        let (len, name) = self
+            .files
+            .get(index)
+            .map_or((0, None), |file| (file.len, Some(file_name(&file.path))));
+        let downloaded = stats.file_progress.get(index).copied().unwrap_or(0);
         let (peers, download_speed) = stats.live.as_ref().map_or((0, 0), |live| {
             (
                 live.snapshot.peer_stats.live,
@@ -689,7 +897,7 @@ impl Selection {
         let state = match stats.state {
             TorrentStatsState::Initializing { .. } => TorrentState::Checking,
             TorrentStatsState::Error => TorrentState::Error,
-            TorrentStatsState::Live | TorrentStatsState::Paused if downloaded >= self.file.len => {
+            TorrentStatsState::Live | TorrentStatsState::Paused if downloaded >= len => {
                 TorrentState::Ready
             }
             TorrentStatsState::Live | TorrentStatsState::Paused => TorrentState::Downloading,
@@ -699,11 +907,16 @@ impl Selection {
             peers,
             download_speed,
             downloaded_bytes: downloaded,
-            file_size: self.file.len,
-            file_name: Some(file_name(&self.file.path).to_owned()),
+            file_size: len,
+            file_name: name.map(str::to_owned),
             error: stats.error,
         }
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    // Every update leaves the data consistent, so a panic elsewhere cannot corrupt it.
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// `416 Range Not Satisfiable`, telling the player how long the file really is.
@@ -716,7 +929,9 @@ fn unsatisfiable(total: u64) -> Response<Body> {
 }
 
 /// The files listed in torrent metadata, in torrent order.
-fn torrent_files(info: &ValidatedTorrentMetaV1Info<ByteBufOwned>) -> Vec<TorrentFile> {
+pub(crate) fn torrent_files<B: AsRef<[u8]>>(
+    info: &ValidatedTorrentMetaV1Info<B>,
+) -> Vec<TorrentFile> {
     info.iter_file_details()
         .map(|details| TorrentFile {
             path: details
@@ -857,6 +1072,48 @@ mod tests {
             .await
             .expect("engine starts");
         assert!(engine.session.get_dht().is_none());
+        shutdown.cancel();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn files_larger_than_the_free_space_are_refused() {
+        let cache = tempfile::tempdir().expect("temp dir");
+        let shutdown = CancellationToken::new();
+        let engine = Engine::start(cache.path(), &shutdown, Network::Offline)
+            .await
+            .expect("engine starts");
+        let hash = InfoHash::parse("08ada5a7a6183aae1e09d831df6748d566095a10").expect("hash");
+        let file = |len| TorrentFile {
+            path: "Show/S01E01.mkv".to_owned(),
+            len,
+            padding: false,
+        };
+        let refused = engine.ensure_space(hash, &file(u64::MAX));
+        assert!(
+            matches!(
+                refused,
+                Err(TorrentError::NotEnoughSpace {
+                    needed: u64::MAX,
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
+        assert!(engine.ensure_space(hash, &file(1_000)).is_ok());
+
+        // What an earlier run downloaded counts as there already.
+        let folder = cache
+            .path()
+            .join(DATA_DIR)
+            .join(hash.to_string())
+            .join("Show");
+        std::fs::create_dir_all(&folder).expect("create folder");
+        std::fs::write(folder.join("S01E01.mkv"), vec![1u8; 200_000]).expect("write");
+        let refused = engine.ensure_space(hash, &file(u64::MAX));
+        assert!(
+            matches!(refused, Err(TorrentError::NotEnoughSpace { needed, .. }) if needed <= u64::MAX - 200_000),
+            "{refused:?}"
+        );
         shutdown.cancel();
     }
 }

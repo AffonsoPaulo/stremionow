@@ -18,13 +18,13 @@ use std::time::Duration;
 
 use stremionow_torrent::{
     LanServer, RemoteError, RemoteHealth, RemoteServer, ServerConfig, StreamServer, TorrentError,
-    TorrentRoute, TorrentState, TorrentStatus,
+    TorrentRoute, TorrentState, TorrentStatus, is_private_url, url_host,
 };
 use tokio::runtime::Runtime;
 use tokio::sync::OnceCell;
 
 use crate::core::StremioCore;
-use crate::playback::StreamSource;
+use crate::playback::{StreamSource, addon_key};
 use crate::records::CoreError;
 use crate::sharing::SecretSink;
 
@@ -49,6 +49,10 @@ pub(crate) struct Streaming {
     on_mobile_data: AtomicBool,
     /// What the app knows about the current network (Android), for the server.
     network_hint: Mutex<Option<String>>,
+    /// How many playbacks use each torrent, by lowercase info hash. One torrent can play in
+    /// two players at once (the next episode of a season pack starts before the last player
+    /// closes), and it stops only when the last one is done with it.
+    torrent_uses: Mutex<HashMap<String, usize>>,
 }
 
 impl Streaming {
@@ -70,7 +74,32 @@ impl Streaming {
             fallbacks: Mutex::default(),
             on_mobile_data: AtomicBool::new(false),
             network_hint: Mutex::default(),
+            torrent_uses: Mutex::default(),
         })
+    }
+
+    /// Counts a playback of a torrent, which one call to [`Self::give_torrent`] ends.
+    fn take_torrent(&self, info_hash: &str) {
+        *lock(&self.torrent_uses)
+            .entry(info_hash.to_ascii_lowercase())
+            .or_default() += 1;
+    }
+
+    /// Ends a playback of a torrent. Returns whether none is left, so the torrent should stop;
+    /// also true for a torrent no playback counted.
+    fn give_torrent(&self, info_hash: &str) -> bool {
+        let mut uses = lock(&self.torrent_uses);
+        let key = info_hash.to_ascii_lowercase();
+        match uses.get_mut(&key) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                false
+            }
+            _ => {
+                uses.remove(&key);
+                true
+            }
+        }
     }
 
     fn runtime(&self) -> Result<&Runtime, CoreError> {
@@ -227,6 +256,11 @@ impl Streaming {
     }
 }
 
+/// The cache size from Settings, in bytes.
+fn cache_bytes(torrent_cache_mb: u32) -> u64 {
+    u64::from(torrent_cache_mb) * 1024 * 1024
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     // Every update leaves the data consistent, so a panic elsewhere cannot corrupt it.
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -342,14 +376,27 @@ impl StremioCore {
     /// With another device paired for torrents, torrents are downloaded there and streamed
     /// through this device's loopback server. If that device cannot be reached, or no longer
     /// knows this one, the torrent downloads here instead and its progress says so.
+    ///
+    /// Every call for a torrent, whether it succeeds or not, counts as one playback, which
+    /// exactly one [`StremioCore::stop_torrent`] ends. A web source may lead into the home
+    /// network only when its addon is there too.
     pub async fn playback_url(&self, source: StreamSource) -> Result<String, CoreError> {
+        if source.url.is_none()
+            && let Some(info_hash) = &source.info_hash
+        {
+            self.streaming.take_torrent(info_hash);
+        }
         let server = self.streaming_server().await?;
         if let Some(url) = source.url {
-            return Ok(server.proxy_url(&url)?);
+            let private_allowed = self.private_addon(&source.addon_key);
+            return Ok(server.proxy_url(&url, private_allowed)?);
         }
         let info_hash = source.info_hash.ok_or(CoreError::NotFound)?;
         let trackers: Vec<String> = source.trackers.into_iter().take(MAX_TRACKERS).collect();
         let file_idx = source.file_idx;
+        // Without an index, the title often names the file or the episode of a season pack.
+        let file_hint = Some(source.description).filter(|text| !text.trim().is_empty());
+        let file_hint = file_hint.filter(|_| file_idx.is_none());
         self.streaming.forget_fallback(&info_hash);
         let remote = self
             .streaming
@@ -357,7 +404,14 @@ impl StremioCore {
             .filter(|_| self.streaming.lan().is_none());
         if let Some(remote) = remote {
             match self
-                .remote_playback_url(&server, remote, &info_hash, file_idx, &trackers)
+                .remote_playback_url(
+                    &server,
+                    remote,
+                    &info_hash,
+                    file_idx,
+                    file_hint.clone(),
+                    &trackers,
+                )
                 .await?
             {
                 Ok(url) => return Ok(url),
@@ -375,15 +429,24 @@ impl StremioCore {
             }
         }
         self.streaming
-            .run(async move { server.torrent_url(&info_hash, file_idx, &trackers).await })
+            .run(async move {
+                server
+                    .torrent_url(&info_hash, file_idx, file_hint.as_deref(), &trackers)
+                    .await
+            })
             .await?
             .map_err(CoreError::from)
     }
 
     /// A local address relaying a web file, such as a subtitle, so the player never sees
-    /// the original address (configured addons can carry keys in it).
+    /// the original address (configured addons can carry keys in it). An address in the home
+    /// network is relayed only from the host of an addon installed there.
     pub async fn relay_url(&self, url: String) -> Result<String, CoreError> {
-        Ok(self.streaming_server().await?.proxy_url(&url)?)
+        let private_allowed = self.on_private_addon_host(&url);
+        Ok(self
+            .streaming_server()
+            .await?
+            .proxy_url(&url, private_allowed)?)
     }
 
     /// Live state of a torrent started by [`StremioCore::playback_url`], if it is running,
@@ -410,8 +473,12 @@ impl StremioCore {
         Some(progress)
     }
 
-    /// Stops a torrent when playback ends and trims the cache to its size limit.
+    /// Ends one playback of a torrent started by [`StremioCore::playback_url`]. When no other
+    /// playback uses it, stops it and trims the cache to its size limit.
     pub async fn stop_torrent(&self, info_hash: String) -> Result<(), CoreError> {
+        if !self.streaming.give_torrent(&info_hash) {
+            return Ok(());
+        }
         self.streaming.forget_fallback(&info_hash);
         let Some(server) = self.streaming.server.get().cloned() else {
             return Ok(());
@@ -429,10 +496,47 @@ impl StremioCore {
 impl StremioCore {
     /// The stream server, started with the cache size from Settings on first use.
     pub(crate) async fn streaming_server(&self) -> Result<StreamServer, CoreError> {
-        let max_cache_bytes = u64::from(self.settings()?.torrent_cache_mb) * 1024 * 1024;
+        let max_cache_bytes = cache_bytes(self.settings()?.torrent_cache_mb);
         let server = self.streaming.server(max_cache_bytes).await?;
+        server.set_max_cache_bytes(max_cache_bytes);
         self.apply_network_policy();
         Ok(server)
+    }
+
+    /// Gives the running server the cache size from Settings, which may have changed.
+    pub(crate) fn apply_cache_limit(&self) {
+        let Some(server) = self.streaming.server.get() else {
+            return;
+        };
+        match self.settings() {
+            Ok(settings) => server.set_max_cache_bytes(cache_bytes(settings.torrent_cache_mb)),
+            Err(error) => log::warn!("streaming: cannot read the cache size: {error}"),
+        }
+    }
+
+    /// Whether the enabled addon whose [`addon_key`] is `key` is on this device or the home
+    /// network, which makes its sources there expected rather than an addon reaching in.
+    pub(crate) fn private_addon(&self, key: &str) -> bool {
+        self.enabled().is_ok_and(|addons| {
+            addons.iter().any(|addon| {
+                let manifest = addon.url.manifest_url();
+                addon_key(manifest) == key && is_private_url(manifest)
+            })
+        })
+    }
+
+    /// Whether `url` is on the host of an addon on this device or the home network. Subtitle
+    /// addresses arrive without their addon; a home-network addon serves its own files.
+    fn on_private_addon_host(&self, url: &str) -> bool {
+        let Some(host) = url_host(url) else {
+            return false;
+        };
+        self.enabled().is_ok_and(|addons| {
+            addons.iter().any(|addon| {
+                let manifest = addon.url.manifest_url();
+                is_private_url(manifest) && url_host(manifest).as_deref() == Some(host.as_str())
+            })
+        })
     }
 
     /// Starts a torrent on the other device, looking for it at a new address once if it does
@@ -443,14 +547,25 @@ impl StremioCore {
         remote: RemoteServer,
         info_hash: &str,
         file_idx: Option<u32>,
+        file_hint: Option<String>,
         trackers: &[String],
     ) -> Result<Result<String, RemoteError>, CoreError> {
         let attempt = |remote: RemoteServer| {
-            let (server, info_hash, trackers) =
-                (server.clone(), info_hash.to_owned(), trackers.to_vec());
+            let (server, info_hash, trackers, file_hint) = (
+                server.clone(),
+                info_hash.to_owned(),
+                trackers.to_vec(),
+                file_hint.clone(),
+            );
             async move {
                 server
-                    .remote_torrent_url(&remote, &info_hash, file_idx, &trackers)
+                    .remote_torrent_url(
+                        &remote,
+                        &info_hash,
+                        file_idx,
+                        file_hint.as_deref(),
+                        &trackers,
+                    )
                     .await
             }
         };
@@ -466,5 +581,35 @@ impl StremioCore {
             Some(moved) => self.streaming.run(attempt(moved)).await,
             None => Ok(first),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_torrent_stops_with_its_last_playback() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let streaming = Streaming::new(dir.path().to_path_buf()).expect("streaming");
+        let hash = "08ADA5A7A6183AAE1E09D831DF6748D566095A10";
+        streaming.take_torrent(hash);
+        streaming.take_torrent(&hash.to_ascii_lowercase());
+        assert!(
+            !streaming.give_torrent(hash),
+            "another player still plays it"
+        );
+        assert!(streaming.give_torrent(hash));
+        // A stop nobody counted a playback for stops it, as before counting.
+        assert!(streaming.give_torrent(hash));
+    }
+
+    #[test]
+    fn without_an_addon_there_nothing_leads_into_the_home_network() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert!(!core.private_addon("k"));
+        assert!(!core.on_private_addon_host("http://192.168.1.5:8080/subtitles.srt"));
+        assert!(!core.on_private_addon_host("not a url"));
     }
 }

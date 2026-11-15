@@ -44,7 +44,13 @@ internal class SerialQueue(
     private val jobs = Channel<() -> Unit>(Channel.UNLIMITED)
 
     init {
-        scope.launch { for (job in jobs) job() }
+        scope.launch {
+            for (job in jobs) {
+                // Nothing a job throws ends the loop, not even a failure to log its failure:
+                // every job queued after it would wait for ever.
+                runCatching { job() }
+            }
+        }
     }
 
     /** Queues [job]; a failure is logged, never thrown, so later jobs still run. */

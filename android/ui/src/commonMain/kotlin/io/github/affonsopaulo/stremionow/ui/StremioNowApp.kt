@@ -36,6 +36,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.navigation.NamedNavArgument
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -70,6 +71,8 @@ import io.github.affonsopaulo.stremionow.ui.data.TitleLink
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.StringResource
+import io.github.affonsopaulo.stremionow.ui.l10n.interfaceLocale
+import io.github.affonsopaulo.stremionow.ui.l10n.layoutDirectionFor
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.playerHasOwnWindow
@@ -150,7 +153,11 @@ fun StremioNowApp(
     onLinkOpened: () -> Unit = {},
     shortcuts: AppShortcuts? = null,
 ) {
-    CompositionLocalProvider(LocalIsTv provides isTv) {
+    // The layout runs the way the interface's language is written (see layoutDirectionFor).
+    CompositionLocalProvider(
+        LocalIsTv provides isTv,
+        LocalLayoutDirection provides layoutDirectionFor(interfaceLocale()),
+    ) {
         // Asks about the last crash report; in a crash loop, before the app starts.
         if (crashReportPrompt()) return@CompositionLocalProvider
         // Opening the core reads the secret store, which can block (a keyring prompt), so it

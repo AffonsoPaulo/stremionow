@@ -18,6 +18,7 @@ import io.github.affonsopaulo.stremionow.ui.StremioNowApp
 import io.github.affonsopaulo.stremionow.ui.components.AppShortcuts
 import io.github.affonsopaulo.stremionow.ui.crash.CrashReports
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.desktop.AppUpdates
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopHost
 import io.github.affonsopaulo.stremionow.ui.desktop.DesktopInput
 import io.github.affonsopaulo.stremionow.ui.desktop.FirstWindow
@@ -107,6 +108,8 @@ fun main(args: Array<String>) {
     }
     // Turns HDR back off if a previous run left it on, and on exit (see DisplaySession).
     DesktopDisplays.start()
+    // Installed by the Windows installer: download newer versions, installed on quit.
+    if (!smokeTest) AppUpdates.start()
     val placement = FirstWindow.place(WINDOW_SIZE)
 
     application {

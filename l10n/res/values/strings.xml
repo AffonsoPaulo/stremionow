@@ -755,6 +755,11 @@
   <string name="settings_about_source">Source code</string>
   <!-- About: opens the form to report a problem. -->
   <string name="settings_about_report">Report a problem</string>
+  <!-- About, on Windows: a newer version was downloaded. %1$s is its number, for example "0.2.0". -->
+  <string name="settings_update_ready">Version %1$s is ready</string>
+  <string name="settings_update_ready_body">It installs the next time you quit StremioNow.</string>
+  <!-- About: installs the downloaded version now; the app closes and opens again. -->
+  <string name="settings_update_restart">Restart and update</string>
 
   <!-- Settings › Playback: how subtitles look, with a preview over a still picture. -->
   <string name="settings_sub_style">Subtitle style</string>

@@ -3,6 +3,7 @@ package io.github.affonsopaulo.stremionow.ui.platform
 
 import androidx.compose.runtime.ProvidableCompositionLocal
 import io.github.affonsopaulo.stremionow.player.StreamMemory
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Where platform services come from: Android's `Context`, or a single instance on the desktop.
@@ -73,3 +74,12 @@ internal expect fun openInExternalPlayer(
     title: String,
     chooserTitle: String,
 ): Boolean
+
+/**
+ * The newer version of the app that was downloaded and installs when the app quits, or null
+ * while there is none: the Windows app installed by its installer updates itself this way.
+ */
+internal expect fun downloadedUpdate(): StateFlow<String?>
+
+/** Installs the version of [downloadedUpdate] now; the app closes and opens again. */
+internal expect fun installUpdateNow()

@@ -10,6 +10,8 @@ import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.ui.platform.LocalContext
 import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 actual typealias PlatformContext = Context
 
@@ -48,6 +50,13 @@ internal actual fun displaySwitchingSupported(): Boolean = false
 internal actual fun automaticStreamMemory(): StreamMemory? = null
 
 internal actual fun isDesktopApp(): Boolean = false
+
+/** Android apps update through their store. */
+private val noUpdate = MutableStateFlow<String?>(null)
+
+internal actual fun downloadedUpdate(): StateFlow<String?> = noUpdate
+
+internal actual fun installUpdateNow() = Unit
 
 internal actual fun externalPlayerSupported(): Boolean = true
 

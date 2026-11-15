@@ -7,7 +7,9 @@ import io.github.affonsopaulo.stremionow.player.StreamMemory
 import io.github.affonsopaulo.stremionow.player.forThisComputer
 import io.github.affonsopaulo.stremionow.ui.crash.RecentLog
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
+import io.github.affonsopaulo.stremionow.ui.desktop.AppUpdates
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.awt.Desktop
 
@@ -54,6 +56,10 @@ internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSup
 internal actual fun automaticStreamMemory(): StreamMemory? = StreamMemory.forThisComputer()
 
 internal actual fun isDesktopApp(): Boolean = true
+
+internal actual fun downloadedUpdate(): StateFlow<String?> = AppUpdates.readyVersion
+
+internal actual fun installUpdateNow() = AppUpdates.restartNow()
 
 internal actual fun externalPlayerSupported(): Boolean = false
 

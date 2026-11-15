@@ -84,7 +84,9 @@ import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.automaticStreamMemory
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.platform.displaySwitchingSupported
+import io.github.affonsopaulo.stremionow.ui.platform.downloadedUpdate
 import io.github.affonsopaulo.stremionow.ui.platform.externalPlayerSupported
+import io.github.affonsopaulo.stremionow.ui.platform.installUpdateNow
 import io.github.affonsopaulo.stremionow.ui.platform.isDesktopApp
 import io.github.affonsopaulo.stremionow.ui.platform.openExternalLink
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
@@ -785,6 +787,7 @@ private fun AboutPage() {
             style = SnTypography.body.copy(color = SnColors.fgMuted),
         )
     }
+    UpdateReady()
     if (isTv) {
         // A TV has no browser to open them in; the addresses are there to type elsewhere.
         Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
@@ -803,6 +806,28 @@ private fun AboutPage() {
                 { openExternalLink(context, IssueLink.NEW_ISSUE) },
                 style = SnButtonStyle.Ghost,
             )
+        }
+    }
+}
+
+/** A newer version downloaded by the Windows app, which installs on quit or now from here. */
+@Composable
+private fun UpdateReady() {
+    val version by remember { downloadedUpdate() }.collectAsStateWithLifecycle()
+    val ready = version ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
+        Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space1)) {
+            BasicText(
+                stringResource(Res.string.settings_update_ready, ready),
+                style = SnTypography.bodyLg.copy(color = SnColors.fg),
+            )
+            BasicText(
+                stringResource(Res.string.settings_update_ready_body),
+                style = SnTypography.body.copy(color = SnColors.fgMuted),
+            )
+        }
+        Row {
+            SnButton(stringResource(Res.string.settings_update_restart), ::installUpdateNow)
         }
     }
 }

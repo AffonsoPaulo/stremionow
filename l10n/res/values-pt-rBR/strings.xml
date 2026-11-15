@@ -561,6 +561,9 @@
   <string name="settings_about_license">Software livre sob a Licença Pública Geral GNU, versão 3 ou posterior.</string>
   <string name="settings_about_source">Código-fonte</string>
   <string name="settings_about_report">Relatar um problema</string>
+  <string name="settings_update_ready">A versão %1$s está pronta</string>
+  <string name="settings_update_ready_body">Ela é instalada da próxima vez que você encerrar o StremioNow.</string>
+  <string name="settings_update_restart">Reiniciar e atualizar</string>
 
   <string name="settings_sub_style">Estilo da legenda</string>
   <string name="settings_sub_style_body">Vale a partir do próximo vídeo. Os botões do player continuam mudando o tamanho e a posição enquanto você assiste.</string>

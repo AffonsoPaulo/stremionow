@@ -23,7 +23,7 @@ kotlin {
 }
 
 /** Shown in the app's profile page; the same as the Android apps' version name. */
-val appVersion = "0.0.1"
+val appVersion = "0.1.0"
 
 dependencies {
     // The shared interface, with the player and the Rust core's bindings (android/ui and friends).
@@ -175,7 +175,43 @@ tasks.register<Exec>("packageVelopack") {
         "Desktop,StartMenuRoot",
         // The app is not a .NET or Rust Velopack app: it handles Velopack's hook arguments itself (Main.kt).
         "--skipVeloAppCheck",
+        // The app updates from full packages only (AppUpdates.kt).
+        "--delta",
+        "None",
         "--outputDir",
         output.get().asFile.absolutePath,
     )
+}
+
+// Publishes the packages packageVelopack made as the GitHub release v<appVersion>, the release the
+// installed apps update from (AppUpdates.kt reads the latest one). Needs a token that can write
+// the repository's releases:
+//   GITHUB_TOKEN=$(gh auth token) ./gradlew :app:packageVelopack :app:publishVelopack
+tasks.register<Exec>("publishVelopack") {
+    description = "Publishes the Velopack packages as this version's GitHub release."
+    group = "compose desktop"
+    mustRunAfter("packageVelopack")
+    onlyIf { System.getProperty("os.name").lowercase().contains("windows") }
+    val output = layout.buildDirectory.dir("velopack")
+    workingDir = projectDir
+    doFirst {
+        val token = System.getenv("GITHUB_TOKEN") ?: throw GradleException("Set GITHUB_TOKEN to publish the release")
+        commandLine(
+            "dotnet",
+            "vpk",
+            "upload",
+            "github",
+            "--repoUrl",
+            "https://github.com/AffonsoPaulo/stremionow",
+            "--token",
+            token,
+            "--publish",
+            "--releaseName",
+            "StremioNow $appVersion",
+            "--tag",
+            "v$appVersion",
+            "--outputDir",
+            output.get().asFile.absolutePath,
+        )
+    }
 }

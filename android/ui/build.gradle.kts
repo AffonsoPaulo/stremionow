@@ -50,6 +50,8 @@ kotlin {
             implementation(libs.jna.platform)
             // Dispatchers.Main on the AWT event thread.
             implementation(libs.kotlinx.coroutines.swing)
+            // The Windows app's update list, Velopack's releases.win.json (AppUpdates).
+            implementation(libs.org.json)
         }
     }
 }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -26,9 +25,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.player.PlaybackState
+import io.github.affonsopaulo.stremionow.ui.components.EpisodeRowControlsCenter
 import io.github.affonsopaulo.stremionow.ui.components.SnEpisodeCard
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
 import io.github.affonsopaulo.stremionow.ui.components.SnMenuChip
+import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
@@ -106,10 +107,14 @@ internal fun EpisodesStrip(
                 background = SnColors.surfaceMuted,
             )
         }
-        LazyRow(
+        // A row like Home's: buttons at its ends to page through it under the pointer, and the
+        // mouse can drag it or turn it with Shift and the wheel.
+        SnRow(
             state = listState,
-            contentPadding = PaddingValues(horizontal = SnSpacing.space10),
-            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
+            contentPadding = PaddingValues(horizontal = SnSpacing.space10, vertical = SnSpacing.space2),
+            spacing = SnSpacing.space4,
+            controlsCenter = EpisodeRowControlsCenter,
+            overContent = true,
         ) {
             items(shown, key = { it.id }) { episode ->
                 val playing = episode.id == selection.videoId

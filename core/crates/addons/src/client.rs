@@ -168,6 +168,34 @@ impl AddonClient {
         Ok(response.subtitles)
     }
 
+    /// The size of the file `url` leads to, following redirects and asking for its first
+    /// byte only, so nothing is downloaded. None when the server does not tell.
+    pub async fn file_size(&self, url: &str) -> Result<Option<u64>, AddonError> {
+        let response = self
+            .http
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+            .map_err(AddonError::from_reqwest)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AddonError::Status(status.as_u16()));
+        }
+        // "bytes 0-0/734003200": the whole size after the slash. A server that ignores ranges
+        // answers with the whole file, and its length; the body is dropped unread.
+        let total = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit('/').next())
+            .and_then(|total| total.trim().parse::<u64>().ok());
+        let whole = (status != reqwest::StatusCode::PARTIAL_CONTENT)
+            .then(|| response.content_length())
+            .flatten();
+        Ok(total.or(whole))
+    }
+
     /// Fetches `url` and returns the raw body, refusing bodies above the size limit.
     pub async fn get_bytes(&self, url: &str) -> Result<Vec<u8>, AddonError> {
         let response = self

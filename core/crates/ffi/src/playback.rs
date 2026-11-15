@@ -28,6 +28,10 @@ pub struct StreamSource {
     /// The manifest id of the addon that offered it, which survives reinstalling and
     /// reconfiguring the addon, to ask the same addon again (see `source_memory.rs`).
     pub addon_id: String,
+    /// Which installed addon offered it: a digest of its address (see [`addon_key`]). Two
+    /// installs of one addon, such as Torrentio with and without a debrid service, share the
+    /// manifest id; this tells them apart.
+    pub addon_key: String,
     /// Short label from the addon, often its name and the quality (`Torrentio\n4k`).
     pub name: String,
     /// Longer description: release name, size, seeders, languages.
@@ -143,6 +147,18 @@ impl StremioCore {
             .into_iter()
             .filter_map(|stream| stream_source(&addon, stream))
             .collect())
+    }
+
+    /// Whether a source that was not in its debrid service's cache is ready to play: its
+    /// address now leads to the file rather than to the addon's short "being downloaded" clip,
+    /// told by size. Asking also has the service start the download, as playing would. A source
+    /// without an address, or whose size the server does not tell, counts as ready.
+    pub async fn source_ready(&self, source: StreamSource) -> Result<bool, CoreError> {
+        let Some(url) = source.url else {
+            return Ok(true);
+        };
+        let size = self.client.file_size(&url).await?;
+        Ok(size.is_none_or(|size| size >= READY_MIN_BYTES))
     }
 
     /// Orders sources best first for the user's preferences.
@@ -398,6 +414,7 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
     let mut source = StreamSource {
         addon_name: addon.manifest.name.clone(),
         addon_id: addon.manifest.id.clone(),
+        addon_key: addon_key(addon.url.manifest_url()),
         name: stream.name.unwrap_or_else(|| addon.manifest.name.clone()),
         description,
         url,
@@ -472,6 +489,26 @@ pub(crate) const MAX_ADDON_ID_LEN: usize = 200;
 /// A debrid address that names its torrent (`debrid|hash|file`) is told apart from the torrent
 /// itself (`bt|hash|file`): addons offer both for the same file, and the one played over the
 /// debrid service must not be found again as the torrent, which plays from peers.
+/// A name for an installed addon that tells two installs of it apart and survives restarts:
+/// the start of a SHA-256 digest of its manifest address. The address itself is never kept or
+/// shown, since configured addons carry the user's keys in it, and a digest does not give it
+/// back.
+pub(crate) fn addon_key(manifest_url: &str) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, manifest_url.as_bytes());
+    digest.as_ref()[..ADDON_KEY_BYTES]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Bytes of the digest in [`addon_key`]: 128 bits, far more than addons anyone installs.
+const ADDON_KEY_BYTES: usize = 16;
+
+/// Smallest file a source that was not in its debrid service's cache leads to once ready.
+/// Until then, debrid addons send a short clip saying the file is being downloaded, a few
+/// MB; an episode or a film is hundreds of MB.
+const READY_MIN_BYTES: u64 = 64 * 1024 * 1024;
+
 fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
     let addon: String = addon_id
         .chars()
@@ -841,6 +878,7 @@ mod tests {
         StreamSource {
             addon_name: "A".into(),
             addon_id: "a".into(),
+            addon_key: "k".into(),
             name: name.into(),
             description: String::new(),
             url: url.map(Into::into),
@@ -920,6 +958,55 @@ mod tests {
             serde_json::from_value(value).expect("valid stream"),
         )
         .expect("usable")
+    }
+
+    #[test]
+    fn installs_of_one_addon_have_their_own_key() {
+        let debrid = addon_key("https://torrentio.strem.fun/torbox=SECRETKEY/manifest.json");
+        let plain = addon_key("https://torrentio.strem.fun/manifest.json");
+        assert_ne!(debrid, plain);
+        assert_eq!(
+            debrid,
+            addon_key("https://torrentio.strem.fun/torbox=SECRETKEY/manifest.json")
+        );
+        assert_eq!(debrid.len(), ADDON_KEY_BYTES * 2);
+        assert!(debrid.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!debrid.contains("SECRETKEY"));
+    }
+
+    #[tokio::test]
+    async fn a_source_is_ready_once_it_leads_to_more_than_a_clip() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/clip"))
+            .and(header("range", "bytes=0-0"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/4200000"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/episode"))
+            .respond_with(
+                ResponseTemplate::new(206).insert_header("content-range", "bytes 0-0/734003200"),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        let at = |route: &str| StreamSource {
+            url: Some(format!("{}{route}", server.uri())),
+            ..source("A", None, None)
+        };
+        assert!(!core.source_ready(at("/clip")).await.expect("asks"));
+        assert!(core.source_ready(at("/episode")).await.expect("asks"));
+        assert!(
+            core.source_ready(source("A", None, None))
+                .await
+                .expect("no address")
+        );
     }
 
     #[test]

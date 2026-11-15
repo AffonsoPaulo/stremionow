@@ -338,6 +338,8 @@ pub struct CatalogRow {
 pub struct AddonInfo {
     pub manifest_url: String,
     pub id: String,
+    /// Tells this install apart from others of the same addon (`StreamSource::addon_key`).
+    pub key: String,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -396,6 +398,7 @@ impl AddonInfo {
         Self {
             manifest_url: addon.url.manifest_url().to_owned(),
             id: manifest.id.clone(),
+            key: crate::playback::addon_key(addon.url.manifest_url()),
             name: if name.is_empty() {
                 truncate(&manifest.id, MAX_NAME_CHARS)
             } else {

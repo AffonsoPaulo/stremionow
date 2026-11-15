@@ -36,6 +36,10 @@ pub struct LastSource {
     pub video_id: String,
     /// The manifest id of the addon that offered it, to ask that addon again.
     pub addon_id: String,
+    /// Which install of that addon offered it ([`StreamSource::addon_key`]), when known: two
+    /// installs of one addon share its id.
+    #[serde(default)]
+    pub addon_key: Option<String>,
     /// The source's [`StreamSource::identity`], to find the same source for the same video.
     pub identity: String,
     /// The source's binge group, to find a source of the same kind for another video, or for
@@ -87,6 +91,7 @@ impl StremioCore {
         let last = LastSource {
             video_id,
             addon_id: source.addon_id,
+            addon_key: Some(source.addon_key).filter(|key| is_addon_key(key)),
             identity,
             // A group that cannot be kept only means the next episode is not found by it.
             binge_group: source.binge_group.filter(|group| is_binge_group(group)),
@@ -150,6 +155,10 @@ fn is_identity(identity: &str) -> bool {
     is_text(identity, MAX_IDENTITY_LEN)
 }
 
+fn is_addon_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 64 && key.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 fn is_addon_id(addon_id: &str) -> bool {
     is_text(addon_id, MAX_ADDON_ID_LEN)
 }
@@ -165,6 +174,7 @@ fn is_text(text: &str, max_len: usize) -> bool {
 fn is_last_source(last: &LastSource) -> bool {
     is_id(&last.video_id)
         && is_addon_id(&last.addon_id)
+        && last.addon_key.as_deref().is_none_or(is_addon_key)
         && is_identity(&last.identity)
         && last.binge_group.as_deref().is_none_or(is_binge_group)
 }
@@ -237,6 +247,7 @@ mod tests {
         StreamSource {
             addon_name: "Torrentio".into(),
             addon_id: "com.stremio.torrentio.addon".into(),
+            addon_key: "0123456789abcdef0123456789abcdef".into(),
             name: "[RD+] Torrentio\n1080p".into(),
             description: "Show.S01E05.1080p.WEB-DL-GRP".into(),
             url: Some("https://debrid.example/resolve/SECRETKEY/0123/Show.mkv".into()),
@@ -285,6 +296,7 @@ mod tests {
             LastSource {
                 video_id: "tt1:1:5".into(),
                 addon_id: "com.stremio.torrentio.addon".into(),
+                addon_key: Some("0123456789abcdef0123456789abcdef".into()),
                 identity:
                     "com.stremio.torrentio.addon|bt|0123456789abcdef0123456789abcdef01234567|4"
                         .into(),
@@ -339,7 +351,16 @@ mod tests {
             serde_json::from_str(&stored).expect("json");
         let mut keys: Vec<&str> = fields.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["addon_id", "binge_group", "identity", "video_id"]);
+        assert_eq!(
+            keys,
+            [
+                "addon_id",
+                "addon_key",
+                "binge_group",
+                "identity",
+                "video_id"
+            ]
+        );
     }
 
     #[test]

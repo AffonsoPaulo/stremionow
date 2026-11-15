@@ -11,6 +11,7 @@ const MAX_RESOLUTION: &str = "max_resolution";
 const ONBOARDED: &str = "onboarded";
 const TORRENT_CACHE_MB: &str = "torrent_cache_mb";
 const ANISKIP: &str = "aniskip";
+const DEBUG_LOGS: &str = "debug_logs";
 const HDR: &str = "hdr";
 const MATCH_REFRESH_RATE: &str = "match_refresh_rate";
 /// Titles the user turned HDR on for ("Only for this title"), one setting each: the prefix and the meta id.
@@ -185,6 +186,9 @@ pub struct AppSettings {
     /// Ask AniSkip for the openings and endings of anime episodes. This sends the anime's id
     /// and the episode number to AniSkip (and Kitsu or AniList ids to an id mapping service).
     pub aniskip: bool,
+    /// Write what the app does while finding and preparing sources to its log, to find out
+    /// why one does not play (off by default). Never addresses or keys.
+    pub debug_logs: bool,
     /// Turning on HDR for HDR videos, on displays that support it (desktop).
     pub hdr: DisplaySwitch,
     /// Matching the display's refresh rate to the video's frame rate (desktop; off by default).
@@ -247,6 +251,7 @@ impl Default for AppSettings {
             max_resolution: 0,
             onboarded: false,
             aniskip: true,
+            debug_logs: false,
             hdr: DisplaySwitch::Ask,
             match_refresh_rate: false,
             serve_to_devices: false,
@@ -299,6 +304,9 @@ impl StremioCore {
             aniskip: store
                 .setting(ANISKIP)?
                 .map_or(defaults.aniskip, |value| value == "1"),
+            debug_logs: store
+                .setting(DEBUG_LOGS)?
+                .map_or(defaults.debug_logs, |value| value == "1"),
             hdr: store
                 .setting(HDR)?
                 .map_or(defaults.hdr, |value| DisplaySwitch::parse(&value)),
@@ -405,6 +413,7 @@ impl StremioCore {
         )?;
         store.set_setting(ONBOARDED, if settings.onboarded { "1" } else { "0" })?;
         store.set_setting(ANISKIP, if settings.aniskip { "1" } else { "0" })?;
+        store.set_setting(DEBUG_LOGS, if settings.debug_logs { "1" } else { "0" })?;
         store.set_setting(HDR, settings.hdr.as_str())?;
         store.set_setting(
             MATCH_REFRESH_RATE,
@@ -618,6 +627,7 @@ mod tests {
             max_resolution: 1081,
             onboarded: true,
             aniskip: false,
+            debug_logs: true,
             hdr: DisplaySwitch::Never,
             match_refresh_rate: true,
             serve_to_devices: true,

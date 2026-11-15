@@ -10,7 +10,6 @@ import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.desktop.display.DesktopDisplays
 import kotlinx.coroutines.launch
 import java.awt.Desktop
-import java.net.URI
 
 /** The desktop has no per-window context; services are process-wide, so a single instance stands in. */
 actual abstract class PlatformContext private constructor() {
@@ -39,8 +38,7 @@ internal actual fun openExternalLink(
     context: PlatformContext,
     url: String,
 ) {
-    val uri = runCatching { URI(url) }.getOrNull() ?: return
-    if (uri.scheme?.lowercase() !in setOf("http", "https")) return
+    val uri = webUri(url) ?: return
     if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) return
     // Starting the browser can take a moment; keep it off the interface thread.
     AppGraph.scope.launch {

@@ -118,7 +118,11 @@ object DeviceSharing {
         private val context: PlatformContext,
         private val name: String,
     ) : SecretSink {
-        override fun save(value: String) = SecureStore.save(context, name, value)
+        override fun save(value: String) {
+            // Called from the core: a refusal must not throw back into it. Only the name is logged.
+            val saved = SecureStore.save(context, name, value)
+            if (!saved) logWarning("\"$name\" will not be remembered after the app closes")
+        }
     }
 }
 

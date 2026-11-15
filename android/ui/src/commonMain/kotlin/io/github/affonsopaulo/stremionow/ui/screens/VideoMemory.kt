@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -46,6 +49,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
+import kotlinx.coroutines.delay
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -277,11 +281,18 @@ private fun AdvancedSizes(
     var behind by remember(effective.behindMiB) { mutableStateOf(effective.behindMiB.toString()) }
     val aheadMiB = parseMiB(ahead, StreamMemorySizes.AHEAD_RANGE)
     val behindMiB = parseMiB(behind, StreamMemorySizes.BEHIND_RANGE)
-    val save = { newAhead: Int?, newBehind: Int? ->
-        if (newAhead != null && newBehind != null) {
-            val sizes = StreamMemorySizes(newAhead, newBehind)
-            if (sizes != effective) onChange { it.withStreamMemory(sizes) }
-        }
+    // Saved once typing pauses, not per keystroke: "1024" would otherwise save 102 first.
+    val pending = pendingSizes(aheadMiB, behindMiB, effective)
+    val latestPending by rememberUpdatedState(pending)
+    val latestOnChange by rememberUpdatedState(onChange)
+    LaunchedEffect(pending) {
+        val sizes = pending ?: return@LaunchedEffect
+        delay(SIZE_SAVE_DELAY_MS)
+        onChange { it.withStreamMemory(sizes) }
+    }
+    // Closing the section or leaving the page within the pause still keeps what was typed.
+    DisposableEffect(Unit) {
+        onDispose { latestPending?.let { sizes -> latestOnChange { it.withStreamMemory(sizes) } } }
     }
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         if (custom) {
@@ -296,10 +307,7 @@ private fun AdvancedSizes(
                 value = ahead,
                 range = StreamMemorySizes.AHEAD_RANGE,
                 invalid = aheadMiB == null,
-                onValueChange = {
-                    ahead = it
-                    save(parseMiB(it, StreamMemorySizes.AHEAD_RANGE), behindMiB)
-                },
+                onValueChange = { ahead = it },
                 modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
             )
             SizeField(
@@ -307,10 +315,7 @@ private fun AdvancedSizes(
                 value = behind,
                 range = StreamMemorySizes.BEHIND_RANGE,
                 invalid = behindMiB == null,
-                onValueChange = {
-                    behind = it
-                    save(aheadMiB, parseMiB(it, StreamMemorySizes.BEHIND_RANGE))
-                },
+                onValueChange = { behind = it },
                 modifier = Modifier.weight(1f, fill = false).widthIn(max = 240.dp),
             )
         }
@@ -321,6 +326,19 @@ private fun AdvancedSizes(
             )
         }
     }
+}
+
+/** How long typing in a size field pauses before the sizes are saved. */
+private const val SIZE_SAVE_DELAY_MS = 600L
+
+/** The sizes typed, when both are valid and differ from those in effect; otherwise null. */
+internal fun pendingSizes(
+    aheadMiB: Int?,
+    behindMiB: Int?,
+    effective: StreamMemorySizes,
+): StreamMemorySizes? {
+    if (aheadMiB == null || behindMiB == null) return null
+    return StreamMemorySizes(aheadMiB, behindMiB).takeIf { it != effective }
 }
 
 @Composable

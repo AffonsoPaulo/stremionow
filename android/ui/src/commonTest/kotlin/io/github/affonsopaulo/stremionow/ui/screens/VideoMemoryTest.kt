@@ -97,4 +97,13 @@ class VideoMemoryTest {
         assertNull(parseMiB("99999999999", StreamMemorySizes.AHEAD_RANGE))
         assertEquals(8, parseMiB("8", StreamMemorySizes.BEHIND_RANGE))
     }
+
+    @Test
+    fun onlyValidChangedSizesWaitToBeSaved() {
+        val effective = StreamMemorySizes(128, 128)
+        assertNull(pendingSizes(128, 128, effective))
+        assertNull(pendingSizes(null, 64, effective))
+        assertNull(pendingSizes(256, null, effective))
+        assertEquals(StreamMemorySizes(256, 64), pendingSizes(256, 64, effective))
+    }
 }

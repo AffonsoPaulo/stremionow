@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.data.secrets
 
 import com.sun.jna.platform.win32.Crypt32Util
+import com.sun.jna.platform.win32.Win32Exception
 import com.sun.jna.platform.win32.WinCrypt
 import java.io.File
 import java.nio.file.Files
@@ -43,12 +44,14 @@ internal class DpapiSecrets(
 
     override fun load(name: String): String? {
         val file = file(name).takeIf(File::isFile) ?: return null
+        val sealed = file.readBytes()
         val data =
-            runCatching {
-                Crypt32Util.cryptUnprotectData(file.readBytes(), ENTROPY, WinCrypt.CRYPTPROTECT_UI_FORBIDDEN, null)
-            }.getOrElse {
-                // Copied from another account or machine: unreadable, so forget it.
-                clear(name)
+            try {
+                Crypt32Util.cryptUnprotectData(sealed, ENTROPY, WinCrypt.CRYPTPROTECT_UI_FORBIDDEN, null)
+            } catch (failure: Win32Exception) {
+                // Copied from another account or machine, or damaged: it can never be read, so
+                // forget it. Anything else (a busy system) may pass; the file stays for next time.
+                if (unreadableForever(failure.errorCode)) clear(name) else throw failure
                 return null
             }
         return try {
@@ -64,8 +67,17 @@ internal class DpapiSecrets(
 
     private fun file(name: String) = File(folder, "$name.dpapi")
 
-    private companion object {
-        val ENTROPY = "StremioNow secrets".toByteArray(Charsets.UTF_8)
-        const val DESCRIPTION = "StremioNow"
+    internal companion object {
+        private val ENTROPY = "StremioNow secrets".toByteArray(Charsets.UTF_8)
+        private const val DESCRIPTION = "StremioNow"
+
+        /** ERROR_INVALID_DATA: a damaged blob, or one sealed with other entropy. */
+        private const val ERROR_INVALID_DATA = 13
+
+        /** NTE_BAD_KEY_STATE: sealed by another Windows account or machine. */
+        private const val NTE_BAD_KEY_STATE = 0x8009000B.toInt()
+
+        /** Whether DPAPI's error [code] means the value can never be decrypted here. */
+        fun unreadableForever(code: Int): Boolean = code == ERROR_INVALID_DATA || code == NTE_BAD_KEY_STATE
     }
 }

@@ -223,6 +223,21 @@ impl Store {
         Ok(())
     }
 
+    /// Writes several settings in one transaction, so a reader never sees half of them and a
+    /// failure leaves the earlier values whole.
+    pub fn set_settings<V: AsRef<str>>(&mut self, entries: &[(&str, V)]) -> Result<(), StoreError> {
+        let transaction = self.connection.transaction()?;
+        for (key, value) in entries {
+            transaction.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                params![key, value.as_ref()],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Number of settings whose key starts with `prefix`.
     pub fn count_settings_with_prefix(&self, prefix: &str) -> Result<u32, StoreError> {
         Ok(self.connection.query_row(
@@ -713,6 +728,17 @@ mod tests {
         let store = Store::open(&path).expect("reopens");
         assert_eq!(store.setting("k").expect("reads").as_deref(), Some("v"));
         assert_eq!(store.setting("missing").expect("reads"), None);
+    }
+
+    #[test]
+    fn writes_several_settings_together() {
+        let mut store = Store::open_in_memory().expect("opens");
+        store.set_setting("a", "old").expect("writes");
+        store
+            .set_settings(&[("a", "1"), ("b", "2")])
+            .expect("writes both");
+        assert_eq!(store.setting("a").expect("reads").as_deref(), Some("1"));
+        assert_eq!(store.setting("b").expect("reads").as_deref(), Some("2"));
     }
 
     #[test]

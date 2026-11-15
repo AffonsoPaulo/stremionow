@@ -20,6 +20,8 @@ internal class CrashRecorder(
     /** The app's recent warnings, oldest first. */
     private val recentLog: () -> List<String> = RecentLog::snapshot,
     private val now: () -> Long = System::currentTimeMillis,
+    /** Exact values to remove from reports, such as the session key; must never block. */
+    private val secrets: () -> Collection<String> = KnownSecrets::snapshot,
 ) {
     /** The last core panic of this process, to attach to the crash it may cause. */
     @Volatile private var lastPanic: Pair<Long, StoredReport>? = null
@@ -46,7 +48,7 @@ internal class CrashRecorder(
                 }
             val report =
                 try {
-                    val trace = Redactor.redact(Traces.stackTrace(error), homeFolder = home)
+                    val trace = Redactor.redact(Traces.stackTrace(error), secrets = known(), homeFolder = home)
                     newReport(
                         kind = kind,
                         time = time,
@@ -69,8 +71,13 @@ internal class CrashRecorder(
     fun recordPanic(details: PanicDetails) {
         try {
             val time = now()
-            val location = Redactor.redact(Traces.panicLocation(details.location), homeFolder = home)
-            val message = Redactor.redact(Traces.safeTake(details.message, Traces.MAX_CHARS), homeFolder = home)
+            val location = Redactor.redact(Traces.panicLocation(details.location), secrets = known(), homeFolder = home)
+            val message =
+                Redactor.redact(
+                    Traces.safeTake(details.message, Traces.MAX_CHARS),
+                    secrets = known(),
+                    homeFolder = home,
+                )
             val report =
                 newReport(
                     kind = ReportKind.CorePanic,
@@ -96,7 +103,7 @@ internal class CrashRecorder(
         var wrote = false
         for (exit in exits.sortedBy { it.time }) {
             try {
-                val details = Redactor.redact(exit.details, homeFolder = home)
+                val details = Redactor.redact(exit.details, secrets = known(), homeFolder = home)
                 val panic =
                     pending.firstOrNull {
                         exit.kind == ReportKind.NativeCrash &&
@@ -125,6 +132,14 @@ internal class CrashRecorder(
         return wrote
     }
 
+    /** [secrets], or none if asking fails: reporting must go on. */
+    private fun known(): Collection<String> =
+        try {
+            secrets()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+
     private fun newReport(
         kind: ReportKind,
         time: Long,
@@ -146,7 +161,18 @@ internal class CrashRecorder(
         occurrences = 1,
         summary = summary,
         details = details,
-        log = if (withLog) recentLog().map { Redactor.redact(it, homeFolder = home) } else emptyList(),
+        log =
+            if (withLog) {
+                recentLog().map {
+                    Redactor.redact(
+                        it,
+                        secrets = known(),
+                        homeFolder = home,
+                    )
+                }
+            } else {
+                emptyList()
+            },
     )
 
     companion object {

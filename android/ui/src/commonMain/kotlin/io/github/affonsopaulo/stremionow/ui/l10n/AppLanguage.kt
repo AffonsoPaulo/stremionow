@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.affonsopaulo.stremionow.ui.l10n
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.LayoutDirection
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import java.util.Locale
 
@@ -39,3 +41,21 @@ fun endonym(tag: String): String {
     val locale = Locale.forLanguageTag(tag)
     return locale.getDisplayName(locale).replaceFirstChar { it.titlecase(locale) }
 }
+
+/**
+ * The language the interface's strings are in now: the chosen one, or the system's when there
+ * is a translation for it, or English, which the strings fall back to.
+ */
+@Composable
+internal expect fun interfaceLocale(): Locale
+
+/**
+ * The layout direction for text in [locale]. The interface follows its strings' language rather
+ * than the system's: on an Arabic or Hebrew system without that translation, the English
+ * strings stay left to right.
+ */
+fun layoutDirectionFor(locale: Locale): LayoutDirection =
+    if (locale.language in RightToLeftLanguages) LayoutDirection.Rtl else LayoutDirection.Ltr
+
+/** Languages written right to left, with the old codes Java still uses for some ("iw", "ji"). */
+private val RightToLeftLanguages = setOf("ar", "ckb", "dv", "fa", "he", "iw", "ji", "ps", "sd", "ug", "ur", "yi")

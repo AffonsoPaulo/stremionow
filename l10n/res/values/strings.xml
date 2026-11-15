@@ -597,6 +597,10 @@
   <string name="profile_sign_out">Sign out</string>
   <string name="profile_sign_out_title">Sign out of Stremio?</string>
   <string name="profile_sign_out_body">Your addons, list and progress stay on this device, but stop syncing.</string>
+  <string name="account_session_not_remembered_title">Signed in for now</string>
+  <string name="account_session_not_remembered_body">This device\'s secure storage couldn\'t keep your session, so you\'ll need to sign in again the next time you open the app.</string>
+  <string name="account_session_not_cleared_title">Session still saved</string>
+  <string name="account_session_not_cleared_body">You\'re signed out, but this device\'s secure storage couldn\'t remove the saved session, so the app may sign you in again the next time it opens.</string>
 
   <string name="player_skip_intro">Skip intro</string>
   <!-- Player button shown during a summary of earlier episodes; it jumps to its end. -->

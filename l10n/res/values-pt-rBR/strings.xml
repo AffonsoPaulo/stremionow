@@ -447,6 +447,10 @@
   <string name="profile_sign_out">Sair da conta</string>
   <string name="profile_sign_out_title">Sair da conta do Stremio?</string>
   <string name="profile_sign_out_body">Seus addons, sua lista e seu progresso continuam neste aparelho, mas param de sincronizar.</string>
+  <string name="account_session_not_remembered_title">Conectado por enquanto</string>
+  <string name="account_session_not_remembered_body">O armazenamento seguro deste aparelho não conseguiu guardar sua sessão, então você vai precisar entrar de novo na próxima vez que abrir o app.</string>
+  <string name="account_session_not_cleared_title">Sessão ainda salva</string>
+  <string name="account_session_not_cleared_body">Você saiu da conta, mas o armazenamento seguro deste aparelho não conseguiu apagar a sessão salva, então o app pode entrar de novo na próxima vez que abrir.</string>
 
   <string name="player_skip_intro">Pular abertura</string>
   <string name="player_skip_recap">Pular recapitulação</string>

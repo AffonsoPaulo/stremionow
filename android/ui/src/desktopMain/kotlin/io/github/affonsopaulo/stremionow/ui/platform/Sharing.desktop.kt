@@ -6,7 +6,6 @@ import kotlinx.coroutines.launch
 import java.awt.Desktop
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
-import java.net.URI
 
 internal actual fun copyToClipboard(
     context: PlatformContext,
@@ -33,7 +32,7 @@ internal actual fun openWebPage(
     allowHttp: Boolean,
 ): Boolean {
     if (!isWebPage(url, allowHttp)) return false
-    val uri = runCatching { URI(url) }.getOrNull() ?: return false
+    val uri = webUri(url) ?: return false
     if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) return false
     // Starting the browser can take a moment; keep it off the interface thread.
     AppGraph.scope.launch {

@@ -20,7 +20,7 @@ object AppGraph {
     /** The core, opened on first use with its database in private, non-backed-up storage. */
     fun core(context: PlatformContext): StremioCore =
         core ?: synchronized(this) {
-            core ?: StremioCore(coreDataDirectory(context).absolutePath)
+            core ?: openStremioCore(context)
                 .also { opened ->
                     SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let(opened::restoreSession)
                     core = opened
@@ -29,6 +29,16 @@ object AppGraph {
                 }
         }
 }
+
+/** The core, with its data in [coreDataDirectory] and its torrent cache in [coreCacheDirectory]. */
+private fun openStremioCore(context: PlatformContext): StremioCore {
+    val data = coreDataDirectory(context).absolutePath
+    val cache = coreCacheDirectory() ?: return StremioCore(data)
+    return StremioCore.withCacheDir(data, cache.absolutePath)
+}
+
+/** Where the core keeps its torrent cache, or null for its default folder inside [coreDataDirectory]. */
+internal expect fun coreCacheDirectory(): File?
 
 /**
  * Where the core keeps its database and torrent cache: private storage that is not backed up

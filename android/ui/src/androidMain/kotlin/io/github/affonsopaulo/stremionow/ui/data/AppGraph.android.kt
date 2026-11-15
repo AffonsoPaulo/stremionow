@@ -6,3 +6,6 @@ import java.io.File
 
 internal actual fun coreDataDirectory(context: PlatformContext): File =
     File(context.applicationContext.noBackupFilesDir, "core")
+
+// Inside the no-backup folder, as before: Android's cache folder may be cleared while streaming.
+internal actual fun coreCacheDirectory(): File? = null

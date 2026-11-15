@@ -117,6 +117,18 @@ object CrashReports {
         runCatching { setPanicListener(Listener) }
     }
 
+    /**
+     * Saves a report for [error], caught where the app cannot go on (a failed start on the
+     * desktop), as a crash: the app closes right after.
+     */
+    fun recordFatal(error: Throwable) {
+        try {
+            if (mode.value != Mode.Never) recorder?.recordCrash(Thread.currentThread(), error, endsProcess = true)
+        } catch (_: Throwable) {
+            // Reporting never gets in the way of the app's own error message.
+        }
+    }
+
     /** Changes the user's choice. [Mode.Never] also deletes every saved report. */
     internal fun setMode(mode: Mode) {
         val reports = store ?: return

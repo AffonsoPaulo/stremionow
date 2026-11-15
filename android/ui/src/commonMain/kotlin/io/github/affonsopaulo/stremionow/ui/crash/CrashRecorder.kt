@@ -26,14 +26,15 @@ internal class CrashRecorder(
 
     private val home get() = environment.homeFolder
 
-    /** Saves a report for [error], uncaught on [thread]. */
+    /** Saves a report for [error], uncaught on [thread]; [endsProcess] when the app closes because of it. */
     fun recordCrash(
         thread: Thread,
         error: Throwable,
+        endsProcess: Boolean = errorsEndProcess,
     ) {
         try {
             val time = now()
-            val kind = if (errorsEndProcess) ReportKind.Crash else ReportKind.Error
+            val kind = if (endsProcess) ReportKind.Crash else ReportKind.Error
             // A panic in a core call reaches Kotlin as InternalException with only its
             // message; the panic report written a moment ago has the location, so the two
             // become one.

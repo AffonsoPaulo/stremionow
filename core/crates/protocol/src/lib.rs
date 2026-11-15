@@ -6,6 +6,7 @@
 //! unknown fields are ignored.
 
 mod addon_catalog;
+mod lenient;
 mod manifest;
 mod resources;
 mod transport;

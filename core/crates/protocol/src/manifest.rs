@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The addon manifest: identity, resources and catalogs.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::lenient::{
+    lenient_bool, lenient_list, lenient_optional_strings, lenient_string, lenient_strings,
+    lenient_text, or_default,
+};
 
 /// Describes an addon and what it can provide.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -11,21 +18,22 @@ pub struct Manifest {
     pub id: String,
     pub version: String,
     pub name: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_text")]
     pub description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub logo: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub resources: Vec<ResourceDescriptor>,
     /// Content types the addon handles, such as `movie` and `series`.
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub types: Vec<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    /// Catalogs in the addon's order, each type and id once.
+    #[serde(default, deserialize_with = "distinct_catalogs")]
     pub catalogs: Vec<CatalogDescriptor>,
     /// Item id prefixes the addon understands, for example `tt` for IMDb ids.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_optional_strings")]
     pub id_prefixes: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub behavior_hints: ManifestBehaviorHints,
 }
 
@@ -57,13 +65,13 @@ impl Manifest {
 #[serde(rename_all = "camelCase")]
 pub struct ManifestBehaviorHints {
     /// The addon offers a configuration page.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub configurable: bool,
     /// The addon cannot be used before it is configured.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub configuration_required: bool,
     /// The addon serves adult content.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub adult: bool,
 }
 
@@ -74,9 +82,13 @@ pub enum ResourceDescriptor {
     Short(String),
     Full {
         name: String,
-        #[serde(default)]
+        #[serde(default, deserialize_with = "lenient_optional_strings")]
         types: Option<Vec<String>>,
-        #[serde(default, rename = "idPrefixes")]
+        #[serde(
+            default,
+            rename = "idPrefixes",
+            deserialize_with = "lenient_optional_strings"
+        )]
         id_prefixes: Option<Vec<String>>,
     },
 }
@@ -110,14 +122,14 @@ pub struct CatalogDescriptor {
     #[serde(rename = "type")]
     pub kind: String,
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub name: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub extra: Vec<ExtraProperty>,
     /// Older manifests list supported extras by name only.
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub extra_supported: Vec<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub extra_required: Vec<String>,
 }
 
@@ -129,7 +141,22 @@ impl CatalogDescriptor {
 
     /// Whether the catalog needs an extra property before it returns anything.
     pub fn requires_extra(&self) -> bool {
-        self.extra.iter().any(|e| e.is_required) || !self.extra_required.is_empty()
+        self.required_extras().next().is_some()
+    }
+
+    /// Whether the catalog needs an extra property other than `name` before it returns
+    /// anything, such as a search catalog that also needs a genre.
+    pub fn requires_extra_other_than(&self, name: &str) -> bool {
+        self.required_extras().any(|required| required != name)
+    }
+
+    /// Names of the extra properties the catalog needs.
+    fn required_extras(&self) -> impl Iterator<Item = &str> {
+        self.extra
+            .iter()
+            .filter(|e| e.is_required)
+            .map(|e| e.name.as_str())
+            .chain(self.extra_required.iter().map(String::as_str))
     }
 
     /// Allowed values of the extra property `name`, for example the genres.
@@ -147,19 +174,24 @@ impl CatalogDescriptor {
 #[serde(rename_all = "camelCase")]
 pub struct ExtraProperty {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub is_required: bool,
-    #[serde(default, deserialize_with = "null_as_default")]
+    /// Allowed values; numbers (years, for example) are kept as text.
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub options: Vec<String>,
 }
 
-/// Treats an explicit `null` like a missing field.
-pub(crate) fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+/// Reads the catalogs, skipping the ones that cannot be read and keeping only the first of
+/// catalogs that repeat a type and id: the interface tells catalogs apart by addon, type and
+/// id, and two at the same address would serve the same items anyway.
+fn distinct_catalogs<'de, D>(deserializer: D) -> Result<Vec<CatalogDescriptor>, D::Error>
 where
     D: Deserializer<'de>,
-    T: Default + Deserialize<'de>,
 {
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+    let mut seen = HashSet::new();
+    let mut catalogs: Vec<CatalogDescriptor> = lenient_list(deserializer)?;
+    catalogs.retain(|catalog| seen.insert((catalog.kind.clone(), catalog.id.clone())));
+    Ok(catalogs)
 }
 
 #[cfg(test)]
@@ -226,6 +258,77 @@ mod tests {
         assert!(manifest.supports("stream", "movie", "tt1"));
         assert!(!manifest.supports("stream", "series", "tt1"));
         assert!(!manifest.supports("stream", "movie", "kitsu:1"));
+    }
+
+    #[test]
+    fn reads_loosely_written_manifests() {
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "id": "x", "version": "1", "name": "X", "logo": null,
+            "behaviorHints": null,
+            "resources": ["stream", 7, {"name": "meta", "types": ["movie", null], "idPrefixes": null}],
+            "types": ["movie", null],
+            "idPrefixes": ["tt", null],
+            "catalogs": [
+                {"type": "movie", "id": "year", "name": null,
+                 "extra": [{"name": "genre", "isRequired": null, "options": [2024, "2023", null]}, {"isRequired": true}]},
+                {"type": "movie"},
+                {"type": "movie", "id": "year", "name": "Repeated"},
+                {"type": "series", "id": "year", "extraRequired": null}
+            ]
+        }))
+        .expect("loose manifest");
+        assert_eq!(manifest.behavior_hints, ManifestBehaviorHints::default());
+        assert_eq!(manifest.types, ["movie"]);
+        assert_eq!(
+            manifest.id_prefixes.as_deref(),
+            Some(&["tt".to_owned()][..])
+        );
+        assert_eq!(manifest.resources.len(), 2, "the number is skipped");
+        assert!(
+            manifest.supports("meta", "movie", "tt1") && !manifest.supports("meta", "movie", "x1"),
+            "null prefixes fall back to the manifest's"
+        );
+        let catalogs: Vec<_> = manifest
+            .catalogs
+            .iter()
+            .map(|c| (c.kind.as_str(), c.id.as_str()))
+            .collect();
+        assert_eq!(
+            catalogs,
+            [("movie", "year"), ("series", "year")],
+            "the catalog without an id and the repeated one are dropped"
+        );
+        let year = &manifest.catalogs[0];
+        assert_eq!(year.name, None);
+        assert_eq!(year.extra.len(), 1, "the extra without a name is dropped");
+        assert!(!year.requires_extra());
+        assert_eq!(year.extra_options("genre"), ["2024", "2023"]);
+
+        let hints: Manifest = serde_json::from_value(serde_json::json!({
+            "id": "y", "version": "1", "name": "Y",
+            "behaviorHints": {"configurable": null, "configurationRequired": "true", "adult": 1}
+        }))
+        .expect("loose hints");
+        assert!(!hints.behavior_hints.configurable);
+        assert!(hints.behavior_hints.configuration_required);
+        assert!(!hints.behavior_hints.adult);
+    }
+
+    #[test]
+    fn tells_which_extras_a_catalog_needs() {
+        let catalog: CatalogDescriptor = serde_json::from_value(serde_json::json!({
+            "type": "movie", "id": "search",
+            "extra": [{"name": "search", "isRequired": true}, {"name": "genre"}]
+        }))
+        .expect("valid");
+        assert!(catalog.requires_extra());
+        assert!(!catalog.requires_extra_other_than("search"));
+        let narrow: CatalogDescriptor = serde_json::from_value(serde_json::json!({
+            "type": "movie", "id": "search", "extraSupported": ["search", "genre"],
+            "extraRequired": ["search", "genre"]
+        }))
+        .expect("valid");
+        assert!(narrow.requires_extra_other_than("search"));
     }
 
     #[test]

@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,7 +102,7 @@ import kotlinx.coroutines.delay
 actual fun PlayerScreen(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
-    onOpenEpisode: (Episode) -> Unit,
+    onOpenEpisode: (episode: Episode, bingeGroup: String?) -> Unit,
 ) {
     // What this player opened with. Moving on to the next episode clears the session's source
     // before the player has finished leaving; read live, that made the leaving player press
@@ -113,22 +114,38 @@ actual fun PlayerScreen(
         return
     }
     val context = LocalContext.current
+    // Named after the video the player opened with, and kept in the saved state: when the
+    // activity is recreated after the player moved on to another episode, the session names
+    // that episode, and a key made from it would start a second player beside the first.
+    val playerKey = rememberSaveable { "player-${selection.videoId}-${source.url.hashCode()}" }
     val viewModel =
-        viewModel(key = "player-${selection.videoId}-${source.url.hashCode()}") {
+        viewModel(key = playerKey) {
             val appContext = context.applicationContext
             val debuggable = appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
             PlayerViewModel(AppGraph.core(context), selection, source) { options ->
                 MpvPlayer.create(appContext, options.copy(verboseLogs = debuggable))
             }
         }
+    // Leaves once, whichever way: an episode's lookup that ends after Back or "Change source"
+    // must not navigate a second time, which would close the title's page too.
+    val leave = remember(viewModel) { LeaveOnce(viewModel::leave) }
+    val back = { leave.to(onBack) }
+    val changeSource = { leave.to(onChangeSource) }
     // The video playing: another episode plays in this player, in place of the one it opened
     // with; only when its source cannot be found does the title's page show its sources.
     val playing = viewModel.selection
-    val openEpisode: (Episode) -> Unit = { episode -> viewModel.openEpisode(episode) { onOpenEpisode(episode) } }
+    val openEpisode: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
+    // The next episode (its button, Up Next, the media session): the one left counts as watched.
+    val playNext: (Episode) -> Unit = { episode ->
+        viewModel.openEpisode(episode, asNext = true) { group -> leave.to { onOpenEpisode(episode, group) } }
+    }
     val state by viewModel.player.state.collectAsStateWithLifecycle()
     val preparing by viewModel.preparing.collectAsStateWithLifecycle()
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
     val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
+    val providerGaveUp by viewModel.providerGaveUp.collectAsStateWithLifecycle()
     val skips by viewModel.skips.collectAsStateWithLifecycle()
     val providerDownloading by viewModel.providerDownloading.collectAsStateWithLifecycle()
     val incomplete by viewModel.incomplete.collectAsStateWithLifecycle()
@@ -153,7 +170,7 @@ actual fun PlayerScreen(
         durationSeconds = state.durationSeconds,
         paused = state.isPaused,
         hasNext = playing.nextEpisode != null,
-        onNext = { playing.nextEpisode?.let(openEpisode) },
+        onNext = { playing.nextEpisode?.let(playNext) },
         seekStepSeconds = seekStep,
     )
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
@@ -167,6 +184,8 @@ actual fun PlayerScreen(
         }
     }
     BackHandler(enabled = panel != null) { panel = null }
+    // The system's Back goes through the same single leave as the player's own button.
+    BackHandler(enabled = panel == null) { back() }
     // A panel open on the episode left closes with it.
     LaunchedEffect(playing.videoId) { panel = null }
     val next = playing.nextEpisode
@@ -259,7 +278,7 @@ actual fun PlayerScreen(
                 scrubSeconds = scrubSeconds,
                 hasNext = next != null,
                 seekStep = viewModel.seekSteps.step,
-                onBack = onBack,
+                onBack = back,
                 onTogglePause = {
                     viewModel.player.togglePause()
                     poke()
@@ -278,8 +297,8 @@ actual fun PlayerScreen(
                 },
                 onTracks = { panel = Panel.Tracks },
                 onEpisodes = { panel = Panel.Episodes },
-                onChangeSource = onChangeSource,
-                onNext = { next?.let(openEpisode) },
+                onChangeSource = changeSource,
+                onNext = { next?.let(playNext) },
             )
         }
 
@@ -288,13 +307,18 @@ actual fun PlayerScreen(
             ProviderDownloading(
                 logo = playing.details.item.logo,
                 title = playing.details.item.name,
-                onChangeSource = onChangeSource,
+                onChangeSource = changeSource,
                 modifier = Modifier.align(Alignment.Center),
             )
         }
 
         if (state.error != null || prepareFailed) {
-            PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+            PlaybackError(
+                onChangeSource = changeSource,
+                onBack = back,
+                modifier = Modifier.align(Alignment.Center),
+                providerGaveUp = providerGaveUp,
+            )
         } else if (incomplete != null) {
             IncompleteVideoPrompt(
                 durationSeconds = incomplete ?: 0.0,
@@ -316,7 +340,7 @@ actual fun PlayerScreen(
                 showSkip = controlsVisible,
                 onSkipBegins = poke,
                 onSeekTo = viewModel.player::seekTo,
-                onOpenEpisode = openEpisode,
+                onOpenEpisode = playNext,
                 upNext = viewModel.upNext,
                 modifier =
                     Modifier
@@ -336,8 +360,8 @@ actual fun PlayerScreen(
                 SidePanel(stringResource(Res.string.player_tracks), onClose = { panel = null }) {
                     TracksList(
                         tracks = state.tracks,
-                        onSelectAudio = viewModel.player::selectAudio,
-                        onSelectSubtitle = viewModel.player::selectSubtitle,
+                        onSelectAudio = viewModel::selectAudio,
+                        onSelectSubtitle = viewModel::selectSubtitle,
                     )
                 }
             }

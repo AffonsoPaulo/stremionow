@@ -31,6 +31,8 @@ fun PlayerMediaSession(
     seekStepSeconds: Double,
 ) {
     val step by rememberUpdatedState(seekStepSeconds)
+    // The callback is set once, but the next episode changes each time the player moves on.
+    val next by rememberUpdatedState(onNext)
     val context = LocalContext.current
     val session = remember { MediaSession(context, "StremioNow") }
     DisposableEffect(session) {
@@ -46,7 +48,7 @@ fun PlayerMediaSession(
 
                 override fun onRewind() = player.seekBy(-step)
 
-                override fun onSkipToNext() = onNext()
+                override fun onSkipToNext() = next()
             },
         )
         session.isActive = true

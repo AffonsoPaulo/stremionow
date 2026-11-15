@@ -120,16 +120,21 @@ internal suspend fun SourceFinder.find(
 }
 
 /**
- * The result of [block], or null when it fails; cancelling, a time limit included, still
- * cancels. Failures are not logged: an addon's errors can quote its address, which may hold
- * the user's settings or keys.
+ * The result of [block], or null when it fails, after telling [onFailure]; cancelling, a time
+ * limit included, still cancels, where `runCatching` would take it for a failure and let the
+ * work of a video already left carry on. Failures are not logged here: an addon's errors can
+ * quote its address, which may hold the user's settings or keys.
  */
-private suspend fun <T> orNull(block: suspend () -> T): T? =
+internal suspend fun <T> orNull(
+    onFailure: (Exception) -> Unit = {},
+    block: suspend () -> T,
+): T? =
     try {
         block()
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) {
+    } catch (failure: Exception) {
+        onFailure(failure)
         null
     }
 

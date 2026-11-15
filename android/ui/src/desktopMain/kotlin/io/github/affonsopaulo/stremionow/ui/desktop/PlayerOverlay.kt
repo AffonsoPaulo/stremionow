@@ -40,6 +40,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -161,6 +162,12 @@ internal class OverlayState {
     /** Where "Skip intro" (recap, credits) on screen would go, for the S key; null when none shows. */
     var skipTarget by mutableStateOf<Double?>(null)
 
+    /**
+     * The focus is in the open panel (tracks, playback, episodes): Space, Enter and the arrows
+     * are its own, to choose and move between its items, rather than the player's shortcuts.
+     */
+    var panelFocused by mutableStateOf(false)
+
     fun poke() {
         areControlsVisible = true
         lastActivity = System.nanoTime()
@@ -179,6 +186,9 @@ internal class OverlayState {
  * Up and Down change the volume and M mutes it. Esc (and the
  * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
  * [onNext], when there is one; E opens and closes the episodes, when the title has them.
+ *
+ * While the focus is in an open panel ([OverlayState.panelFocused]), Space, Enter and the
+ * arrows go to the panel instead (see [panelKeys]); the other shortcuts keep working.
  */
 internal fun handlePlayerShortcut(
     event: KeyEvent,
@@ -192,6 +202,10 @@ internal fun handlePlayerShortcut(
     escLeavesFullScreen: Boolean = true,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
+    if (keyBelongsToPanel(event.key, state)) {
+        state.poke()
+        return false
+    }
     when (event.key) {
         Key.Spacebar, Key.K -> {
             player.togglePause()
@@ -260,6 +274,27 @@ internal fun handlePlayerShortcut(
     state.poke()
     return true
 }
+
+/** Keys a focused panel uses itself: choosing its items and moving between them. */
+internal val panelKeys =
+    setOf(
+        Key.Spacebar,
+        Key.Enter,
+        Key.NumPadEnter,
+        Key.DirectionUp,
+        Key.DirectionDown,
+        Key.DirectionLeft,
+        Key.DirectionRight,
+    )
+
+/**
+ * Whether [key] goes to the open panel rather than to the player's shortcuts: the shortcuts see
+ * keys first (they are the window's preview), so without this a focused panel never gets them.
+ */
+internal fun keyBelongsToPanel(
+    key: Key,
+    state: OverlayState,
+): Boolean = state.panel != null && state.panelFocused && key in panelKeys
 
 /** What one step back does in the player, in this order. */
 internal enum class BackStep { DismissHdr, LeaveFullScreen, ClosePanel, Leave }
@@ -339,6 +374,7 @@ internal fun PlayerOverlay(
     onBack: () -> Unit,
     onChangeSource: () -> Unit,
     onOpenEpisode: (Episode) -> Unit,
+    onPlayNext: (Episode) -> Unit = onOpenEpisode,
 ) {
     val player = viewModel.player
     val selection = viewModel.selection
@@ -347,6 +383,7 @@ internal fun PlayerOverlay(
     val preparing by viewModel.preparing.collectAsState()
     val torrent by viewModel.torrent.collectAsState()
     val prepareFailed by viewModel.prepareFailed.collectAsState()
+    val providerGaveUp by viewModel.providerGaveUp.collectAsState()
     val skips by viewModel.skips.collectAsState()
     val watched by viewModel.watched.collectAsState()
     val providerDownloading by viewModel.providerDownloading.collectAsState()
@@ -391,7 +428,10 @@ internal fun PlayerOverlay(
     // goes on meanwhile, so the question never delays the start.
     val video = playback.video
     val scope = rememberCoroutineScope()
+    // Again for each video this player plays: the next episode can be HDR when this one was
+    // not, or the other way round. A question still showing was about the video that left.
     LaunchedEffect(video, display) {
+        if (video == null) state.isAskingHdr = false
         if (video != null && display != null) state.isAskingHdr = display.onVideo(video)
     }
 
@@ -496,7 +536,7 @@ internal fun PlayerOverlay(
                 onTracks = { state.panel = if (state.panel == Panel.Tracks) null else Panel.Tracks },
                 onEpisodes = { state.panel = Panel.Episodes },
                 onChangeSource = onChangeSource,
-                onNext = { next?.let(onOpenEpisode) },
+                onNext = { next?.let(onPlayNext) },
             )
         }
 
@@ -513,7 +553,12 @@ internal fun PlayerOverlay(
         if (playback.error == PlayerError.PlayerUnavailable) {
             PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (failed) {
-            PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+            PlaybackError(
+                onChangeSource = onChangeSource,
+                onBack = onBack,
+                modifier = Modifier.align(Alignment.Center),
+                providerGaveUp = providerGaveUp,
+            )
         } else if (incomplete != null) {
             IncompleteVideoPrompt(
                 durationSeconds = incomplete ?: 0.0,
@@ -549,7 +594,7 @@ internal fun PlayerOverlay(
                 skips = skips,
                 next = promptNext,
                 onSeekTo = player::seekTo,
-                onOpenEpisode = onOpenEpisode,
+                onOpenEpisode = onPlayNext,
                 upNext = viewModel.upNext,
                 showSkip = state.areControlsVisible,
                 onSkipBegins = state::poke,
@@ -572,10 +617,14 @@ internal fun PlayerOverlay(
                 TracksPanel(
                     player = player,
                     playback = playback,
+                    // Through the player's model, which remembers what the viewer picks.
+                    onSelectAudio = viewModel::selectAudio,
+                    onSelectSubtitle = viewModel::selectSubtitle,
                     modifier =
                         Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM),
+                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM)
+                            .onFocusChanged { state.panelFocused = it.hasFocus },
                 )
             }
 
@@ -592,7 +641,8 @@ internal fun PlayerOverlay(
                     modifier =
                         Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM),
+                            .padding(end = SnSpacing.space8, bottom = TRACKS_PANEL_BOTTOM)
+                            .onFocusChanged { state.panelFocused = it.hasFocus },
                 )
             }
 
@@ -609,12 +659,17 @@ internal fun PlayerOverlay(
                     watched = watched,
                     onOpenEpisode = onOpenEpisode,
                     onClose = { state.panel = null },
-                    modifier = Modifier.align(Alignment.BottomStart),
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .onFocusChanged { state.panelFocused = it.hasFocus },
                 )
             }
 
             null -> {}
         }
+        // A panel that closed with the focus in it gives the keys back to the player.
+        LaunchedEffect(state.panel) { if (state.panel == null) state.panelFocused = false }
 
         if (!pair.isFullScreen && !pair.framed) {
             for (edge in ResizeEdge.entries) ResizeHandle(edge, pair)

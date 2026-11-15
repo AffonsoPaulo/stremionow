@@ -19,8 +19,9 @@ private val FULL_LENGTH_KINDS = setOf("movie", "series", "anime")
 
 /**
  * Whether a video of [durationSeconds] looks too short to be [selection]'s film or episode:
- * under three minutes, or under half the length the title's metadata gives, when it gives one.
- * Other kinds (channels' videos) can be short and are never asked about.
+ * under half the length the title's metadata gives, when it gives one, else under three minutes.
+ * A short whose metadata says it is short is not asked about. Other kinds (channels' videos) can
+ * be short and are never asked about.
  */
 internal fun looksIncomplete(
     durationSeconds: Double,
@@ -32,9 +33,9 @@ internal fun looksIncomplete(
             ?: selection.details.runtime
                 ?.let(::runtimeMinutes)
                 .takeIf { selection.episode == null }
-    val shortOfRuntime =
-        expectedMinutes != null && expectedMinutes > 0 && durationSeconds < expectedMinutes * 60 * MIN_SHARE_OF_RUNTIME
-    return durationSeconds < MIN_FULL_VIDEO_SECONDS || shortOfRuntime
+    val shortest =
+        expectedMinutes?.takeIf { it > 0 }?.let { it * 60 * MIN_SHARE_OF_RUNTIME } ?: MIN_FULL_VIDEO_SECONDS
+    return durationSeconds < shortest
 }
 
 /**

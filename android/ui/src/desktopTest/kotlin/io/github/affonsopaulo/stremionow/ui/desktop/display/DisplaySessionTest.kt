@@ -238,6 +238,74 @@ class DisplaySessionTest {
     }
 
     @Test
+    fun theNextVideoInThePlayerIsJudgedAgainForHdr() {
+        val display = FakeDisplay()
+        val journal = MemoryJournal()
+        val session = session(display, FakePreferences(DisplaySwitch.ALWAYS), journal)
+        session.onVideo(hdrVideo, monitor)
+        assertTrue(display.hdr.enabled)
+
+        // The next episode is SDR: HDR goes off, and mpv is told to stop outputting it.
+        assertFalse(session.onVideo(sdrVideo, monitor))
+        assertFalse(display.hdr.enabled)
+        assertFalse(session.isHdrActive)
+        assertNull(journal.entry)
+
+        // And the one after is HDR again.
+        assertFalse(session.onVideo(hdrVideo, monitor))
+        assertTrue(display.hdr.enabled)
+        assertTrue(session.isHdrActive)
+        session.restore()
+        assertFalse(display.hdr.enabled)
+    }
+
+    @Test
+    fun anHdrEpisodeAfterAnSdrOneAsks() {
+        val display = FakeDisplay()
+        val session = session(display)
+        assertFalse(session.onVideo(sdrVideo, monitor))
+        assertTrue(session.onVideo(hdrVideo, monitor))
+        session.answer(HdrChoice.OnlyThisTitle)
+        assertTrue(display.hdr.enabled)
+        // HDR on for the title: the next HDR episode keeps it without asking.
+        assertFalse(session.onVideo(hdrVideo, monitor))
+        assertTrue(session.isHdrActive)
+    }
+
+    @Test
+    fun notNowIsNotAskedAgainInTheSamePlayer() {
+        val session = session(FakeDisplay())
+        assertTrue(session.onVideo(hdrVideo, monitor))
+        session.answer(HdrChoice.NotNow)
+        assertFalse(session.onVideo(hdrVideo, monitor))
+    }
+
+    @Test
+    fun theRefreshRateFollowsEachVideo() {
+        val display = FakeDisplay()
+        val session = session(display, FakePreferences(matchRefreshRate = true))
+        session.onVideo(sdrVideo, monitor)
+        assertEquals(120, display.refresh)
+
+        // 24 fps suits 120 Hz as well as 23.976 does: no switch.
+        val calls = display.calls.size
+        session.onVideo(VideoFormat.from("bt.1886", 24.0), monitor)
+        assertEquals(calls, display.calls.size)
+
+        // Nothing suits 25 fps here: the saved mode comes back.
+        session.onVideo(VideoFormat.from("bt.1886", 25.0), monitor)
+        assertEquals(60, display.refresh)
+
+        session.onVideo(sdrVideo, monitor)
+        assertEquals(120, display.refresh)
+        // A video with no known frame rate puts the mode back too.
+        session.onVideo(VideoFormat.from("bt.1886", null), monitor)
+        assertEquals(60, display.refresh)
+        session.restore()
+        assertEquals(60, display.refresh)
+    }
+
+    @Test
     fun aRefusedRefreshRateLeavesTheModeAlone() {
         val display = FakeDisplay(refuseRefresh = true)
         val session = session(display, FakePreferences(matchRefreshRate = true))

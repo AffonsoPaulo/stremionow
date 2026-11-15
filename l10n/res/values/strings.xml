@@ -474,6 +474,8 @@
   <string name="player_incomplete_default_in">Not saved in %1$d s</string>
   <string name="player_provider_downloading">The provider is downloading this video</string>
   <string name="player_provider_downloading_body">It starts by itself once ready, which can take a few minutes.</string>
+  <!-- Instead of the usual error text, when the debrid service never got the video ready or stopped answering. -->
+  <string name="player_provider_gave_up">The provider still hasn\'t got this video ready, or stopped answering. Try another source.</string>
   <string name="player_choose_other_source">Choose another source</string>
   <string name="settings_debug_logs">Debug log</string>
   <string name="settings_debug_logs_body">Writes what the app does while finding and preparing sources to its log, to find out why one does not play. Never addresses or keys.</string>

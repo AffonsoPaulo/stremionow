@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Runs every job, as a forced push does (see the changes job).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,18 +28,24 @@ jobs:
       contents: read
       # On pull requests, paths-filter lists the changed files through the API.
       pull-requests: read
+    # A forced push (a rewritten history) has no previous commit left to compare with, and a run
+    # started by hand has none at all: both run every job.
     outputs:
-      core: ${{ steps.filter.outputs.core }}
-      android: ${{ steps.filter.outputs.android }}
-      desktop: ${{ steps.filter.outputs.desktop }}
+      core: ${{ steps.everything.outputs.run || steps.filter.outputs.core }}
+      android: ${{ steps.everything.outputs.run || steps.filter.outputs.android }}
+      desktop: ${{ steps.everything.outputs.run || steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           # Full history lets paths-filter diff pushes locally, without fetching with a token.
           fetch-depth: 0
+      - id: everything
+        if: github.event_name == 'workflow_dispatch' || github.event.forced
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
+        if: steps.everything.outputs.run != 'true'
         with:
           filters: |
             core:

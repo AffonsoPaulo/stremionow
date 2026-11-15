@@ -179,14 +179,14 @@ fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
 }
 
 /** A poster card's width where a pointer drives the screen, before fitting the window. */
-internal val POINTER_POSTER_CARD_WIDTH = 175.dp
+internal val POINTER_POSTER_CARD_WIDTH = 160.dp
 
 /** Room between poster cards where a pointer drives the screen. */
-internal val POSTER_SPACING = 48.dp
+internal val POSTER_SPACING = 40.dp
 
 /** Narrowest and widest a poster card gets while fitting the window. */
-internal val MIN_POSTER_CARD_WIDTH = 150.dp
-internal val MAX_POSTER_CARD_WIDTH = 200.dp
+internal val MIN_POSTER_CARD_WIDTH = 140.dp
+internal val MAX_POSTER_CARD_WIDTH = 185.dp
 
 /** How much of the last card in view shows, at least and at most: enough to tell it is cut. */
 internal const val MIN_LAST_CARD_SHOWN = 0.25f

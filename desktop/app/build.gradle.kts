@@ -124,3 +124,58 @@ tasks.register<JavaExec>("writeAppIcons") {
     )
     systemProperty("java.awt.headless", "true")
 }
+
+// The Windows installer people download: Velopack's one-click Setup.exe, which installs the app
+// in the user's profile (%LOCALAPPDATA%\StremioNow, no administrator rights), shows
+// icons/StremioNow-splash.png while it does, adds the Start menu and desktop shortcuts and
+// opens the app; Velopack also makes the packages that later updates are built from. It wraps
+// the folder `createDistributable` makes, so packaging needs a JDK with jpackage, as the MSI:
+//   ./gradlew :app:packageVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
+// `vpk` is a .NET tool pinned in desktop/dotnet-tools.json (`dotnet tool restore` installs it).
+// Each release needs a higher version than the last (appVersion above) for updates to apply.
+// Output: build/velopack/ (StremioNow-win-Setup.exe, the portable zip and the packages).
+tasks.register<Exec>("packageVelopack") {
+    description = "Builds the Windows installer (Velopack) from the app folder createDistributable makes."
+    group = "compose desktop"
+    dependsOn("createDistributable")
+    onlyIf { System.getProperty("os.name").lowercase().contains("windows") }
+    val appFolder = layout.buildDirectory.dir("compose/binaries/main/app/StremioNow")
+    val output = layout.buildDirectory.dir("velopack")
+    workingDir = projectDir
+    commandLine(
+        "dotnet",
+        "vpk",
+        "pack",
+        "--packId",
+        "StremioNow",
+        "--packTitle",
+        "StremioNow",
+        "--packAuthors",
+        "StremioNow contributors",
+        "--packVersion",
+        appVersion,
+        // The bundled runtime and libmpv are 64-bit (ARM64 builds bundle no libmpv yet).
+        "--runtime",
+        "win-x64",
+        "--packDir",
+        appFolder.get().asFile.absolutePath,
+        "--mainExe",
+        "StremioNow.exe",
+        "--icon",
+        layout.projectDirectory
+            .file("icons/StremioNow.ico")
+            .asFile.absolutePath,
+        "--splashImage",
+        layout.projectDirectory
+            .file("icons/StremioNow-splash.png")
+            .asFile.absolutePath,
+        "--splashProgressColor",
+        "#8B7CFF",
+        "--shortcuts",
+        "Desktop,StartMenuRoot",
+        // The app is not a .NET or Rust Velopack app: it handles Velopack's hook arguments itself (Main.kt).
+        "--skipVeloAppCheck",
+        "--outputDir",
+        output.get().asFile.absolutePath,
+    )
+}

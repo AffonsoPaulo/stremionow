@@ -38,6 +38,9 @@ import kotlin.system.exitProcess
 
 private const val APP_NAME = "StremioNow"
 
+/** Arguments Velopack runs the app with during setup, updates and removal (`--veloapp-install` …). */
+private const val VELOPACK_HOOK_PREFIX = "--veloapp-"
+
 /** The smoke test gives up after this long, whatever it is waiting for. */
 private const val SMOKE_TEST_TIMEOUT_MS = 120_000L
 
@@ -59,6 +62,9 @@ private val BACKGROUND = Color(0x0A, 0x0B, 0x10)
  * pattern through libmpv once and exits with 0 when everything worked (see [SmokeTest]).
  */
 fun main(args: Array<String>) {
+    // The Windows installer (Velopack) runs the app with these while it installs, updates or
+    // removes it, and waits for it to exit: the app has nothing to set up then.
+    if (args.any { it.startsWith(VELOPACK_HOOK_PREFIX) }) exitProcess(0)
     // Before anything uses JNA, which reads where to load its native part from once.
     NativeLibraries.useBundledJnaDispatch()
     // Before AWT starts: the macOS title bar follows the system's light or dark mode.

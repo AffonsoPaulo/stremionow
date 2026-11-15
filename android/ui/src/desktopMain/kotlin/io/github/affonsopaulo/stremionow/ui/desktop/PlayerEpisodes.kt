@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
+import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 
 /** Seasons in the order the strip offers them: regular ones in order, specials (season 0) last. */
 internal fun stripSeasons(episodes: List<Episode>): List<Int> {
@@ -78,7 +80,9 @@ internal fun EpisodesStrip(
         Row(
             Modifier.fillMaxWidth().padding(horizontal = SnLayout.gutter),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space4),
         ) {
+            BasicText(title, style = SnTypography.headingMd.copy(color = SnColors.fg))
             if (seasons.size > 1 && season != null) {
                 SnMenuChip(
                     options = seasons,

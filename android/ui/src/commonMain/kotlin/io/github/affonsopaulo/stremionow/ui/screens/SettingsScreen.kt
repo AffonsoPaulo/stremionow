@@ -30,7 +30,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -95,9 +94,11 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
 import io.github.affonsopaulo.stremionow.ui.theme.SnRadius
 import io.github.affonsopaulo.stremionow.ui.theme.SnSpacing
 import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The project's source code, linked from About. */
 private const val SOURCE_URL = "https://github.com/AffonsoPaulo/stremionow"
@@ -682,7 +683,6 @@ private fun AccountPage(onSignIn: () -> Unit) {
     var confirmSignOut by remember { mutableStateOf(false) }
     var syncing by remember { mutableStateOf(false) }
     var syncFailed by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     if (confirmSignOut) {
         SnDialog(
             title = stringResource(Res.string.profile_sign_out_title),
@@ -712,12 +712,15 @@ private fun AccountPage(onSignIn: () -> Unit) {
                         if (syncing) return@SnButton
                         syncing = true
                         syncFailed = false
-                        scope.launch {
+                        // In the app's scope, so leaving the page does not cancel the sync.
+                        AppGraph.scope.launch {
                             val result = runCatching { AppGraph.core(context).sync() }
                             // An expired session signs out quietly, as at start-up.
                             if (result.exceptionOrNull() is CoreException.SignIn) signOutOfStremio(context)
-                            syncFailed = result.isFailure
-                            syncing = false
+                            withContext(Dispatchers.Main) {
+                                syncFailed = result.isFailure
+                                syncing = false
+                            }
                             AccountEvents.changed()
                         }
                     },

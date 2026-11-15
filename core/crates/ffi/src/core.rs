@@ -10,12 +10,13 @@ use futures::future::join_all;
 use serde::de::DeserializeOwned;
 use stremionow_addons::{
     AddonClient, AddonError, AddonList, DISCOVER_SOURCE, IconClient, InstalledAddon, discoverable,
-    manifest_fingerprint,
+    manifest_fingerprint, parse_json, without_bom,
 };
 use stremionow_library::{LibraryEntry, ProgressEntry, Store, WatchStats, WatchedTitle};
 use stremionow_markers::AniSkip;
 use stremionow_protocol::{
-    AddonCatalogResponse, AddonUrl, CatalogResponse, Extra, Manifest, MetaDetail, MetaResponse,
+    AddonCatalogResponse, AddonUrl, CatalogDescriptor, CatalogResponse, Extra, Manifest,
+    MetaDetail, MetaResponse,
 };
 
 use crate::account::Account;
@@ -45,6 +46,9 @@ const DEFAULT_ADDONS: &[(&str, u32)] = &[
 pub(crate) const DEFAULTS_VERSION: u32 = 2;
 /// Setting that holds the version of the defaults already installed.
 pub(crate) const DEFAULTS_INSTALLED: &str = "default_addons_installed";
+/// Prefix of the settings that note each default installed before the whole list was: when
+/// one fails, the others must not come back on the next try if the user removed them.
+const DEFAULT_INSTALLED_PREFIX: &str = "default_addon_installed:";
 
 /// How long each addon may take before it is skipped.
 /// Generous enough for slow mobile networks; stale cached data is shown meanwhile.
@@ -86,43 +90,10 @@ impl StremioCore {
 
     /// Installs the default addons the first time the app runs, and the ones a newer version
     /// of the list added after an update. Safe to call on every launch: it does nothing once
-    /// they are installed, and retries on the next launch after a failure.
+    /// they are installed, and retries the ones that failed on the next launch, never one
+    /// that was installed and that the user removed since.
     pub async fn ensure_default_addons(&self) -> Result<(), CoreError> {
-        let installed_version = self
-            .store()?
-            .setting(DEFAULTS_INSTALLED)?
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
-        if installed_version >= DEFAULTS_VERSION {
-            return Ok(());
-        }
-        let present: Vec<String> = self
-            .store()?
-            .addons()?
-            .into_iter()
-            .map(|addon| addon.manifest_url)
-            .collect();
-        let wanted = defaults_to_install(installed_version, &present);
-        // Download the manifests at once, then save them in list order so Cinemeta comes
-        // first. The ones that worked are kept; a failure is retried on the next launch.
-        let fetched = join_all(wanted.iter().map(|url| self.client.install(url))).await;
-        let mut first_error = None;
-        for result in fetched {
-            match result {
-                Ok(addon) => {
-                    self.save_addon(&addon)?;
-                }
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                }
-            }
-        }
-        if let Some(error) = first_error {
-            return Err(error.into());
-        }
-        self.store()?
-            .set_setting(DEFAULTS_INSTALLED, &DEFAULTS_VERSION.to_string())?;
-        Ok(())
+        self.ensure_defaults(DEFAULT_ADDONS, DEFAULTS_VERSION).await
     }
 
     /// Installed addons in display order.
@@ -178,11 +149,12 @@ impl StremioCore {
         };
         let json = manifest_json(&addon)?;
         let new_url = addon.url.manifest_url();
-        let old_url = self
-            .same_addon(&addon)?
-            .map(|(installed, _)| installed.url.manifest_url().to_owned());
         let enabled = {
+            // Looked up and replaced under one lock, so two installs at once cannot both
+            // find nothing to replace and list the addon twice.
             let mut store = self.store()?;
+            let old_url = same_addon_in(&store, &addon)?
+                .map(|(installed, _)| installed.url.manifest_url().to_owned());
             store.replace_addon(old_url.as_deref().unwrap_or(new_url), new_url, &json)?;
             store
                 .addons()?
@@ -267,7 +239,7 @@ impl StremioCore {
                     .manifest
                     .catalogs
                     .iter()
-                    .filter(|c| c.supports_extra("search"))
+                    .filter(|c| searchable(c))
                     .map(move |c| CatalogInfo::new(addon, c))
             })
             .collect())
@@ -313,7 +285,7 @@ impl StremioCore {
                     .manifest
                     .catalogs
                     .iter()
-                    .filter(|c| c.supports_extra("search"))
+                    .filter(|c| searchable(c))
                     .map(move |c| (addon, c))
             })
             .collect();
@@ -323,11 +295,15 @@ impl StremioCore {
             }))
             .await;
 
+        // Fails only when no catalog answered: catalogs that answered with nothing mean
+        // "no results", even when others could not be reached.
+        let mut answered = false;
         let mut first_error = None;
         let mut rows = Vec::new();
         for ((addon, catalog), result) in targets.iter().zip(results) {
             match result {
                 Ok(metas) => {
+                    answered = true;
                     let items = dedupe(metas.into_iter().map(MetaItem::from));
                     if !items.is_empty() {
                         rows.push(CatalogRow {
@@ -341,8 +317,8 @@ impl StremioCore {
                 }
             }
         }
-        match (rows.is_empty(), first_error) {
-            (true, Some(error)) => Err(error.into()),
+        match (answered, first_error) {
+            (false, Some(error)) => Err(error.into()),
             _ => Ok(rows),
         }
     }
@@ -455,6 +431,62 @@ impl StremioCore {
         }))
     }
 
+    /// Installs the `defaults` (see [`DEFAULT_ADDONS`]) up to list `version`; tests give
+    /// their own. Each default that installs is noted at once, so when another fails and the
+    /// list is not marked done, the next try asks only for the ones still missing.
+    async fn ensure_defaults(
+        &self,
+        defaults: &[(&str, u32)],
+        version: u32,
+    ) -> Result<(), CoreError> {
+        let (installed_version, done) = {
+            let store = self.store()?;
+            let installed_version = store
+                .setting(DEFAULTS_INSTALLED)?
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            if installed_version >= version {
+                return Ok(());
+            }
+            let mut done: Vec<String> = store
+                .addons()?
+                .into_iter()
+                .map(|addon| addon.manifest_url)
+                .collect();
+            for (url, _) in defaults {
+                if store.setting(&default_installed_key(url))?.is_some() {
+                    done.push((*url).to_owned());
+                }
+            }
+            (installed_version, done)
+        };
+        let wanted = defaults_to_install(defaults, installed_version, &done);
+        // Download the manifests at once, then save them in list order so Cinemeta comes
+        // first. The ones that worked are kept; a failure is retried on the next launch.
+        let fetched = join_all(wanted.iter().map(|url| self.client.install(url))).await;
+        let mut first_error = None;
+        for (url, result) in wanted.iter().zip(fetched) {
+            match result {
+                Ok(addon) => {
+                    self.save_addon(&addon)?;
+                    self.store()?
+                        .set_setting(&default_installed_key(url), "1")?;
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error.into());
+        }
+        let store = self.store()?;
+        store.set_setting(DEFAULTS_INSTALLED, &version.to_string())?;
+        // The version now covers every default; the notes of single ones are not needed.
+        store.delete_settings_with_prefix(DEFAULT_INSTALLED_PREFIX)?;
+        Ok(())
+    }
+
     /// Discover's lists, from the addon at `source`; tests point it at a fake server.
     async fn discover_addons_from(&self, source: &str) -> Result<Vec<CatalogAddon>, CoreError> {
         let source = AddonUrl::parse(source).map_err(AddonError::from)?;
@@ -524,16 +556,7 @@ impl StremioCore {
         &self,
         addon: &InstalledAddon,
     ) -> Result<Option<(InstalledAddon, bool)>, CoreError> {
-        let id = &addon.manifest.id;
-        let installed = self.installed()?;
-        // The same address first, in case an older copy shares the id under another one.
-        let exact = installed
-            .iter()
-            .position(|(a, _)| a.url == addon.url && &a.manifest.id == id);
-        let any = installed.iter().position(|(a, _)| &a.manifest.id == id);
-        Ok(exact
-            .or(any)
-            .and_then(|index| installed.into_iter().nth(index)))
+        same_addon_in(&*self.store()?, addon)
     }
 
     /// Saves a downloaded addon, keeping its position and enabled state if it was installed.
@@ -555,19 +578,9 @@ impl StremioCore {
         })
     }
 
-    /// Installed addons with their enabled flag. Entries whose stored manifest no longer parses
-    /// are skipped rather than failing everything.
+    /// Installed addons with their enabled flag (see [`installed_in`]).
     fn installed(&self) -> Result<Vec<(InstalledAddon, bool)>, CoreError> {
-        Ok(self
-            .store()?
-            .addons()?
-            .into_iter()
-            .filter_map(|stored| {
-                let url = AddonUrl::parse(&stored.manifest_url).ok()?;
-                let manifest: Manifest = serde_json::from_str(&stored.manifest_json).ok()?;
-                Some((InstalledAddon { url, manifest }, stored.enabled))
-            })
-            .collect())
+        installed_in(&*self.store()?)
     }
 
     pub(crate) fn enabled(&self) -> Result<Vec<InstalledAddon>, CoreError> {
@@ -608,7 +621,7 @@ impl StremioCore {
         let cached = self.store()?.cached(url)?;
         if let Some((body, fetched_at)) = &cached
             && now_millis() - fetched_at < millis(freshness)
-            && let Ok(value) = serde_json::from_slice(body)
+            && let Ok(value) = parse_json(body)
         {
             return Ok(value);
         }
@@ -619,27 +632,76 @@ impl StremioCore {
                 Ok(value)
             }
             Err(error) => cached
-                .and_then(|(body, _)| serde_json::from_slice(&body).ok())
+                .and_then(|(body, _)| parse_json(&body).ok())
                 .ok_or_else(|| error.into()),
         }
     }
 
+    /// Fetches and parses JSON, returning the body as it is cached: without a byte order
+    /// mark, so the readers of the cache that parse it directly can.
     async fn fetch_json<T: DeserializeOwned>(&self, url: &str) -> Result<(T, Vec<u8>), AddonError> {
         let body = self.client.get_bytes(url).await?;
-        let value = serde_json::from_slice(&body)
-            .map_err(|e| AddonError::InvalidResponse(e.to_string()))?;
+        let body = without_bom(&body).to_vec();
+        let value = parse_json(&body)?;
         Ok((value, body))
     }
 }
 
-/// Default addons to install when the list at `installed_version` is already in place:
-/// the ones added later that are not installed yet, in list order.
-fn defaults_to_install(installed_version: u32, present: &[String]) -> Vec<&'static str> {
-    DEFAULT_ADDONS
+/// Installed addons with their enabled flag. Entries whose stored manifest no longer parses
+/// are skipped rather than failing everything.
+fn installed_in(store: &Store) -> Result<Vec<(InstalledAddon, bool)>, CoreError> {
+    Ok(store
+        .addons()?
+        .into_iter()
+        .filter_map(|stored| {
+            let url = AddonUrl::parse(&stored.manifest_url).ok()?;
+            let manifest: Manifest = serde_json::from_str(&stored.manifest_json).ok()?;
+            Some((InstalledAddon { url, manifest }, stored.enabled))
+        })
+        .collect())
+}
+
+/// The addon in `store` with the same manifest id as `addon`, with its enabled flag.
+fn same_addon_in(
+    store: &Store,
+    addon: &InstalledAddon,
+) -> Result<Option<(InstalledAddon, bool)>, CoreError> {
+    let id = &addon.manifest.id;
+    let installed = installed_in(store)?;
+    // The same address first, in case an older copy shares the id under another one.
+    let exact = installed
         .iter()
-        .filter(|(url, since)| *since > installed_version && !present.iter().any(|p| p == url))
+        .position(|(a, _)| a.url == addon.url && &a.manifest.id == id);
+    let any = installed.iter().position(|(a, _)| &a.manifest.id == id);
+    Ok(exact
+        .or(any)
+        .and_then(|index| installed.into_iter().nth(index)))
+}
+
+/// Of `defaults`, the ones to install when the list at `installed_version` is already in
+/// place: the ones added later that are not installed, or noted as installed, yet, in list
+/// order.
+fn defaults_to_install<'a>(
+    defaults: &[(&'a str, u32)],
+    installed_version: u32,
+    done: &[String],
+) -> Vec<&'a str> {
+    defaults
+        .iter()
+        .filter(|(url, since)| *since > installed_version && !done.iter().any(|p| p == url))
         .map(|(url, _)| *url)
         .collect()
+}
+
+/// Whether a search can ask `catalog` with the search term alone: it takes one, and needs
+/// no other extra (such as a genre) that a search does not give.
+fn searchable(catalog: &CatalogDescriptor) -> bool {
+    catalog.supports_extra("search") && !catalog.requires_extra_other_than("search")
+}
+
+/// Setting that notes the default addon at `url` as installed.
+fn default_installed_key(url: &str) -> String {
+    format!("{DEFAULT_INSTALLED_PREFIX}{url}")
 }
 
 /// The manifest as stored in the database.
@@ -775,13 +837,13 @@ mod tests {
 
     #[test]
     fn defaults_cover_new_installs_and_updates() {
-        let all = defaults_to_install(0, &[]);
+        let all = defaults_to_install(DEFAULT_ADDONS, 0, &[]);
         assert_eq!(all.len(), DEFAULT_ADDONS.len());
         assert!(all[0].contains("cinemeta"), "Cinemeta comes first");
 
         // An install from version 1 only gets the additions, minus any already present.
         let present = vec!["https://watchhub.strem.io/manifest.json".to_owned()];
-        let update = defaults_to_install(1, &present);
+        let update = defaults_to_install(DEFAULT_ADDONS, 1, &present);
         assert_eq!(
             update,
             vec![
@@ -789,7 +851,178 @@ mod tests {
                 "https://caching.stremio.net/publicdomainmovies.now.sh/manifest.json",
             ]
         );
-        assert!(defaults_to_install(DEFAULTS_VERSION, &[]).is_empty());
+        assert!(defaults_to_install(DEFAULT_ADDONS, DEFAULTS_VERSION, &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn retries_only_the_defaults_that_failed() {
+        let good = addon_server("Good").await;
+        let flaky = MockServer::start().await;
+        let good_url = format!("{}/manifest.json", good.uri());
+        let flaky_url = format!("{}/manifest.json", flaky.uri());
+        let defaults = [(good_url.as_str(), 1), (flaky_url.as_str(), 1)];
+        let (core, _dir) = core();
+
+        assert!(core.ensure_defaults(&defaults, 1).await.is_err());
+        assert_eq!(
+            core.addons().expect("lists").len(),
+            1,
+            "the good one is kept"
+        );
+        core.remove_addon(good_url.clone()).expect("removes");
+
+        // Still failing: the removed default does not come back.
+        assert!(core.ensure_defaults(&defaults, 1).await.is_err());
+        assert!(core.addons().expect("lists").is_empty());
+
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test.flaky", "version": "1.0.0", "name": "Flaky"
+            })))
+            .mount(&flaky)
+            .await;
+        core.ensure_defaults(&defaults, 1).await.expect("installs");
+        let urls: Vec<_> = core
+            .addons()
+            .expect("lists")
+            .into_iter()
+            .map(|a| a.manifest_url)
+            .collect();
+        assert_eq!(urls, [flaky_url]);
+        let store = core.store().expect("store");
+        assert_eq!(
+            store.setting(DEFAULTS_INSTALLED).expect("reads").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            store
+                .count_settings_with_prefix(DEFAULT_INSTALLED_PREFIX)
+                .expect("counts"),
+            0,
+            "the notes of single defaults are cleared"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_search_results_are_not_an_error() {
+        let server = addon_server("A").await;
+        Mock::given(method("GET"))
+            .and(path("/catalog/movie/search/search=nothing.json"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"metas": []})),
+            )
+            .mount(&server)
+            .await;
+        let down = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "test.down", "version": "1.0.0", "name": "Down",
+                "resources": ["catalog"], "types": ["movie"],
+                "catalogs": [
+                    {"type": "movie", "id": "search", "extra": [{"name": "search", "isRequired": true}]},
+                    {"type": "movie", "id": "by-genre", "extra": [
+                        {"name": "search", "isRequired": true}, {"name": "genre", "isRequired": true}
+                    ]}
+                ]
+            })))
+            .mount(&down)
+            .await;
+        let (core, _dir) = core();
+        install(&core, format!("{}/manifest.json", server.uri()))
+            .await
+            .expect("installs");
+        install(&core, format!("{}/manifest.json", down.uri()))
+            .await
+            .expect("installs");
+        let searchable: Vec<_> = core
+            .search_catalogs()
+            .expect("lists")
+            .into_iter()
+            .map(|c| c.catalog_id)
+            .collect();
+        assert_eq!(
+            searchable,
+            ["search", "search"],
+            "the catalog that also needs a genre is not searched"
+        );
+        // The second addon answers 404 to its search; the first answered with nothing.
+        assert!(
+            core.search("nothing".into())
+                .await
+                .expect("no results")
+                .is_empty()
+        );
+
+        server.reset().await;
+        assert!(
+            core.search("nothing".into()).await.is_err(),
+            "with no catalog answering, the search fails"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn installs_at_once_list_the_addon_once() {
+        let first = addon_server("A").await;
+        let second = addon_server("A").await;
+        let (core, _dir) = core();
+        let first_url = format!("{}/manifest.json", first.uri());
+        let second_url = format!("{}/manifest.json", second.uri());
+        let first_preview = core
+            .preview_addon(first_url.clone())
+            .await
+            .expect("previews");
+        let second_preview = core
+            .preview_addon(second_url.clone())
+            .await
+            .expect("previews");
+        let (a, b) = tokio::join!(
+            tokio::spawn({
+                let core = core.clone();
+                async move {
+                    core.install_addon(first_url, first_preview.addon.fingerprint)
+                        .await
+                }
+            }),
+            tokio::spawn({
+                let core = core.clone();
+                async move {
+                    core.install_addon(second_url, second_preview.addon.fingerprint)
+                        .await
+                }
+            }),
+        );
+        a.expect("joins").expect("installs");
+        b.expect("joins").expect("installs");
+        assert_eq!(core.addons().expect("lists").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reads_cached_bodies_sent_with_a_byte_order_mark() {
+        let server = addon_server("A").await;
+        let mut body = b"\xEF\xBB\xBF".to_vec();
+        body.extend_from_slice(br#"{"metas": [{"id": "tt1", "type": "movie", "name": "One"}]}"#);
+        Mock::given(method("GET"))
+            .and(path("/catalog/movie/top.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&server)
+            .await;
+        let (core, _dir) = core();
+        install(&core, format!("{}/manifest.json", server.uri()))
+            .await
+            .expect("installs");
+        let catalog = core.catalogs("movie".into()).expect("lists").remove(0);
+        let items = core.catalog_page(catalog, None, 0).await.expect("reads");
+        assert_eq!(items[0].id, "tt1");
+        let url = format!("{}/catalog/movie/top.json", server.uri());
+        let (cached, _) = core
+            .store()
+            .expect("store")
+            .cached(&url)
+            .expect("reads")
+            .expect("cached");
+        assert!(cached.starts_with(b"{"), "cached without the mark");
     }
 
     #[tokio::test]

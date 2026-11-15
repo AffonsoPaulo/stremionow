@@ -41,6 +41,14 @@ const SUBTITLE_POSITION_STEP: u32 = 5;
 const DEFAULT_SUBTITLE_TEXT_COLOR: u32 = 0xFFFF_FFFF;
 const DEFAULT_SUBTITLE_BACKGROUND_COLOR: u32 = 0x0000_0000;
 const DEFAULT_SUBTITLE_OUTLINE_COLOR: u32 = 0xFF00_0000;
+const AUTOPLAY_NEXT: &str = "autoplay_next";
+const UP_NEXT_COUNTDOWN_SECONDS: &str = "up_next_countdown_seconds";
+
+/// The Up Next countdown, in seconds, when there is one: Stremio offers the same range.
+pub const UP_NEXT_COUNTDOWN_RANGE: (u32, u32) = (5, 90);
+/// Ten seconds, as before the setting: Stremio's 35 leave the card up for most of the credits,
+/// which already show it as they start.
+const DEFAULT_UP_NEXT_COUNTDOWN_SECONDS: u32 = 10;
 
 /// Custom stream memory read ahead, in MiB: the player's `StreamMemorySizes` takes the same
 /// range. Below it, a few seconds of a 4K film; above it, more memory than any level uses.
@@ -171,6 +179,13 @@ pub struct AppSettings {
     /// Styled subtitles (ASS) keep the file's own fonts, colours and places; off, the colours
     /// and place above apply to them too, as with plain ones.
     pub subtitle_file_styling: bool,
+    /// Moves on to the next episode by itself (Stremio's "binge watching"): when the Up Next
+    /// card's countdown ends, or at the end of the episode when the card has none. Off, the card
+    /// still offers the next episode, without counting down.
+    pub autoplay_next: bool,
+    /// How long the Up Next card counts down, in seconds: 0 for no countdown, otherwise within
+    /// [`UP_NEXT_COUNTDOWN_RANGE`].
+    pub up_next_countdown_seconds: u32,
 }
 
 impl Default for AppSettings {
@@ -196,6 +211,8 @@ impl Default for AppSettings {
             subtitle_background_color: DEFAULT_SUBTITLE_BACKGROUND_COLOR,
             subtitle_outline_color: DEFAULT_SUBTITLE_OUTLINE_COLOR,
             subtitle_file_styling: false,
+            autoplay_next: true,
+            up_next_countdown_seconds: DEFAULT_UP_NEXT_COUNTDOWN_SECONDS,
         }
     }
 }
@@ -280,6 +297,13 @@ impl StremioCore {
             subtitle_file_styling: store
                 .setting(SUBTITLE_FILE_STYLING)?
                 .map_or(defaults.subtitle_file_styling, |value| value == "1"),
+            autoplay_next: store
+                .setting(AUTOPLAY_NEXT)?
+                .map_or(defaults.autoplay_next, |value| value == "1"),
+            up_next_countdown_seconds: store
+                .setting(UP_NEXT_COUNTDOWN_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.up_next_countdown_seconds, up_next_countdown),
         })
     }
 
@@ -355,6 +379,11 @@ impl StremioCore {
             } else {
                 "0"
             },
+        )?;
+        store.set_setting(AUTOPLAY_NEXT, flag(settings.autoplay_next))?;
+        store.set_setting(
+            UP_NEXT_COUNTDOWN_SECONDS,
+            &up_next_countdown(settings.up_next_countdown_seconds).to_string(),
         )?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
@@ -456,6 +485,20 @@ fn subtitle_position(percent: u32) -> u32 {
     snap_to_step(percent, SUBTITLE_POSITION_RANGE, SUBTITLE_POSITION_STEP)
 }
 
+/// No countdown stays none; any other length is kept within the range.
+fn up_next_countdown(seconds: u32) -> u32 {
+    if seconds == 0 {
+        0
+    } else {
+        clamp_range(seconds, UP_NEXT_COUNTDOWN_RANGE)
+    }
+}
+
+/// A yes/no setting as stored.
+fn flag(on: bool) -> &'static str {
+    if on { "1" } else { "0" }
+}
+
 /// Keeps a cache size within the offered range.
 fn clamp_cache(megabytes: u32) -> u32 {
     let (min, max) = (TORRENT_CACHE_CHOICES_MB[0], TORRENT_CACHE_CHOICES_MB[4]);
@@ -493,6 +536,8 @@ mod tests {
             subtitle_background_color: 0x8000_0000,
             subtitle_outline_color: 0,
             subtitle_file_styling: true,
+            autoplay_next: false,
+            up_next_countdown_seconds: 300,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -525,6 +570,30 @@ mod tests {
         assert_eq!(saved.subtitle_background_color, 0x8000_0000);
         assert_eq!(saved.subtitle_outline_color, 0);
         assert!(saved.subtitle_file_styling);
+        assert!(!saved.autoplay_next);
+        assert_eq!(saved.up_next_countdown_seconds, UP_NEXT_COUNTDOWN_RANGE.1);
+    }
+
+    #[test]
+    fn next_episode_defaults_and_countdown_limits() {
+        let defaults = AppSettings::default();
+        assert!(defaults.autoplay_next, "Stremio's binge watching is on");
+        assert_eq!(defaults.up_next_countdown_seconds, 10);
+        assert_eq!(up_next_countdown(0), 0, "no countdown stays none");
+        assert_eq!(up_next_countdown(1), UP_NEXT_COUNTDOWN_RANGE.0);
+        assert_eq!(up_next_countdown(35), 35);
+        assert_eq!(up_next_countdown(91), UP_NEXT_COUNTDOWN_RANGE.1);
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        core.update_settings(AppSettings {
+            up_next_countdown_seconds: 0,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.up_next_countdown_seconds, 0);
+        assert!(saved.autoplay_next);
     }
 
     #[test]

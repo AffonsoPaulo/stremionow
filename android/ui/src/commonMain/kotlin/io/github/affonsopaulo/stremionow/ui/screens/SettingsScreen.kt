@@ -383,6 +383,7 @@ private fun PlaybackPage() {
             onSelect = { lines -> viewModel.update { it.copy(maxResolution = lines) } },
         )
     }
+    NextEpisodeSettings(current, viewModel::update)
     SettingsToggle(
         title = stringResource(Res.string.settings_aniskip),
         body = stringResource(Res.string.settings_aniskip_body),
@@ -392,6 +393,45 @@ private fun PlaybackPage() {
     // Only where the player takes the choice (the desktop); Android keeps its own sizes.
     val automatic = remember { automaticStreamMemory() }
     if (automatic != null) VideoMemorySetting(current, automatic, viewModel::update)
+}
+
+/**
+ * Moving on to the next episode: on or off, and how long the card counts down, which only
+ * matters while it is on.
+ */
+@Composable
+private fun NextEpisodeSettings(
+    current: AppSettings,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    SettingsToggle(
+        title = stringResource(Res.string.settings_autoplay_next),
+        body = stringResource(Res.string.settings_autoplay_next_body),
+        checked = current.autoplayNext,
+        onToggle = { onChange { it.copy(autoplayNext = !it.autoplayNext) } },
+    )
+    if (!current.autoplayNext) return
+    val off = stringResource(Res.string.state_off)
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(
+            stringResource(Res.string.settings_up_next_countdown),
+            style = SnTypography.bodyLg.copy(color = SnColors.fg),
+        )
+        BasicText(
+            stringResource(Res.string.settings_up_next_countdown_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        val saved = current.upNextCountdownSeconds.toInt()
+        SnChipRow(
+            // A length saved elsewhere (another version) stays selectable.
+            options = (UpNextCountdownChoices + saved).distinct().sorted(),
+            selected = saved,
+            label = { seconds ->
+                if (seconds == 0) off else pluralStringResource(Res.plurals.settings_duration_seconds, seconds, seconds)
+            },
+            onSelect = { seconds -> onChange { it.copy(upNextCountdownSeconds = seconds.toUInt()) } },
+        )
+    }
 }
 
 /** HDR and refresh rate switching, where the app can change the display (Windows). */

@@ -475,6 +475,7 @@ internal fun PlayerOverlay(
                 next = next,
                 onSeekTo = player::seekTo,
                 onOpenEpisode = onOpenEpisode,
+                upNext = viewModel.upNext,
                 modifier =
                     Modifier
                         .align(Alignment.BottomEnd)

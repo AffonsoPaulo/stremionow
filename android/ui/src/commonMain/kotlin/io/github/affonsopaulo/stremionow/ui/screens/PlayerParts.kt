@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import io.github.affonsopaulo.stremionow.core.AppSettings
 import io.github.affonsopaulo.stremionow.core.Episode
 import io.github.affonsopaulo.stremionow.core.FallbackReason
 import io.github.affonsopaulo.stremionow.core.SkipSegment
@@ -92,8 +94,37 @@ import io.github.affonsopaulo.stremionow.core.SkipKind as CoreSkipKind
 // card, the skip buttons, the error message and the torrent status line. Each platform's
 // PlayerScreen lays them out over its own video surface and controls.
 
-/** Seconds the "Up next" card counts down before playing the next episode. */
-private const val UP_NEXT_COUNTDOWN = 10
+/**
+ * What the "Up next" card does, from Settings › Playback: count down [countdownSeconds] and then
+ * play the next episode, or show without a countdown (null). With [playsAtEnd], the next episode
+ * plays once this one ends, for a card that does not count down.
+ */
+internal data class UpNextBehavior(
+    val countdownSeconds: Int?,
+    val playsAtEnd: Boolean,
+) {
+    companion object {
+        /** Ten seconds, then the next episode: the defaults. */
+        val DEFAULT = UpNextBehavior(countdownSeconds = 10, playsAtEnd = false)
+
+        /**
+         * With "Play the next episode automatically" off, the card only offers it. On, it counts
+         * down for the chosen length, or, with no countdown, the next episode plays at the end.
+         */
+        fun from(settings: AppSettings?): UpNextBehavior {
+            if (settings == null) return DEFAULT
+            val countdown = settings.upNextCountdownSeconds.toInt()
+            return when {
+                !settings.autoplayNext -> UpNextBehavior(countdownSeconds = null, playsAtEnd = false)
+                countdown <= 0 -> UpNextBehavior(countdownSeconds = null, playsAtEnd = true)
+                else -> UpNextBehavior(countdownSeconds = countdown, playsAtEnd = false)
+            }
+        }
+    }
+}
+
+/** Countdown lengths offered in Settings, in seconds; 0 is none. The core keeps 5 to 90. */
+internal val UpNextCountdownChoices = listOf(0, 5, 10, 15, 20, 30, 45, 60, 90)
 
 /** Controls hide after this long without input while playing. */
 internal const val CONTROLS_TIMEOUT_MS = 4_000L
@@ -114,7 +145,8 @@ internal enum class Panel { Tracks, Playback, Episodes }
  * from [skips] (AniSkip) for what the chapters do not mark.
  *
  * With [takeFocus], each prompt takes the focus when it appears, so a remote's OK acts on it.
- * Platforms set it only when nothing else on screen could have the focus.
+ * Platforms set it only when nothing else on screen could have the focus. [upNext] is what the
+ * card does, from Settings.
  */
 @Composable
 internal fun PlaybackPrompts(
@@ -125,7 +157,13 @@ internal fun PlaybackPrompts(
     onOpenEpisode: (Episode) -> Unit,
     modifier: Modifier = Modifier,
     takeFocus: Boolean = false,
+    upNext: UpNextBehavior = UpNextBehavior.DEFAULT,
 ) {
+    // Without a countdown, "Play the next episode automatically" moves on when this one ends.
+    val currentOnOpenEpisode by rememberUpdatedState(onOpenEpisode)
+    LaunchedEffect(state.isEnded, next?.id, upNext.playsAtEnd) {
+        if (upNext.playsAtEnd && state.isEnded && next != null) currentOnOpenEpisode(next)
+    }
     val markers =
         remember(state.chapters, state.durationSeconds, skips) {
             Chapters.markers(state.chapters, state.durationSeconds).orElse(skips)
@@ -164,6 +202,7 @@ internal fun PlaybackPrompts(
             if (next != null && (!creditsChosen || state.isEnded)) {
                 UpNext(
                     episode = next,
+                    countdownSeconds = upNext.countdownSeconds,
                     // mpv pauses itself at the end of a file; only a pause by the viewer stops the count.
                     paused = state.isPaused && !state.isEnded,
                     onPlay = { onOpenEpisode(next) },
@@ -454,17 +493,21 @@ internal fun SkipPill(
  * The next episode, near the end: its picture with "Next episode · S1 E6" and its title, a
  * "Next episode" button that fills up as the countdown runs (it plays the episode when full,
  * unless the viewer pauses), "Watch credits", which hides the card, and the time left in words.
+ * Without [countdownSeconds] the button is simply full and nothing plays by itself.
  */
 @Composable
 internal fun UpNext(
     episode: Episode,
+    countdownSeconds: Int?,
     paused: Boolean,
     onPlay: () -> Unit,
     onWatchCredits: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var remaining by remember(episode.id) { mutableIntStateOf(UP_NEXT_COUNTDOWN) }
-    LaunchedEffect(episode.id, paused) {
+    val countdown = countdownSeconds?.takeIf { it > 0 }
+    var remaining by remember(episode.id, countdown) { mutableIntStateOf(countdown ?: 0) }
+    LaunchedEffect(episode.id, paused, countdown) {
+        if (countdown == null) return@LaunchedEffect
         while (!paused && remaining > 0) {
             delay(1_000)
             remaining--
@@ -472,7 +515,7 @@ internal fun UpNext(
         if (remaining == 0) onPlay()
     }
     val fill by animateFloatAsState(
-        targetValue = 1f - remaining.toFloat() / UP_NEXT_COUNTDOWN,
+        targetValue = if (countdown == null) 1f else 1f - remaining.toFloat() / countdown,
         animationSpec = tween(1_000, easing = LinearEasing),
         label = "up-next-fill",
     )
@@ -530,10 +573,12 @@ internal fun UpNext(
             )
             OutlineButton(stringResource(Res.string.player_watch_credits), onWatchCredits)
         }
-        BasicText(
-            stringResource(Res.string.player_starts_in, remaining),
-            style = SnTypography.caption.copy(color = SnColors.fgSecondary),
-        )
+        if (countdown != null) {
+            BasicText(
+                stringResource(Res.string.player_starts_in, remaining),
+                style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+            )
+        }
     }
 }
 

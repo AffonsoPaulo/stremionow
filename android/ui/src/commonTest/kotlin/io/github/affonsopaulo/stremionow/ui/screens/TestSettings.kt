@@ -31,4 +31,6 @@ internal fun defaultSettings() =
         subtitleBackgroundColor = 0u,
         subtitleOutlineColor = 0xFF000000u,
         subtitleFileStyling = false,
+        autoplayNext = true,
+        upNextCountdownSeconds = 10u,
     )

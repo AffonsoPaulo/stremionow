@@ -547,6 +547,11 @@
   <string name="settings_color_translucent_black">Preto translúcido</string>
   <string name="settings_color_none">Nenhum</string>
 
+  <string name="settings_autoplay_next">Reproduzir o próximo episódio automaticamente</string>
+  <string name="settings_autoplay_next_body">O próximo episódio começa sozinho perto do fim deste. Desligado, o cartão do próximo episódio continua aparecendo, sem contagem regressiva.</string>
+  <string name="settings_up_next_countdown">Contagem para o próximo episódio</string>
+  <string name="settings_up_next_countdown_body">Quanto tempo o cartão do próximo episódio conta antes de ele começar. Desligado, o próximo episódio começa assim que este termina.</string>
+
   <string name="settings_memory">Memória para o vídeo</string>
   <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>
   <string name="settings_memory_light">Leve</string>

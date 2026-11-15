@@ -69,6 +69,9 @@ class PlayerViewModel<out P : VideoPlayer>(
     /** How subtitles look, from Settings › Playback. */
     val subtitleStyle = settings.subtitleStyle()
 
+    /** What the Up Next card does, from Settings › Playback. */
+    internal val upNext = UpNextBehavior.from(settings)
+
     val player: P =
         createPlayer(
             PlayerOptions(

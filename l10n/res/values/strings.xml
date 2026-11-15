@@ -739,6 +739,12 @@
   <!-- No background box, or no outline. -->
   <string name="settings_color_none">None</string>
 
+  <!-- Settings › Playback: moving on to the next episode. The card is the one shown near the end of an episode. -->
+  <string name="settings_autoplay_next">Play the next episode automatically</string>
+  <string name="settings_autoplay_next_body">The next episode starts by itself near the end of this one. When off, the next episode\'s card still shows, without counting down.</string>
+  <string name="settings_up_next_countdown">Next episode countdown</string>
+  <string name="settings_up_next_countdown_body">How long the next episode\'s card counts down before it starts. When off, the next episode starts as soon as this one ends.</string>
+
   <!-- Settings › Playback: how much of the video is kept in memory for skipping. Not the torrent cache, which is disk space. -->
   <string name="settings_memory">Memory for the video</string>
   <string name="settings_memory_body">How much of the video StremioNow keeps in memory around where you are, so skipping back or forward doesn\'t load it again. It\'s separate from the torrent cache, which is disk space for downloads. Applies from the next video.</string>

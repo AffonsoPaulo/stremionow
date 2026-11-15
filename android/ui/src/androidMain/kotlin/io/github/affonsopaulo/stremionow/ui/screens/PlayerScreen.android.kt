@@ -277,6 +277,7 @@ actual fun PlayerScreen(
                 next = next,
                 onSeekTo = viewModel.player::seekTo,
                 onOpenEpisode = onOpenEpisode,
+                upNext = viewModel.upNext,
                 modifier =
                     Modifier
                         .align(Alignment.BottomEnd)

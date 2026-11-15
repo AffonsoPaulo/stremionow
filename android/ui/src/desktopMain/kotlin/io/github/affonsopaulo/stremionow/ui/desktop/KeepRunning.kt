@@ -65,6 +65,27 @@ class KeepRunning(
         onQuit()
     }
 
+    /**
+     * Shows the app in front of other windows, from the tray or minimized: what launching it
+     * again does (see [SingleInstance]).
+     */
+    fun bringToFront() {
+        val window = window ?: return
+        if (trayIcon != null || window.isVisible) {
+            bringBack()
+            return
+        }
+        // The player is open, and the app's window stepped aside for it (DesktopHost.stepAside):
+        // the video window comes forward instead. Its overlay is a window it owns, which follows
+        // it, and WindowPair puts the overlay above it once it is active.
+        Frame.getFrames().filter { it !== window && it.isShowing }.forEach { frame ->
+            if (frame.extendedState and Frame.ICONIFIED != 0) {
+                frame.extendedState = frame.extendedState and Frame.ICONIFIED.inv()
+            }
+            frame.toFront()
+        }
+    }
+
     private fun bringBack() {
         removeTrayIcon()
         val window = window ?: return

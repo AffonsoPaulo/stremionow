@@ -87,6 +87,19 @@ impl StremioCore {
         Self::open(data_dir, Account::new()?)
     }
 
+    /// Like `new`, with the torrent cache in `cache_dir` instead of inside `data_dir`. The
+    /// Windows app keeps its database in the roaming profile and its cache, which can hold
+    /// gigabytes, in the local one, which is never copied between computers.
+    #[uniffi::constructor]
+    pub fn with_cache_dir(data_dir: String, cache_dir: String) -> Result<Arc<Self>, CoreError> {
+        Self::open_in(
+            data_dir,
+            Some(PathBuf::from(cache_dir)),
+            Account::new()?,
+            skips::new_client()?,
+        )
+    }
+
     /// Installs the default addons the first time the app runs, and the ones a newer version
     /// of the list added after an update. Safe to call on every launch: it does nothing once
     /// they are installed, and retries the ones that failed on the next launch, never one
@@ -412,7 +425,18 @@ impl StremioCore {
         account: Account,
         aniskip: AniSkip,
     ) -> Result<Arc<Self>, CoreError> {
+        Self::open_in(data_dir, None, account, aniskip)
+    }
+
+    /// Opens the core; the torrent cache goes in `cache_dir`, or `streams` inside `data_dir`.
+    fn open_in(
+        data_dir: String,
+        cache_dir: Option<PathBuf>,
+        account: Account,
+        aniskip: AniSkip,
+    ) -> Result<Arc<Self>, CoreError> {
         let directory = PathBuf::from(data_dir);
+        let cache_dir = cache_dir.unwrap_or_else(|| directory.join("streams"));
         std::fs::create_dir_all(&directory).map_err(|e| CoreError::Storage {
             reason: e.to_string(),
         })?;
@@ -421,7 +445,7 @@ impl StremioCore {
         Ok(Arc::new(Self {
             store: Mutex::new(store),
             client: AddonClient::new(ADDON_TIMEOUT)?,
-            streaming: Streaming::new(directory.join("streams"))?,
+            streaming: Streaming::new(cache_dir)?,
             account,
             aniskip,
             icons: IconClient::new(crate::icons::ICON_TIMEOUT)?,

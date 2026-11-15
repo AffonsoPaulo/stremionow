@@ -585,6 +585,11 @@
   <string name="tray_open">Abrir o StremioNow</string>
   <string name="tray_quit">Encerrar</string>
 
+  <string name="startup_error_title">Não foi possível iniciar o StremioNow</string>
+  <string name="startup_error_body">Uma parte do app está faltando ou danificada. Instalar o StremioNow de novo costuma resolver.</string>
+  <string name="core_unavailable_title">O StremioNow não consegue abrir os seus dados</string>
+  <string name="core_unavailable_body">Confira se esta pasta existe, se é possível gravar nela e se há espaço livre no disco, e abra o app de novo.</string>
+
   <string name="settings_play_in">Reproduzir em</string>
   <string name="settings_play_in_body">Outro app, como VLC, MX Player ou Just Player, pode reproduzir as fontes no lugar do StremioNow; você escolhe qual a cada vez. O StremioNow não acompanha o progresso lá, então Continuar assistindo e os episódios assistidos não são atualizados.</string>
   <string name="settings_play_in_app">StremioNow</string>

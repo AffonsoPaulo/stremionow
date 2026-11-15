@@ -787,6 +787,13 @@
   <string name="tray_open">Open StremioNow</string>
   <string name="tray_quit">Quit</string>
 
+  <!-- Desktop: system dialog shown when the app cannot start (a file it ships with is missing or damaged). -->
+  <string name="startup_error_title">StremioNow couldn\'t start</string>
+  <string name="startup_error_body">Part of the app is missing or damaged. Installing StremioNow again usually fixes this.</string>
+  <!-- Shown instead of the app when its data folder cannot be opened: a system dialog on the desktop, a screen on phones and TVs. The folder's path is shown under the body. -->
+  <string name="core_unavailable_title">StremioNow can\'t open its data</string>
+  <string name="core_unavailable_body">Check that this folder exists, that it can be written to and that the disk has free space, then open the app again.</string>
+
   <!-- Settings › Playback (Android): which app plays sources. -->
   <string name="settings_play_in">Play in</string>
   <string name="settings_play_in_body">Another app, such as VLC, MX Player or Just Player, can play the sources instead; you pick it each time. StremioNow can\'t follow your progress there, so Continue watching and watched episodes don\'t update.</string>

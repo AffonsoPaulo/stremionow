@@ -8,8 +8,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import io.github.affonsopaulo.stremionow.core.CoreException
 import io.github.affonsopaulo.stremionow.ui.StremioNowApp
+import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.l10n.AppLanguage
+import io.github.affonsopaulo.stremionow.ui.screens.CoreUnavailable
 
 /** Entry point of the phone app. */
 class MainActivity : ComponentActivity() {
@@ -23,6 +26,16 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        setContent { StremioNowApp(isTv = false) }
+        // Every screen needs the core: a data folder it cannot open is explained here, rather
+        // than failing inside the first screen. Other failures are bugs, and crash as before.
+        val opened = AppGraph.openCore(applicationContext)
+        opened.exceptionOrNull()?.let { if (it !is CoreException) throw it }
+        setContent {
+            if (opened.isSuccess) {
+                StremioNowApp(isTv = false)
+            } else {
+                CoreUnavailable(AppGraph.coreFolder(applicationContext))
+            }
+        }
     }
 }

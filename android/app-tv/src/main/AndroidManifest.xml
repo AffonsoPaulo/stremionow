@@ -26,10 +26,13 @@
     <!--
       Compose redraws for size and orientation changes itself; recreating the activity would
       interrupt playback and rebuild the video surface every time the device rotates.
+      A single task: a Watch Next tile picked while the app runs reaches the running activity
+      (onNewIntent) instead of stacking a second one over it.
     -->
     <activity
         android:name=".MainActivity"
         android:exported="true"
+        android:launchMode="singleTask"
         android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
         android:screenOrientation="landscape">
       <intent-filter>

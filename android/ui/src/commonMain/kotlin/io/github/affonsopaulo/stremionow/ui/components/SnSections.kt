@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.affonsopaulo.stremionow.core.MetaItem
+import io.github.affonsopaulo.stremionow.ui.platform.screenHeightDp
 import io.github.affonsopaulo.stremionow.ui.theme.SnColors
 import io.github.affonsopaulo.stremionow.ui.theme.SnIcons
 import io.github.affonsopaulo.stremionow.ui.theme.SnLayout
@@ -161,45 +162,63 @@ data class PosterRowSizing(
 )
 
 /**
- * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, the cards fill
- * the window: eight whole ones and half of a ninth past the page gutter, the cut card telling
- * there is more to the side, never narrower than phones' and TV's [PosterCardWidth] nor wider
- * than [MAX_POSTER_CARD_WIDTH]. Elsewhere they keep [PosterCardWidth].
+ * The poster cards of a row [rowWidth] wide. Where a pointer drives the screen, they follow the
+ * window: two rows and a half fit in its height, and as many cards as fit in its width, the last
+ * cut in half so it tells there is more to the side (see [posterRowSizing]). Elsewhere they keep
+ * [PosterCardWidth].
  */
 @Composable
 fun rememberPosterRowSizing(rowWidth: Dp): PosterRowSizing {
     val mouseFirst = LocalSnFeedback.current.mouseFirst
     val gutter = SnLayout.gutter
-    return remember(rowWidth, mouseFirst, gutter) {
+    val windowHeight = screenHeightDp().dp
+    return remember(rowWidth, windowHeight, mouseFirst, gutter) {
         if (mouseFirst) {
-            PosterRowSizing(posterCardWidth(rowWidth, gutter, POINTER_POSTER_SPACING), POINTER_POSTER_SPACING)
+            posterRowSizing(rowWidth, windowHeight, gutter)
         } else {
             PosterRowSizing(PosterCardWidth, SnSpacing.space4)
         }
     }
 }
 
-/** Whole cards a row shows where a pointer drives the screen; half of the next one shows too. */
-internal const val POSTER_ROW_WHOLE_CARDS = 8
+/** Rows of posters the window's height shows, the last in half. */
+internal const val POSTER_ROWS_SHOWN = 2.5f
 
-/** Widest a poster card grows in a wide window. */
-internal val MAX_POSTER_CARD_WIDTH = 240.dp
+/** What a poster row takes besides its cards' pictures: its heading, the cards' text, the gaps. */
+internal val POSTER_ROW_EXTRA = 150.dp
 
-/** Room between poster cards where a pointer drives the screen. */
-internal val POINTER_POSTER_SPACING = 24.dp
+/** The header above the pages. */
+internal val PAGE_HEADER_ALLOWANCE = 96.dp
+
+/** Narrowest and widest a poster card gets. */
+internal val MIN_POSTER_CARD_WIDTH = 132.dp
+internal val MAX_POSTER_CARD_WIDTH = 220.dp
+
+/** Least room between poster cards where a pointer drives the screen. */
+internal val MIN_POSTER_SPACING = 28.dp
 
 /**
- * The width of each card so that [POSTER_ROW_WHOLE_CARDS] whole cards and half of the next fit in
- * [rowWidth] after the page [gutter], with [spacing] between them.
+ * The cards of a row [rowWidth] wide in a window [windowHeight] tall: as wide as two rows and a
+ * half of them fit under the header, then as many as fit after the page [gutter] with half of
+ * the next one showing, the room left spread between them, never less than
+ * [MIN_POSTER_SPACING].
  */
-internal fun posterCardWidth(
+internal fun posterRowSizing(
     rowWidth: Dp,
+    windowHeight: Dp,
     gutter: Dp,
-    spacing: Dp,
-): Dp {
-    val shown = POSTER_ROW_WHOLE_CARDS + 0.5f
-    val width = (rowWidth - gutter - spacing * POSTER_ROW_WHOLE_CARDS) / shown
-    return width.coerceIn(PosterCardWidth, MAX_POSTER_CARD_WIDTH)
+): PosterRowSizing {
+    val rowHeight = (windowHeight - PAGE_HEADER_ALLOWANCE) / POSTER_ROWS_SHOWN
+    val card = ((rowHeight - POSTER_ROW_EXTRA) / 1.5f).coerceIn(MIN_POSTER_CARD_WIDTH, MAX_POSTER_CARD_WIDTH)
+    val room = rowWidth - gutter
+    // The most whole cards, besides the half one, that leave the least room between them.
+    var whole = ((room - card / 2 + MIN_POSTER_SPACING) / (card + MIN_POSTER_SPACING)).toInt().coerceAtLeast(1)
+    var spacing = (room - card * (whole + 0.5f)) / whole
+    while (spacing < MIN_POSTER_SPACING && whole > 1) {
+        whole--
+        spacing = (room - card * (whole + 0.5f)) / whole
+    }
+    return PosterRowSizing(card, spacing.coerceAtLeast(MIN_POSTER_SPACING))
 }
 
 /** A titled section: header, optional "See all" action and a poster row; see [SnPosterRow] for [slot]. */

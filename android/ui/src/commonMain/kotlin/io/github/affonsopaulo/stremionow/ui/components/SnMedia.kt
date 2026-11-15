@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +49,34 @@ private val CardShape = RoundedCornerShape(SnRadius.radiusMd)
 
 /** How much a poster's picture zooms, inside its frame, under the pointer. */
 private const val POSTER_ZOOM = 1.06f
+
+/** How much a focused card grows (see `snCardMotion`), for the poster's sharpness. */
+private const val CARD_GROWTH = 1.08f
+
+/**
+ * A copy of a poster sharp enough for [widthPx] pixels, when its host offers several sizes;
+ * the poster itself otherwise. Cinemeta's posters come from metahub at 300, 500 and 780
+ * pixels wide (small, medium and large), and catalogs link the small one, which turns soft on
+ * wide cards and scaled screens. Never a smaller copy than the one linked.
+ */
+fun sharperPoster(
+    url: String,
+    widthPx: Float,
+): String {
+    if (!url.startsWith(METAHUB_POSTERS)) return url
+    val rest = url.removePrefix(METAHUB_POSTERS)
+    val linked = rest.substringBefore('/', missingDelimiterValue = "")
+    val sizes = POSTER_SIZES.keys.toList()
+    if (linked !in sizes) return url
+    val wanted = POSTER_SIZES.entries.firstOrNull { it.value >= widthPx }?.key ?: sizes.last()
+    val size = if (sizes.indexOf(wanted) > sizes.indexOf(linked)) wanted else linked
+    return "$METAHUB_POSTERS$size/${rest.substringAfter('/')}"
+}
+
+private const val METAHUB_POSTERS = "https://images.metahub.space/poster/"
+
+/** Metahub's poster sizes, smallest first, with their width in pixels. */
+private val POSTER_SIZES = linkedMapOf("small" to 300, "medium" to 500, "large" to 780)
 
 /**
  * Artwork with a fallback: while the image loads, or when there is none, the box shows the
@@ -128,15 +158,20 @@ fun SnPosterCard(
                     },
                 ).clip(CardShape),
         ) {
-            SnArtwork(
-                url = poster,
-                fallbackTitle = title,
-                modifier =
-                    Modifier.fillMaxSize().then(card.art).graphicsLayer {
-                        scaleX = zoom
-                        scaleY = zoom
-                    },
-            )
+            // A copy as sharp as the card is wide on this screen, grown under the pointer.
+            val density = LocalDensity.current
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val pixels = with(density) { maxWidth.toPx() } * POSTER_ZOOM * CARD_GROWTH
+                SnArtwork(
+                    url = remember(poster, pixels) { poster?.let { sharperPoster(it, pixels) } },
+                    fallbackTitle = title,
+                    modifier =
+                        Modifier.fillMaxSize().then(card.art).graphicsLayer {
+                            scaleX = zoom
+                            scaleY = zoom
+                        },
+                )
+            }
             if (progress != null && progress > 0f) {
                 ProgressBar(progress, Modifier.align(Alignment.BottomStart))
             }

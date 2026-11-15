@@ -17,7 +17,10 @@ use crate::records::CoreError;
 /// One setting per video: the prefix and the video id (a movie's id, or an episode's).
 const PLAYED_SOURCE_PREFIX: &str = "played_source:";
 /// One setting per title: the prefix and the title's id.
-const LAST_SOURCE_PREFIX: &str = "last_source:";
+const LAST_SOURCE_PREFIX: &str = "resume_source:";
+/// The first version's per-title prefix, whose identities could not tell a debrid source from
+/// its torrent; never read, only forgotten.
+const LEGACY_LAST_SOURCE_PREFIX: &str = "last_source:";
 /// Longest video or title id remembered; ids are short (`tt0944947:1:5`, `kitsu:1:12`).
 const MAX_VIDEO_ID_LEN: usize = 200;
 /// Longest identity kept: an addon id and a digest or an info hash.
@@ -124,7 +127,8 @@ impl StremioCore {
         let store = self.store()?;
         let videos = store.delete_settings_with_prefix(PLAYED_SOURCE_PREFIX)?;
         let titles = store.delete_settings_with_prefix(LAST_SOURCE_PREFIX)?;
-        Ok(videos.saturating_add(titles))
+        let legacy = store.delete_settings_with_prefix(LEGACY_LAST_SOURCE_PREFIX)?;
+        Ok(videos.saturating_add(titles).saturating_add(legacy))
     }
 }
 
@@ -323,7 +327,7 @@ mod tests {
         let stored = core
             .store()
             .expect("store")
-            .setting("last_source:tt1")
+            .setting("resume_source:tt1")
             .expect("reads")
             .expect("stored");
         assert!(

@@ -468,6 +468,10 @@ pub(crate) const MAX_ADDON_ID_LEN: usize = 200;
 /// What recognizes a source the app plays in a later search: the addon's id with the info
 /// hash and file of a torrent, or with a SHA-256 digest of a web address. The address itself
 /// is never kept, since debrid addresses carry the user's key. None for links out.
+///
+/// A debrid address that names its torrent (`debrid|hash|file`) is told apart from the torrent
+/// itself (`bt|hash|file`): addons offer both for the same file, and the one played over the
+/// debrid service must not be found again as the torrent, which plays from peers.
 fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
     let addon: String = addon_id
         .chars()
@@ -479,7 +483,11 @@ fn source_identity(addon_id: &str, source: &StreamSource) -> Option<String> {
             .file_idx
             .map(|idx| idx.to_string())
             .unwrap_or_default();
-        return Some(format!("{addon}|bt|{}|{file}", hash.to_ascii_lowercase()));
+        let kind = if source.url.is_some() { "debrid" } else { "bt" };
+        return Some(format!(
+            "{addon}|{kind}|{}|{file}",
+            hash.to_ascii_lowercase()
+        ));
     }
     let url = source.url.as_deref()?;
     let digest = ring::digest::digest(&ring::digest::SHA256, url.as_bytes());
@@ -935,6 +943,14 @@ mod tests {
         assert_eq!(
             torrent.identity.as_deref(),
             Some("a|bt|0123456789abcdef0123456789abcdef01234567|3")
+        );
+        // The same file over a debrid service is another source than its torrent.
+        let debrid_torrent = source_from(serde_json::json!({
+            "url": debrid, "infoHash": "0123456789ABCDEF0123456789ABCDEF01234567", "fileIdx": 3
+        }));
+        assert_eq!(
+            debrid_torrent.identity.as_deref(),
+            Some("a|debrid|0123456789abcdef0123456789abcdef01234567|3")
         );
         let outside =
             source_from(serde_json::json!({ "externalUrl": "https://service.example/t" }));

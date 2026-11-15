@@ -40,7 +40,9 @@ class DisplaySession(
     private val metaId: String,
 ) {
     private var target: DisplayTarget? = null
-    private var format: VideoFormat? = null
+
+    /** The user answered "Not now" in this player: other videos it plays do not ask again. */
+    private var hdrDeclined = false
 
     /** The monitor HDR was turned on for, until it is turned off again. */
     private var hdrChangedOn: DisplayTarget? = null
@@ -59,19 +61,22 @@ class DisplaySession(
     }
 
     /**
-     * The video's format is known and it plays on [display]. Matches the refresh rate when the
-     * user turned that on, and turns on HDR when the user already chose it. Returns true when the
-     * user should be asked about HDR; call [answer] with the reply.
+     * The format of a video is known and it plays on [display]: the first one, or each next one
+     * the player moves on to. Matches the refresh rate when the user turned that on, and turns on
+     * HDR when the user already chose it. What was changed for an earlier video and does not suit
+     * this one goes back: HDR for an SDR video, a refresh rate made for another frame rate.
+     * Returns true when the user should be asked about HDR; call [answer] with the reply.
      */
     @Synchronized
     fun onVideo(
         format: VideoFormat,
         display: DisplayTarget?,
     ): Boolean {
-        if (restored || this.format != null || display == null) return false
-        this.format = format
+        if (restored || display == null) return false
         target = display
-        format.framesPerSecond?.let { matchRefreshRate(display, it) }
+        matchRefreshRate(display, format.framesPerSecond)
+        // HDR stays on only for an HDR video on the monitor it was turned on for.
+        hdrChangedOn?.takeIf { !format.isHdr || it != display }?.let { turnOffHdr() }
         if (!format.isHdr) return false
         val mode = preferences.hdr
         if (mode == DisplaySwitch.NEVER) return false
@@ -84,7 +89,7 @@ class DisplaySession(
             }
 
             else -> {
-                true
+                !hdrDeclined
             }
         }
     }
@@ -95,9 +100,18 @@ class DisplaySession(
         if (restored) return
         val display = target ?: return
         when (choice) {
-            HdrChoice.OnlyThisTitle -> preferences.rememberHdrForTitle(metaId)
-            HdrChoice.Always -> preferences.alwaysHdr()
-            HdrChoice.NotNow -> return
+            HdrChoice.OnlyThisTitle -> {
+                preferences.rememberHdrForTitle(metaId)
+            }
+
+            HdrChoice.Always -> {
+                preferences.alwaysHdr()
+            }
+
+            HdrChoice.NotNow -> {
+                hdrDeclined = true
+                return
+            }
         }
         // The display may have changed since the prompt opened (turned on by hand, unplugged).
         val state = control.hdr(display) ?: return
@@ -110,18 +124,27 @@ class DisplaySession(
         if (restored) return
         restored = true
         live -= this
-        hdrChangedOn?.let { display ->
-            // Only if it is still on: the user may have turned it off by hand meanwhile.
-            val state = control.hdr(display)
-            val off = state == null || !state.enabled || control.setHdr(display, false)
-            // A monitor that is gone keeps the journal, for the next launch to try again.
-            if (off && state != null) journal.clear()
-            hdrChangedOn = null
-        }
-        refreshChangedOn?.let { display ->
-            control.resetRefreshRate(display)
-            refreshChangedOn = null
-        }
+        turnOffHdr()
+        resetRefreshRate()
+    }
+
+    /** Turns HDR off again, if this session turned it on. */
+    private fun turnOffHdr() {
+        val display = hdrChangedOn ?: return
+        // Only if it is still on: the user may have turned it off by hand meanwhile.
+        val state = control.hdr(display)
+        val off = state == null || !state.enabled || control.setHdr(display, false)
+        // A monitor that is gone keeps the journal, for the next launch to try again.
+        if (off && state != null) journal.clear()
+        hdrChangedOn = null
+        log.log(System.Logger.Level.INFO, "HDR on ${display.deviceName} turned off again: off=$off")
+    }
+
+    /** Puts back the refresh rate, if this session changed it. */
+    private fun resetRefreshRate() {
+        val display = refreshChangedOn ?: return
+        control.resetRefreshRate(display)
+        refreshChangedOn = null
     }
 
     private fun turnOnHdr(display: DisplayTarget) {
@@ -143,9 +166,18 @@ class DisplaySession(
 
     private fun matchRefreshRate(
         display: DisplayTarget,
-        framesPerSecond: Double,
+        framesPerSecond: Double?,
     ) {
-        if (!preferences.matchRefreshRate) return
+        // A rate chosen for an earlier video stays while it suits this one (24 and 23.976 fps
+        // both suit 120 Hz), which spares the screen a blank switch; otherwise the saved mode
+        // comes back before choosing again.
+        refreshChangedOn?.let { changed ->
+            val rate = if (changed == display) control.refreshRate(changed) else null
+            val suits = framesPerSecond != null && rate != null && RefreshRates.suits(framesPerSecond, rate)
+            if (suits && preferences.matchRefreshRate) return
+            resetRefreshRate()
+        }
+        if (!preferences.matchRefreshRate || framesPerSecond == null) return
         val current = control.refreshRate(display) ?: return
         val hertz = RefreshRates.choose(framesPerSecond, current, control.refreshRates(display)) ?: return
         if (control.setRefreshRate(display, hertz)) {

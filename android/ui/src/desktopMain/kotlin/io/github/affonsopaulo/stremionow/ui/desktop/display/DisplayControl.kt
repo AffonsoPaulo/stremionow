@@ -90,6 +90,16 @@ internal object RefreshRates {
         return available.filter { it in 1..MAX_HERTZ && matches(it, nominal) }.maxOrNull()
     }
 
+    /** Whether [hertz] shows every frame of a video at [framesPerSecond] for the same time. */
+    fun suits(
+        framesPerSecond: Double,
+        hertz: Int,
+    ): Boolean {
+        if (!framesPerSecond.isFinite()) return false
+        val nominal = framesPerSecond.roundToInt()
+        return nominal in 1..MAX_HERTZ && matches(hertz, nominal)
+    }
+
     private fun matches(
         hertz: Int,
         nominal: Int,

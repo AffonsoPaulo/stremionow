@@ -17,6 +17,9 @@ pub(crate) struct Token<'a> {
     pub raw: &'a str,
     /// The token lowercased.
     pub lower: String,
+    /// It comes after the year or episode tag of a release name, among the release's tags,
+    /// rather than in the title or on a line that is not a release name.
+    pub after_title: bool,
 }
 
 /// Splits `text` into [`Token`]s. Emoji, punctuation and whitespace are separators.
@@ -26,6 +29,7 @@ pub(crate) fn tokenize(text: &str) -> Vec<Token<'_>> {
         .map(|raw| Token {
             raw,
             lower: raw.to_lowercase(),
+            after_title: false,
         })
         .collect()
 }

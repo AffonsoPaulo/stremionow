@@ -64,7 +64,8 @@ pub struct StreamSource {
     /// the torrent's info hash and file, or with a digest of the address (debrid addresses
     /// carry the user's key, which is never kept). None for links that open outside the app.
     pub identity: Option<String>,
-    /// ISO 639-1 codes of the languages the text mentions, audio or subtitles, in order.
+    /// ISO 639-1 codes of the audio languages the text mentions, in order (`fil` for
+    /// Filipino). Languages it names only as subtitles (`Sub.Ita`, `VOSTFR`) are left out.
     pub languages: Vec<String>,
     /// HDR formats, such as `DV` or `HDR10+`; empty when the text names none.
     pub hdr: Vec<String>,
@@ -1064,7 +1065,7 @@ mod tests {
             "title": "Hokum.2026.2160p.BDRemux.HDR10.DTS-HD.MA.Eng.Sub.Ita",
             "infoHash": "0123456789abcdef0123456789abcdef01234567"
         }));
-        assert_eq!(source.languages, ["en", "it"]);
+        assert_eq!(source.languages, ["en"], "Italian is only the subtitles");
         assert_eq!(source.hdr, ["HDR10"]);
         assert_eq!(source.audio, ["DTS-HD MA"]);
         assert_eq!(source.release_quality.as_deref(), Some("Remux"));

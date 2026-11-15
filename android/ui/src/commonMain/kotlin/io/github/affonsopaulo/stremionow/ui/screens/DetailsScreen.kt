@@ -77,10 +77,13 @@ import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnTabs
 import io.github.affonsopaulo.stremionow.ui.components.SnTextLink
+import io.github.affonsopaulo.stremionow.ui.components.TitleArrival
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
+import io.github.affonsopaulo.stremionow.ui.components.rememberTitleArrival
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
+import io.github.affonsopaulo.stremionow.ui.components.titleHeroArt
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Connectivity
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
@@ -292,6 +295,8 @@ fun DetailsScreen(
     val context = LocalPlatformContext.current
     val viewModel = viewModel(key = "details-$kind-$id") { DetailsViewModel(AppGraph.core(context), kind, id) }
     val state by viewModel.details.collectAsStateWithLifecycle()
+    // Opened from a poster, whose art flies into the hero.
+    val arrival = rememberTitleArrival(kind, id)
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refresh()
         // Back from the player to choose a source: "Change source", or the next episode.
@@ -312,7 +317,7 @@ fun DetailsScreen(
         }
 
         is Loadable.Ready -> {
-            DetailsContent(details.value, viewModel, onOpenTitle, {
+            DetailsContent(details.value, arrival, viewModel, onOpenTitle, {
                 onOpenGenre(details.value.item.kind, it)
             }, onSearchPerson, onPlay)
         }
@@ -325,6 +330,7 @@ private enum class DetailsTab { Episodes, Sources, Related, Info }
 @Composable
 private fun DetailsContent(
     details: MetaDetails,
+    arrival: TitleArrival,
     viewModel: DetailsViewModel,
     onOpenTitle: (MetaItem) -> Unit,
     onOpenGenre: (String) -> Unit,
@@ -546,7 +552,11 @@ private fun DetailsContent(
                         }
                     // Grows by the header's height, so its content stays where it was.
                     Box(Modifier.fillMaxWidth().heightIn(min = height)) {
-                        SnHeroBackdrop(url = art, textWidth = DetailsTextWidth, modifier = Modifier.matchParentSize())
+                        SnHeroBackdrop(
+                            url = art,
+                            textWidth = DetailsTextWidth,
+                            modifier = Modifier.matchParentSize().titleHeroArt(arrival),
+                        )
                         Column(
                             Modifier
                                 .align(Alignment.BottomStart)
@@ -607,7 +617,12 @@ private fun DetailsContent(
                         SnMinimalScroll {
                             when (tab) {
                                 DetailsTab.Related -> {
-                                    SnPosterRow(related, onOpenTitle, subtitle = { it.cardSubtitle() })
+                                    SnPosterRow(
+                                        related,
+                                        onOpenTitle,
+                                        subtitle = { it.cardSubtitle() },
+                                        slot = "related",
+                                    )
                                 }
 
                                 DetailsTab.Info -> {

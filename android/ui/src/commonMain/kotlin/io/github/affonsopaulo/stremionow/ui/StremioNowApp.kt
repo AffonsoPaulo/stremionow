@@ -56,6 +56,7 @@ import io.github.affonsopaulo.stremionow.ui.components.PageMotion
 import io.github.affonsopaulo.stremionow.ui.components.ProvidePageMotion
 import io.github.affonsopaulo.stremionow.ui.components.SnHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnHeaderSearch
+import io.github.affonsopaulo.stremionow.ui.components.SnPageTransitions
 import io.github.affonsopaulo.stremionow.ui.components.SnPhoneHeader
 import io.github.affonsopaulo.stremionow.ui.components.SnTabBar
 import io.github.affonsopaulo.stremionow.ui.components.TopDestination
@@ -386,6 +387,24 @@ private fun AppNavHost(
             playerHasOwnWindow,
         )
     }
+    // Title art flies between the pages within this layout, so under the header drawn over it.
+    SnPageTransitions(reducedMotion, Modifier.fillMaxSize()) {
+        AppPages(navController, startRoute, searchFocusRequests, openTab, headerQuery, onSignIn, reducedMotion, move)
+    }
+}
+
+/** The NavHost of [AppNavHost], with the transitions [move] picks. */
+@Composable
+private fun AppPages(
+    navController: NavHostController,
+    startRoute: String,
+    searchFocusRequests: Int,
+    openTab: (TopDestination) -> Unit,
+    headerQuery: String?,
+    onSignIn: () -> Unit,
+    reducedMotion: Boolean,
+    move: (AnimatedContentTransitionScope<NavBackStackEntry>, back: Boolean) -> PageMove,
+) {
     NavHost(
         navController = navController,
         startDestination = startRoute,

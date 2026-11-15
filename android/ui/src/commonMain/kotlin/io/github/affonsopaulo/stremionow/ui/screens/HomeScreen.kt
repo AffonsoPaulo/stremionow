@@ -104,12 +104,15 @@ import io.github.affonsopaulo.stremionow.ui.components.SnPosterRow
 import io.github.affonsopaulo.stremionow.ui.components.SnRow
 import io.github.affonsopaulo.stremionow.ui.components.SnScrollArea
 import io.github.affonsopaulo.stremionow.ui.components.SnSectionHeader
+import io.github.affonsopaulo.stremionow.ui.components.TitleCard
+import io.github.affonsopaulo.stremionow.ui.components.TitleOrigin
 import io.github.affonsopaulo.stremionow.ui.components.belowHeader
 import io.github.affonsopaulo.stremionow.ui.components.collectSnInteraction
 import io.github.affonsopaulo.stremionow.ui.components.heroHeight
 import io.github.affonsopaulo.stremionow.ui.components.initialFocus
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
+import io.github.affonsopaulo.stremionow.ui.components.titleCard
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.SecureStore
@@ -285,6 +288,13 @@ private fun HomeContent(
     val heroHover = remember { MutableInteractionSource() }
     var heroFocused by remember { mutableStateOf(false) }
     val pick = if (hero.isEmpty()) null else rememberHeroPick(hero, listState, heroHover, heroFocused)
+    // "More info" flies the hero's art into the title's page. It stays behind the rows as it
+    // flies, as it lies behind them on screen; its crop eases from this hero's to that one's.
+    val heroCard =
+        titleCard(
+            pick?.current?.let { TitleOrigin("hero/${it.kind}/${it.id}", it.kind, it.id, it.background) },
+            overlay = false,
+        )
     // Rows arrive in stages, and the hero can appear after the first ones. A lazy list keeps
     // showing the item it showed, which would leave the new hero above the screen; so while
     // the list is at its top, it stays there. Before the layout that applies the change, so
@@ -313,7 +323,8 @@ private fun HomeContent(
                     Modifier
                         .fillMaxWidth()
                         .height(heroHeight + HeroArtOverlap)
-                        .offset { IntOffset(0, -listState.heroScroll()) },
+                        .offset { IntOffset(0, -listState.heroScroll()) }
+                        .then(heroCard.art),
             )
         }
         SnScrollArea(listState, topInset = headerInset, minimalScroll = true) {
@@ -330,6 +341,7 @@ private fun HomeContent(
                             pick = pick,
                             items = hero,
                             height = heroHeight,
+                            card = heroCard,
                             onOpenTitle = onOpenTitle,
                             modifier =
                                 Modifier
@@ -387,9 +399,22 @@ private fun HomeRow(
     Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(name.title, caption = name.caption)
         when {
-            section.loading -> PlaceholderRow()
-            section.reason is HomeReason.NewEpisodes -> NewEpisodesRow(section.entries, onOpenTitle)
-            else -> SnPosterRow(section.entries.map { it.item }, onOpenTitle, subtitle = { it.cardSubtitle() })
+            section.loading -> {
+                PlaceholderRow()
+            }
+
+            section.reason is HomeReason.NewEpisodes -> {
+                NewEpisodesRow(section.entries, onOpenTitle)
+            }
+
+            else -> {
+                SnPosterRow(
+                    section.entries.map { it.item },
+                    onOpenTitle,
+                    subtitle = { it.cardSubtitle() },
+                    slot = section.key,
+                )
+            }
         }
     }
 }
@@ -657,12 +682,16 @@ private fun HeroStep(
     }
 }
 
-/** The hero's title, facts, synopsis and button, over the art drawn behind the list. */
+/**
+ * The hero's title, facts, synopsis and button, over the art drawn behind the list. The
+ * button of the title on show is [card], whose art flies and which takes the focus back on TV.
+ */
 @Composable
 private fun Hero(
     pick: HeroPick,
     items: List<MetaItem>,
     height: Dp,
+    card: TitleCard,
     onOpenTitle: (MetaItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -726,11 +755,18 @@ private fun Hero(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                val onShow = item.id == pick.current.id
                 SnButton(
                     text = stringResource(Res.string.action_more_info),
-                    onClick = { onOpenTitle(item) },
+                    onClick = {
+                        // The title fading out as the next one comes in has no art left to fly.
+                        if (onShow) card.onOpen()
+                        onOpenTitle(item)
+                    },
                     icon = SnIcons.Info,
-                    modifier = if (pick.takesFocus && item.id == pick.current.id) Modifier.initialFocus() else Modifier,
+                    modifier =
+                        (if (onShow) card.focus else Modifier)
+                            .then(if (pick.takesFocus && onShow) Modifier.initialFocus() else Modifier),
                 )
             }
         }

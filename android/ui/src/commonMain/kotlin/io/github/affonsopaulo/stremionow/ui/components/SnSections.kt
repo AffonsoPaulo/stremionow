@@ -120,25 +120,35 @@ fun SnSeeAll(
     }
 }
 
-/** Horizontal row of poster cards, aligned to the page gutter. */
+/**
+ * Horizontal row of poster cards, aligned to the page gutter. [slot] tells the row apart from
+ * the page's other rows (a row's key), so a title in two of them flies from the card chosen.
+ */
 @Composable
 fun SnPosterRow(
     items: List<MetaItem>,
     onOpen: (MetaItem) -> Unit,
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     modifier: Modifier = Modifier,
+    slot: String = "row",
 ) {
     SnRow(
         modifier = modifier,
         controlsCenter = SnSpacing.space2 + PosterCardWidth * 1.5f / 2,
     ) {
         items(items, key = { "${it.kind}/${it.id}" }) { item ->
-            SnPosterCard(item.name, item.poster, subtitle(item), onClick = { onOpen(item) })
+            SnPosterCard(
+                item.name,
+                item.poster,
+                subtitle(item),
+                onClick = { onOpen(item) },
+                origin = titleOrigin(slot, item),
+            )
         }
     }
 }
 
-/** A titled section: header, optional "See all" action and a poster row. */
+/** A titled section: header, optional "See all" action and a poster row; see [SnPosterRow] for [slot]. */
 @Composable
 fun SnPosterSection(
     title: String,
@@ -148,10 +158,11 @@ fun SnPosterSection(
     subtitle: @Composable (MetaItem) -> String? = { it.releaseInfo },
     caption: String? = null,
     action: (@Composable () -> Unit)? = null,
+    slot: String = "row",
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(SnSpacing.space3)) {
         SnSectionHeader(title, caption = caption, action = action)
-        SnPosterRow(items, onOpen, subtitle)
+        SnPosterRow(items, onOpen, subtitle, slot = slot)
     }
 }
 

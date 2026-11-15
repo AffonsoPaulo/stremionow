@@ -33,6 +33,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
+import io.github.affonsopaulo.stremionow.ui.components.titleOrigin
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -191,6 +192,7 @@ fun ExploreScreen(
                             item.releaseInfo,
                             onClick = { onOpenTitle(item) },
                             width = null,
+                            origin = titleOrigin("grid", item),
                         )
                     }
                     if (state.loading || state.failed) {

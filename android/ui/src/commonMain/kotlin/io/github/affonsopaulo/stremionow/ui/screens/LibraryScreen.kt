@@ -29,6 +29,7 @@ import io.github.affonsopaulo.stremionow.ui.components.SnMessage
 import io.github.affonsopaulo.stremionow.ui.components.SnPageTitle
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterCard
 import io.github.affonsopaulo.stremionow.ui.components.SnPosterGrid
+import io.github.affonsopaulo.stremionow.ui.components.TitleOrigin
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.Loadable
 import io.github.affonsopaulo.stremionow.ui.data.io
@@ -123,6 +124,13 @@ fun LibraryScreen(
                                     onClick = { onOpenTitle(item.kind, item.id) },
                                     width = null,
                                     progress = item.progressFraction(),
+                                    origin =
+                                        TitleOrigin(
+                                            "grid/${item.kind}/${item.id}",
+                                            item.kind,
+                                            item.id,
+                                            item.poster,
+                                        ),
                                 )
                             }
                         }

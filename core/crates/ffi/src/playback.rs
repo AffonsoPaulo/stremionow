@@ -424,11 +424,15 @@ fn stream_source(addon: &InstalledAddon, stream: Stream) -> Option<StreamSource>
     if url.is_none() && info_hash.is_none() && external_url.is_none() && yt_id.is_none() {
         return None;
     }
-    let description = [stream.title, stream.description]
-        .into_iter()
-        .flatten()
-        .find(|text| !text.trim().is_empty())
-        .unwrap_or_default();
+    // Addons put the release name, size and languages in `title`, `description` or both;
+    // keeping only the first would lose what the other says. The same text twice is kept once.
+    let mut texts: Vec<String> = Vec::new();
+    for text in [stream.title, stream.description].into_iter().flatten() {
+        if !text.trim().is_empty() && !texts.iter().any(|known| known.trim() == text.trim()) {
+            texts.push(text);
+        }
+    }
+    let description = texts.join("\n");
     let mut source = StreamSource {
         addon_name: addon.manifest.name.clone(),
         addon_id: addon.manifest.id.clone(),
@@ -1165,6 +1169,33 @@ mod tests {
         let preferences = ranking_preferences(&AppSettings::default(), "");
         assert_eq!(preferences.supports_av1, !cfg!(target_os = "android"));
         assert!(preferences.supports_hevc && preferences.supports_hdr);
+    }
+
+    #[test]
+    fn title_and_description_are_both_kept() {
+        let both = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "Movie.2023.1080p.WEB-DL",
+            "description": "💾 2.1 GB 🇮🇹",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(both.description, "Movie.2023.1080p.WEB-DL\n💾 2.1 GB 🇮🇹");
+        assert_eq!(both.languages, ["it"]);
+        assert_eq!(both.size.as_deref(), Some("2.1 GB"));
+        let same = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "Movie.2023.1080p",
+            "description": " Movie.2023.1080p ",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(same.description, "Movie.2023.1080p");
+        let blank = source_from(serde_json::json!({
+            "name": "Addon",
+            "title": "  ",
+            "description": "Movie.2023.720p",
+            "infoHash": "0123456789abcdef0123456789abcdef01234567"
+        }));
+        assert_eq!(blank.description, "Movie.2023.720p");
     }
 
     #[test]

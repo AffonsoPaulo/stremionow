@@ -25,6 +25,10 @@ internal actual fun logWarning(
     RecentLog.add('W', message, error)
 }
 
+internal actual fun logInfo(message: String) {
+    Log.i(TAG, message)
+}
+
 internal actual fun openExternalLink(
     context: PlatformContext,
     url: String,

@@ -63,9 +63,11 @@ class ResumePlaybackTest {
         infoHash: String? = null,
         external: String? = null,
         addonId: String = "torrentio",
+        cached: Boolean? = null,
     ) = StreamSource(
         addonName = "Torrentio",
         addonId = addonId,
+        addonKey = "key-$addonId",
         name = identity.orEmpty(),
         description = "",
         url = url,
@@ -88,30 +90,33 @@ class ResumePlaybackTest {
         codec = null,
         releaseQuality = null,
         sizeBytes = null,
-        cached = null,
+        cached = cached,
     )
 
-    private fun addon(id: String) =
-        AddonInfo(
-            manifestUrl = "https://$id.example/manifest.json",
-            id = id,
-            name = id,
-            version = "1.0.0",
-            description = "",
-            logo = null,
-            enabled = true,
-            types = listOf("movie", "series"),
-            providesCatalogs = false,
-            providesMetadata = false,
-            providesStreams = true,
-            providesSubtitles = false,
-            providesTitleMetadata = false,
-            configurable = false,
-            configurationRequired = false,
-            configureUrl = null,
-            linkHasSettings = false,
-            fingerprint = "",
-        )
+    private fun addon(
+        id: String,
+        key: String = "key-$id",
+    ) = AddonInfo(
+        manifestUrl = "https://$id.example/manifest.json",
+        id = id,
+        key = key,
+        name = id,
+        version = "1.0.0",
+        description = "",
+        logo = null,
+        enabled = true,
+        types = listOf("movie", "series"),
+        providesCatalogs = false,
+        providesMetadata = false,
+        providesStreams = true,
+        providesSubtitles = false,
+        providesTitleMetadata = false,
+        configurable = false,
+        configurationRequired = false,
+        configureUrl = null,
+        linkHasSettings = false,
+        fingerprint = "",
+    )
 
     /** Addons answering from memory; [answer] gives each addon's sources for a video. */
     private class FakeFinder(
@@ -139,6 +144,7 @@ class ResumePlaybackTest {
         LastSource(
             videoId = "tt1:1:1",
             addonId = "torrentio",
+            addonKey = null,
             identity = "torrentio|url|aaa",
             bingeGroup = "torrentio|1080p",
         )
@@ -304,5 +310,29 @@ class ResumePlaybackTest {
         val outside = source("torrentio|url|aaa", "g", url = null, external = "https://x.example")
         assertNull(pickSource(listOf(outside), SourceWanted("torrentio", "torrentio|url|aaa", "g")))
         assertNull(pickSource(emptyList(), SourceWanted("torrentio", "torrentio|url|aaa", "g")))
+    }
+
+    @Test
+    fun `the install of the source is asked, not another of the same addon`() {
+        val plain = addon("torrentio", key = "plain")
+        val debrid = addon("torrentio", key = "debrid")
+        val installed = listOf(plain, debrid)
+        assertEquals(debrid, pickAddon(installed, SourceWanted("torrentio", addonKey = "debrid")))
+        // Without the install, only an addon alone with its id is asked: guessing could ask the
+        // one without the debrid service.
+        assertNull(pickAddon(installed, SourceWanted("torrentio", addonKey = "gone")))
+        assertNull(pickAddon(installed, SourceWanted("torrentio")))
+        assertEquals(plain, pickAddon(listOf(plain), SourceWanted("torrentio", addonKey = "gone")))
+    }
+
+    @Test
+    fun `a source in the debrid cache comes before one still to download`() {
+        val download = source("torrentio|url|dl", group = "torrentio|1080p", cached = false)
+        val ready = source("torrentio|url|ok", group = "torrentio|1080p", cached = true)
+        val wanted = SourceWanted("torrentio", bingeGroup = "torrentio|1080p")
+        assertEquals(ready, pickSource(listOf(download, ready), wanted))
+        assertEquals(download, pickSource(listOf(download), wanted))
+        // The same source as before is taken as it is.
+        assertEquals(download, pickSource(listOf(ready, download), wanted.copy(identity = "torrentio|url|dl")))
     }
 }

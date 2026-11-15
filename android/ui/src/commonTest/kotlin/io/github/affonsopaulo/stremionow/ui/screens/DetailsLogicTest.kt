@@ -199,6 +199,7 @@ class DetailsLogicTest {
     ) = StreamSource(
         addonName = addon,
         addonId = addon.lowercase(),
+        addonKey = "key-${addon.lowercase()}",
         name = addon,
         description = "",
         url = url,

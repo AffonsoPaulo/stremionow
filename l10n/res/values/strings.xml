@@ -446,6 +446,16 @@
   <string name="player_starts_in">Starts in %1$d s</string>
   <string name="player_closes_in">Closes in %1$d s</string>
   <string name="player_hdr_not_now">Not now</string>
+  <string name="player_incomplete_title">This video looks incomplete</string>
+  <string name="player_incomplete_body">It is only %1$s long, much less than expected: it may be a notice from the provider rather than the video. Save its progress anyway?</string>
+  <string name="player_incomplete_discard">Don\'t save</string>
+  <string name="player_incomplete_save">Save progress</string>
+  <string name="player_incomplete_default_in">Not saved in %1$d s</string>
+  <string name="player_provider_downloading">The provider is downloading this video</string>
+  <string name="player_provider_downloading_body">It starts by itself as soon as it is ready.</string>
+  <string name="player_choose_other_source">Choose another source</string>
+  <string name="settings_debug_logs">Debug log</string>
+  <string name="settings_debug_logs_body">Writes what the app does while finding and preparing sources to its log, to find out why one does not play. Never addresses or keys.</string>
   <string name="player_watching_now">Watching now</string>
   <string name="player_season_menu">Season</string>
   <string name="player_close_episodes">Close episodes</string>

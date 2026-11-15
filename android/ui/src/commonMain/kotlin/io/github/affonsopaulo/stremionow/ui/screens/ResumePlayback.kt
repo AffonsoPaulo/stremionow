@@ -52,8 +52,8 @@ internal const val RESUME_TIMEOUT_MS = 6_000L
  */
 internal fun LastSource.wantedFor(videoId: String): SourceWanted? =
     when {
-        this.videoId == videoId -> SourceWanted(addonId, identity, bingeGroup)
-        bingeGroup != null -> SourceWanted(addonId, bingeGroup = bingeGroup)
+        this.videoId == videoId -> SourceWanted(addonId, identity, bingeGroup, addonKey)
+        bingeGroup != null -> SourceWanted(addonId, bingeGroup = bingeGroup, addonKey = addonKey)
         else -> null
     }
 

@@ -21,6 +21,7 @@ import io.github.affonsopaulo.stremionow.player.VideoPlayer
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.logWarning
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,6 +52,9 @@ private const val SUBTITLE_WAIT_MS = 10_000L
 
 /** How long moving on to an episode looks for its source before showing its sources. */
 private const val EPISODE_LOOKUP_MS = 6_000L
+
+/** How often a source still being downloaded by its debrid service is checked again. */
+private const val PROVIDER_CHECK_MS = 15_000L
 
 /** After the last player of a torrent goes, how long before it is stopped, in case another takes it. */
 private const val TORRENT_STOP_DELAY_MS = 3_000L
@@ -145,6 +149,28 @@ class PlayerViewModel<out P : VideoPlayer>(
     /** The title's videos marked watched, for the episodes strip; empty until read. */
     val watched = mutableWatched.asStateFlow()
 
+    private val mutableProviderDownloading = MutableStateFlow(false)
+
+    /**
+     * The source was not in its debrid service's cache: the provider is downloading it, and it
+     * plays by itself once ready, instead of the addon's "being downloaded" clip.
+     */
+    val providerDownloading = mutableProviderDownloading.asStateFlow()
+    private val mutableIncomplete = MutableStateFlow<Double?>(null)
+
+    /**
+     * The length of a video much shorter than expected (see [looksIncomplete]), while the viewer
+     * has not said whether its progress counts; null otherwise.
+     */
+    val incomplete = mutableIncomplete.asStateFlow()
+    private val mutableProgressCounts = MutableStateFlow(true)
+
+    /**
+     * Whether the video's progress is saved, counts it as watched and leads on to the next
+     * episode: not for a video much shorter than expected, unless the viewer says so.
+     */
+    val progressCounts = mutableProgressCounts.asStateFlow()
+
     /** The work of the video playing, cancelled when the player moves on to another. */
     private var videoWork: Job? = null
 
@@ -186,6 +212,7 @@ class PlayerViewModel<out P : VideoPlayer>(
                     }
                 }
                 launch { prepare(selection, source) }
+                launch { checkLength(selection) }
                 if (settings?.aniskip != false) launch { findSkips(selection) }
                 launch { findNextSource(selection, source) }
                 launch { rememberSource(selection, source) }
@@ -196,11 +223,18 @@ class PlayerViewModel<out P : VideoPlayer>(
         selection: PlaybackSession.Selection,
         source: StreamSource,
     ) {
+        DebugLog.log { "prepare ${selection.videoId}: ${source.addonName} ${describe(source)}" }
+        if (source.cached == false) waitForProvider(source)
+        val began = System.currentTimeMillis()
         // Every source plays through the local server, so the player never sees debrid keys.
         val url =
             runCatching { core.playbackUrl(source) }
                 .onFailure { logWarning("Could not prepare the source", it) }
                 .getOrNull()
+        DebugLog.log {
+            val took = System.currentTimeMillis() - began
+            "prepare ${selection.videoId}: ${if (url != null) "ready" else "failed"} after $took ms"
+        }
         if (url == null) {
             mutablePreparing.value = false
             mutablePrepareFailed.value = true
@@ -220,6 +254,44 @@ class PlayerViewModel<out P : VideoPlayer>(
             carriedTracks ?: runCatching { io { core.tracks(selection.details.item.id) } }.getOrNull()
         if (remembered != null) applyTracks(remembered) else selectSubtitleIfMissing()
         recordTracks(selection)
+    }
+
+    /**
+     * Waits while the debrid service downloads a source that was not in its cache, asking now
+     * and then whether its address leads to the file yet; asking also starts the download.
+     */
+    private suspend fun waitForProvider(source: StreamSource) {
+        mutableProviderDownloading.value = true
+        while (true) {
+            val ready = runCatching { core.sourceReady(source) }.getOrDefault(false)
+            DebugLog.log { "provider check: ${if (ready) "ready" else "still downloading"}" }
+            if (ready) break
+            delay(PROVIDER_CHECK_MS)
+        }
+        mutableProviderDownloading.value = false
+    }
+
+    /**
+     * Once the file's length is known, asks about a video much shorter than expected: until
+     * the viewer says, its progress does not count.
+     */
+    private suspend fun checkLength(selection: PlaybackSession.Selection) {
+        val duration =
+            player.state
+                .mapNotNull { state -> state.durationSeconds?.takeIf { state.isLoaded && it > 0 } }
+                .first()
+        if (looksIncomplete(duration, selection)) {
+            DebugLog.log { "length ${selection.videoId}: ${clockText(duration)} looks incomplete" }
+            mutableProgressCounts.value = false
+            mutableIncomplete.value = duration
+        }
+    }
+
+    /** The viewer's answer about a video much shorter than expected: whether its progress counts. */
+    fun answerIncomplete(save: Boolean) {
+        mutableIncomplete.value = null
+        mutableProgressCounts.value = save
+        DebugLog.log { "length ${selection.videoId}: progress ${if (save) "kept" else "not kept"}" }
     }
 
     /**
@@ -269,7 +341,8 @@ class PlayerViewModel<out P : VideoPlayer>(
     ) {
         val next = selection.nextEpisode ?: return
         val group = source.bingeGroup ?: return
-        val match = core.sourceFinder().find(selection.kind, next.id, SourceWanted(source.addonId, bingeGroup = group))
+        val wanted = SourceWanted(source.addonId, bingeGroup = group, addonKey = source.addonKey)
+        val match = core.sourceFinder().find(selection.kind, next.id, wanted)
         // Only while this episode is still the one chosen: the session may have moved on.
         if (match != null && PlaybackSession.selection?.videoId == selection.videoId) {
             PlaybackSession.nextUp = PlaybackSession.NextUp(next.id, match)
@@ -289,6 +362,7 @@ class PlayerViewModel<out P : VideoPlayer>(
         val target = selection.copy(episode = episode)
         if (target.videoId == selection.videoId) return
         val ready = PlaybackSession.nextUp?.takeIf { it.episodeId == episode.id }?.source
+        DebugLog.log { "open ${target.videoId}: ${if (ready != null) "source found ahead" else "looking it up"}" }
         if (ready != null) {
             switchTo(target, ready)
             return
@@ -307,9 +381,10 @@ class PlayerViewModel<out P : VideoPlayer>(
                         core.sourceFinder().find(
                             target.kind,
                             target.videoId,
-                            SourceWanted(playing.addonId, bingeGroup = group),
+                            SourceWanted(playing.addonId, bingeGroup = group, addonKey = playing.addonKey),
                         )
                     }
+                DebugLog.log { "open ${target.videoId}: ${found?.let(::describe) ?: "not found, showing its sources"}" }
                 if (found != null) start(target, found) else onNotFound()
             }
     }
@@ -340,6 +415,9 @@ class PlayerViewModel<out P : VideoPlayer>(
         mutablePrepareFailed.value = false
         mutableTorrent.value = null
         mutableSkips.value = Markers()
+        mutableProviderDownloading.value = false
+        mutableIncomplete.value = null
+        mutableProgressCounts.value = true
         selection = target
         PlaybackSession.select(target)
     }
@@ -448,6 +526,7 @@ class PlayerViewModel<out P : VideoPlayer>(
 
     /** How far into the video playing the viewer is, or null before it has loaded. */
     private fun progressNow(): WatchProgress? {
+        if (!mutableProgressCounts.value) return null
         val state = player.state.value
         val duration = state.durationSeconds ?: return null
         if (!state.isLoaded || duration <= 0) return null

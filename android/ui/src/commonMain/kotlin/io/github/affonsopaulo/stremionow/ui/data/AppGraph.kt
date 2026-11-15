@@ -2,6 +2,7 @@
 package io.github.affonsopaulo.stremionow.ui.data
 
 import io.github.affonsopaulo.stremionow.core.StremioCore
+import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.PlatformContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ object AppGraph {
                     SecureStore.load(context, SecureStore.STREMIO_AUTH_KEY)?.let(opened::restoreSession)
                     core = opened
                     DeviceSharing.restore(context, opened)
+                    DebugLog.enabled = runCatching { opened.settings().debugLogs }.getOrDefault(false)
                 }
         }
 }

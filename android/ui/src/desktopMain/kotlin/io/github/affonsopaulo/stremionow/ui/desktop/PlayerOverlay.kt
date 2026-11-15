@@ -88,11 +88,13 @@ import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
 import io.github.affonsopaulo.stremionow.ui.screens.CONTROLS_TIMEOUT_MS
 import io.github.affonsopaulo.stremionow.ui.screens.EpisodesList
 import io.github.affonsopaulo.stremionow.ui.screens.HdrPrompt
+import io.github.affonsopaulo.stremionow.ui.screens.IncompleteVideoPrompt
 import io.github.affonsopaulo.stremionow.ui.screens.OpeningStage
 import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerViewModel
+import io.github.affonsopaulo.stremionow.ui.screens.ProviderDownloading
 import io.github.affonsopaulo.stremionow.ui.screens.SeekSteps
 import io.github.affonsopaulo.stremionow.ui.screens.SidePanel
 import io.github.affonsopaulo.stremionow.ui.screens.TracksList
@@ -347,19 +349,30 @@ internal fun PlayerOverlay(
     val prepareFailed by viewModel.prepareFailed.collectAsState()
     val skips by viewModel.skips.collectAsState()
     val watched by viewModel.watched.collectAsState()
+    val providerDownloading by viewModel.providerDownloading.collectAsState()
+    val incomplete by viewModel.incomplete.collectAsState()
+    val progressCounts by viewModel.progressCounts.collectAsState()
     val promptLift by animateDpAsState(
         if (state.areControlsVisible) CONTROLS_CLEARANCE - SnSpacing.space8 else 0.dp,
         label = "prompt-lift",
     )
     val failed = prepareFailed || playback.error != null
     val next = selection.nextEpisode
+    // A video whose progress does not count (much shorter than expected) leads on to nothing.
+    val promptNext = next.takeIf { progressCounts }
     // The prompt on screen now, so S can skip what it offers to skip.
     val markers =
         remember(playback.chapters, playback.durationSeconds, skips) {
             Chapters.markers(playback.chapters, playback.durationSeconds).orElse(skips)
         }
     val prompt =
-        PlaybackPrompt.at(markers, playback.positionSeconds, playback.durationSeconds, next != null, playback.isEnded)
+        PlaybackPrompt.at(
+            markers,
+            playback.positionSeconds,
+            playback.durationSeconds,
+            promptNext != null,
+            playback.isEnded,
+        )
     SideEffect { state.skipTarget = (prompt as? PlaybackPrompt.Skip)?.toSeconds }
     // The intro, recap and credits, from the file's chapters or else AniSkip, marked on the timeline.
     val highlights =
@@ -427,14 +440,22 @@ internal fun PlayerOverlay(
                 enter = EnterTransition.None,
                 exit = fadeOut(tween(OPENING_FADE_MS)),
             ) {
-                SnLogoLoader(
-                    logo = selection.details.item.logo,
-                    title = selection.details.item.name,
-                    progress = rememberOpeningFill(OpeningStage.of(preparing, playback.isLoaded)),
-                    status = torrent?.let { torrentStatusText(it) },
-                    label = stringResource(Res.string.player_preparing),
-                    modifier = Modifier.padding(SnSpacing.space8),
-                )
+                if (providerDownloading) {
+                    ProviderDownloading(
+                        logo = selection.details.item.logo,
+                        title = selection.details.item.name,
+                        onChangeSource = onChangeSource,
+                    )
+                } else {
+                    SnLogoLoader(
+                        logo = selection.details.item.logo,
+                        title = selection.details.item.name,
+                        progress = rememberOpeningFill(OpeningStage.of(preparing, playback.isLoaded)),
+                        status = torrent?.let { torrentStatusText(it) },
+                        label = stringResource(Res.string.player_preparing),
+                        modifier = Modifier.padding(SnSpacing.space8),
+                    )
+                }
             }
             // The same logo over the last frame, dimmed: filled by what mpv reports while it
             // waits for data, or moving on its own during a seek, which reports nothing.
@@ -488,6 +509,18 @@ internal fun PlayerOverlay(
             PlayerUnavailable(onBack = onBack, modifier = Modifier.align(Alignment.Center))
         } else if (failed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (incomplete != null) {
+            IncompleteVideoPrompt(
+                durationSeconds = incomplete ?: 0.0,
+                onDiscard = { viewModel.answerIncomplete(save = false) },
+                onSave = { viewModel.answerIncomplete(save = true) },
+                // Above the timeline and buttons while they show, in the corner otherwise.
+                modifier =
+                    Modifier.align(Alignment.BottomEnd).padding(
+                        end = SnSpacing.space8,
+                        bottom = if (state.areControlsVisible) CONTROLS_CLEARANCE else SnSpacing.space8,
+                    ),
+            )
         } else if (state.isAskingHdr && display != null) {
             val answer = { choice: HdrChoice ->
                 state.isAskingHdr = false
@@ -509,7 +542,7 @@ internal fun PlayerOverlay(
             PlaybackPrompts(
                 state = playback,
                 skips = skips,
-                next = next,
+                next = promptNext,
                 onSeekTo = player::seekTo,
                 onOpenEpisode = onOpenEpisode,
                 upNext = viewModel.upNext,

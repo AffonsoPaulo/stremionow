@@ -317,6 +317,16 @@
   <string name="player_starts_in">Começa sozinho em %1$d s</string>
   <string name="player_closes_in">Fecha sozinho em %1$d s</string>
   <string name="player_hdr_not_now">Agora não</string>
+  <string name="player_incomplete_title">Este vídeo parece incompleto</string>
+  <string name="player_incomplete_body">Ele tem só %1$s, bem menos que o esperado: pode ser um aviso do provedor, e não o vídeo. Salvar o progresso dele mesmo assim?</string>
+  <string name="player_incomplete_discard">Não salvar</string>
+  <string name="player_incomplete_save">Salvar progresso</string>
+  <string name="player_incomplete_default_in">Não salva em %1$d s</string>
+  <string name="player_provider_downloading">O provedor está baixando este vídeo</string>
+  <string name="player_provider_downloading_body">Ele começa sozinho assim que ficar pronto.</string>
+  <string name="player_choose_other_source">Escolher outra fonte</string>
+  <string name="settings_debug_logs">Registro de depuração</string>
+  <string name="settings_debug_logs_body">Escreve no registro do app o que ele faz ao procurar e preparar fontes, para descobrir por que uma não toca. Nunca endereços nem chaves.</string>
   <string name="player_watching_now">Assistindo agora</string>
   <string name="player_season_menu">Temporada</string>
   <string name="player_close_episodes">Fechar episódios</string>

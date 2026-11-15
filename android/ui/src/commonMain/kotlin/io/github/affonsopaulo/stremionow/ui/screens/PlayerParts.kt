@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -75,6 +76,7 @@ import io.github.affonsopaulo.stremionow.player.Track
 import io.github.affonsopaulo.stremionow.ui.components.SnButton
 import io.github.affonsopaulo.stremionow.ui.components.SnButtonStyle
 import io.github.affonsopaulo.stremionow.ui.components.SnIconButton
+import io.github.affonsopaulo.stremionow.ui.components.SnLogoLoader
 import io.github.affonsopaulo.stremionow.ui.components.snClickable
 import io.github.affonsopaulo.stremionow.ui.data.PlaybackSession
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
@@ -713,6 +715,116 @@ internal fun HdrPrompt(
         BasicText(
             stringResource(Res.string.player_closes_in, remaining),
             style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+        )
+    }
+}
+
+/** How long the incomplete video question stays before it counts as "don't save". */
+internal const val INCOMPLETE_PROMPT_TIMEOUT_S = 15
+
+/**
+ * Asks about a video much shorter than expected ([durationSeconds] long), which may be a
+ * provider's notice rather than the episode: whether to save its progress. In the shape of the
+ * HDR question. "Don't save" is the default: its button fills up as the countdown runs and
+ * answers when full ([onDiscard]); "Save progress" ([onSave]) is for when the video is right.
+ * It never takes the focus, so the player's keys keep working.
+ */
+@Composable
+internal fun IncompleteVideoPrompt(
+    durationSeconds: Double,
+    onDiscard: () -> Unit,
+    onSave: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val title = stringResource(Res.string.player_incomplete_title)
+    var remaining by remember { mutableIntStateOf(INCOMPLETE_PROMPT_TIMEOUT_S) }
+    LaunchedEffect(Unit) {
+        while (remaining > 0) {
+            delay(1_000)
+            remaining--
+        }
+        onDiscard()
+    }
+    val fill by animateFloatAsState(
+        targetValue = 1f - remaining.toFloat() / INCOMPLETE_PROMPT_TIMEOUT_S,
+        animationSpec = tween(1_000, easing = LinearEasing),
+        label = "incomplete-fill",
+    )
+    val card = RoundedCornerShape(SnRadius.radiusLg)
+    Column(
+        modifier
+            .width(PROMPT_WIDTH)
+            .semantics {
+                paneTitle = title
+                liveRegion = LiveRegionMode.Polite
+            },
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .shadow(18.dp, card)
+                .background(SnColors.surfaceRaised, card)
+                .border(1.dp, SnColors.border, card)
+                .padding(SnSpacing.space4),
+            verticalArrangement = Arrangement.spacedBy(SnSpacing.space1),
+        ) {
+            BasicText(title, style = SnTypography.headingMd.copy(color = SnColors.fg))
+            BasicText(
+                stringResource(Res.string.player_incomplete_body, clockText(durationSeconds)),
+                style = SnTypography.body.copy(color = SnColors.fgSecondary),
+            )
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(SnSpacing.space3),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FillingButton(
+                text = stringResource(Res.string.player_incomplete_discard),
+                fill = fill,
+                onClick = onDiscard,
+                modifier = Modifier.weight(1f),
+            )
+            OutlineButton(stringResource(Res.string.player_incomplete_save), onSave)
+        }
+        BasicText(
+            stringResource(Res.string.player_incomplete_default_in, remaining),
+            style = SnTypography.caption.copy(color = SnColors.fgSecondary),
+        )
+    }
+}
+
+/**
+ * The provider (a debrid service) is downloading the source: the title's logo with what is
+ * happening, and a way to pick another source meanwhile. The video starts by itself once ready.
+ */
+@Composable
+internal fun ProviderDownloading(
+    logo: String?,
+    title: String,
+    onChangeSource: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.padding(SnSpacing.space8),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(SnSpacing.space6),
+    ) {
+        SnLogoLoader(
+            logo = logo,
+            title = title,
+            progress = null,
+            status = stringResource(Res.string.player_provider_downloading),
+            label = stringResource(Res.string.player_provider_downloading),
+        )
+        BasicText(
+            stringResource(Res.string.player_provider_downloading_body),
+            style = SnTypography.body.copy(color = SnColors.fgSecondary, textAlign = TextAlign.Center),
+        )
+        SnButton(
+            stringResource(Res.string.player_choose_other_source),
+            onChangeSource,
+            style = SnButtonStyle.Secondary,
         )
     }
 }

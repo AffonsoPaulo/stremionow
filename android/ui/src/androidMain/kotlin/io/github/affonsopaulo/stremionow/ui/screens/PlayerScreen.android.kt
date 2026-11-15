@@ -130,6 +130,9 @@ actual fun PlayerScreen(
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
     val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
     val skips by viewModel.skips.collectAsStateWithLifecycle()
+    val providerDownloading by viewModel.providerDownloading.collectAsStateWithLifecycle()
+    val incomplete by viewModel.incomplete.collectAsStateWithLifecycle()
+    val progressCounts by viewModel.progressCounts.collectAsStateWithLifecycle()
     // How far the skip buttons and the remote's fast-forward and rewind keys move.
     val seekStep = viewModel.seekSteps.step.toDouble()
     var controlsVisible by remember { mutableStateOf(true) }
@@ -232,7 +235,14 @@ actual fun PlayerScreen(
         PlayerSurface(viewModel.player, Modifier.fillMaxSize())
 
         if (!prepareFailed && state.error == null) {
-            if (preparing || !state.isLoaded) {
+            if (providerDownloading) {
+                ProviderDownloading(
+                    logo = playing.details.item.logo,
+                    title = playing.details.item.name,
+                    onChangeSource = onChangeSource,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            } else if (preparing || !state.isLoaded) {
                 // Until the first frame: the title's logo fills while the source gets ready.
                 SnLogoLoader(
                     logo = playing.details.item.logo,
@@ -280,11 +290,24 @@ actual fun PlayerScreen(
 
         if (state.error != null || prepareFailed) {
             PlaybackError(onChangeSource = onChangeSource, onBack = onBack, modifier = Modifier.align(Alignment.Center))
+        } else if (incomplete != null) {
+            IncompleteVideoPrompt(
+                durationSeconds = incomplete ?: 0.0,
+                onDiscard = { viewModel.answerIncomplete(save = false) },
+                onSave = { viewModel.answerIncomplete(save = true) },
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .safeDrawingPadding()
+                        .padding(SnSpacing.space8)
+                        .padding(bottom = promptLift),
+            )
         } else if (state.isLoaded) {
             PlaybackPrompts(
                 state = state,
                 skips = skips,
-                next = next,
+                // A video whose progress does not count (much shorter than expected) leads on to nothing.
+                next = next.takeIf { progressCounts },
                 onSeekTo = viewModel.player::seekTo,
                 onOpenEpisode = openEpisode,
                 upNext = viewModel.upNext,

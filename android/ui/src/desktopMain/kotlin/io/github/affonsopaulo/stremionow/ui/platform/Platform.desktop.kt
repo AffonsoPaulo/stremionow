@@ -30,6 +30,10 @@ internal actual fun logWarning(
     RecentLog.add('W', message, error)
 }
 
+internal actual fun logInfo(message: String) {
+    log.log(System.Logger.Level.INFO, message)
+}
+
 /** Web pages only: links come from addons, and other schemes could start any program. */
 internal actual fun openExternalLink(
     context: PlatformContext,

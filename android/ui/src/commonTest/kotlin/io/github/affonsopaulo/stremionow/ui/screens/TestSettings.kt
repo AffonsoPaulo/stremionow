@@ -19,6 +19,7 @@ internal fun defaultSettings() =
         maxResolution = 0u,
         onboarded = true,
         aniskip = true,
+        debugLogs = false,
         hdr = DisplaySwitch.ASK,
         matchRefreshRate = false,
         serveToDevices = false,

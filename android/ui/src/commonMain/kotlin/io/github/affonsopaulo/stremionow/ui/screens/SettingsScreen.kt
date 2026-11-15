@@ -78,6 +78,7 @@ import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.endonym
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
+import io.github.affonsopaulo.stremionow.ui.platform.DebugLog
 import io.github.affonsopaulo.stremionow.ui.platform.LocalPlatformContext
 import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.automaticStreamMemory
@@ -132,6 +133,7 @@ class SettingsViewModel(
     fun update(change: (AppSettings) -> AppSettings) {
         val current = settings.value ?: return
         mutableSettings.value = change(current)
+        DebugLog.enabled = mutableSettings.value?.debugLogs == true
         viewModelScope.launch { runCatching { io { core.updateSettings(change(core.settings())) } } }
     }
 }
@@ -787,6 +789,16 @@ private fun AboutPage() {
                 style = SnButtonStyle.Ghost,
             )
         }
+    }
+    val viewModel = settingsViewModel()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    settings?.let { current ->
+        SettingsToggle(
+            title = stringResource(Res.string.settings_debug_logs),
+            body = stringResource(Res.string.settings_debug_logs_body),
+            checked = current.debugLogs,
+            onToggle = { viewModel.update { it.copy(debugLogs = !it.debugLogs) } },
+        )
     }
 }
 

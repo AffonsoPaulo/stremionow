@@ -91,17 +91,156 @@ private fun List<Track>.match(
 }
 
 /**
- * One key for the ways files and addons name a language: `pt`, `por` and `pt-BR` are all
- * Portuguese. Codes Java does not know (`pob`, OpenSubtitles' Brazilian Portuguese) stay as
- * they are.
+ * What to remember of the viewer picking the audio track [trackId] among [tracks]: [memory], the
+ * tracks remembered for the title, with only its audio changed. Its subtitle stays as it was
+ * remembered, even when this file could not show it; with nothing remembered yet, it is the one
+ * showing.
+ */
+internal fun withAudioPicked(
+    memory: TrackChoice?,
+    tracks: List<Track>,
+    trackId: Int?,
+): TrackChoice? {
+    val picked = choiceOf(tracks.picking(Track.Type.Audio, trackId)) ?: return memory
+    return memory?.copy(audioLanguage = picked.audioLanguage, audioTitle = picked.audioTitle) ?: picked
+}
+
+/** As [withAudioPicked], for the viewer picking the subtitle [trackId], or none with null. */
+internal fun withSubtitlePicked(
+    memory: TrackChoice?,
+    tracks: List<Track>,
+    trackId: Int?,
+): TrackChoice? {
+    val picked = choiceOf(tracks.picking(Track.Type.Subtitle, trackId)) ?: return memory
+    return memory?.copy(
+        subtitlesOff = picked.subtitlesOff,
+        subtitleLanguage = picked.subtitleLanguage,
+        subtitleTitle = picked.subtitleTitle,
+    ) ?: picked
+}
+
+/** These tracks once [trackId] is the one selected of its [type], or none of it with null. */
+private fun List<Track>.picking(
+    type: Track.Type,
+    trackId: Int?,
+): List<Track> = map { if (it.type == type) it.copy(isSelected = it.id == trackId) else it }
+
+/**
+ * One key for the ways files and addons name a language: `pt`, `por`, `pt-BR` and `pob` are all
+ * Portuguese; `fr`, `fra` and `fre` all French. The key is the ISO 639-2 terminology code
+ * (`fra`, `deu`), which Java gives for two-letter codes, while Matroska files and OpenSubtitles
+ * use the bibliographic one (`fre`, `ger`). English names ("French") and the language's own
+ * ("Français") are understood too. Anything else stays as it is, in lowercase, so two tracks of
+ * a language no list knows still match each other.
  */
 internal fun languageKey(code: String): String {
     val tag = code.trim().replace('_', '-')
-    LANGUAGE_ALIASES[tag.lowercase(Locale.ROOT)]?.let { return it }
-    val locale = Locale.forLanguageTag(tag)
-    val iso3 = runCatching { locale.isO3Language }.getOrNull().orEmpty()
-    return iso3.ifEmpty { tag.lowercase(Locale.ROOT) }
+    val lower = tag.lowercase(Locale.ROOT)
+    LANGUAGE_ALIASES[lower]?.let { return it }
+    val iso3 =
+        if (LANGUAGE_CODE.matches(tag)) {
+            runCatching { Locale.forLanguageTag(tag).isO3Language }.getOrNull().orEmpty().lowercase(Locale.ROOT)
+        } else {
+            ""
+        }
+    if (iso3.isNotEmpty()) return BIBLIOGRAPHIC_TO_TERMINOLOGY[iso3] ?: LANGUAGE_ALIASES[iso3] ?: iso3
+    return LANGUAGE_NAMES[lower] ?: lower
 }
 
-/** Codes subtitle sites use that are no language tag: Brazilian Portuguese. */
-private val LANGUAGE_ALIASES = mapOf("pob" to "por", "pb" to "por")
+/**
+ * A language tag for showing a track's language by name: the two-letter code of [code]'s
+ * language when it has one (`fre` → `fr`), so Java can name it, `pt-BR` for Brazilian
+ * Portuguese, else [code] itself.
+ */
+internal fun displayLanguageTag(code: String): String {
+    val lower = code.trim().replace('_', '-').lowercase(Locale.ROOT)
+    if (lower in BRAZILIAN_PORTUGUESE) return "pt-BR"
+    if (lower.contains('-')) return code
+    return TWO_LETTER_CODES[languageKey(code)] ?: code
+}
+
+/**
+ * [code] and the other codes of its language, for mpv's lists of preferred languages, which
+ * compare codes as they are: "fr" gives fr, fra and fre; "pt-BR" gives pt-BR, pob, pt and por.
+ */
+internal fun languageCodes(code: String): List<String> {
+    val key = languageKey(code)
+    val brazilian = code.trim().replace('_', '-').lowercase(Locale.ROOT) in BRAZILIAN_PORTUGUESE
+    return listOfNotNull(
+        code,
+        "pob".takeIf { brazilian },
+        TWO_LETTER_CODES[key],
+        key,
+        TERMINOLOGY_TO_BIBLIOGRAPHIC[key],
+    ).distinct()
+}
+
+/** A language code, alone or with a region or script ("pt-BR", "zh-Hant"), as opposed to a name. */
+private val LANGUAGE_CODE = Regex("""^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$""")
+
+/** OpenSubtitles' codes for Brazilian Portuguese. */
+private val BRAZILIAN_PORTUGUESE = setOf("pob", "pb", "pt-br")
+
+/**
+ * Codes subtitle sites use that are no ISO 639 code, or one Java does not map: OpenSubtitles'
+ * Brazilian Portuguese, Chinese variants, and the old codes for Serbian and Croatian.
+ */
+private val LANGUAGE_ALIASES =
+    mapOf(
+        "pob" to "por",
+        "pb" to "por",
+        "zht" to "zho",
+        "zhe" to "zho",
+        "ze" to "zho",
+        "scc" to "srp",
+        "scr" to "hrv",
+        "mol" to "ron",
+    )
+
+/** The twenty ISO 639-2 languages with a bibliographic code apart from the terminology one. */
+private val BIBLIOGRAPHIC_TO_TERMINOLOGY =
+    mapOf(
+        "alb" to "sqi",
+        "arm" to "hye",
+        "baq" to "eus",
+        "bur" to "mya",
+        "chi" to "zho",
+        "cze" to "ces",
+        "dut" to "nld",
+        "fre" to "fra",
+        "geo" to "kat",
+        "ger" to "deu",
+        "gre" to "ell",
+        "ice" to "isl",
+        "mac" to "mkd",
+        "mao" to "mri",
+        "may" to "msa",
+        "per" to "fas",
+        "rum" to "ron",
+        "slo" to "slk",
+        "tib" to "bod",
+        "wel" to "cym",
+    )
+
+private val TERMINOLOGY_TO_BIBLIOGRAPHIC = BIBLIOGRAPHIC_TO_TERMINOLOGY.entries.associate { (b, t) -> t to b }
+
+/** Every language Java knows by a two-letter code, under its [languageKey]. */
+private val TWO_LETTER_CODES: Map<String, String> by lazy {
+    Locale.getISOLanguages().associateBy { code -> languageKey(code) }
+}
+
+/** Every language Java knows, by its English name and its own, in lowercase, to its key. */
+private val LANGUAGE_NAMES: Map<String, String> by lazy {
+    buildMap {
+        for (code in Locale.getISOLanguages()) {
+            val locale = Locale.forLanguageTag(code)
+            val key =
+                runCatching { locale.isO3Language }.getOrNull()?.lowercase(Locale.ROOT)?.ifEmpty { null } ?: continue
+            val normalized = BIBLIOGRAPHIC_TO_TERMINOLOGY[key] ?: LANGUAGE_ALIASES[key] ?: key
+            for (name in listOf(locale.getDisplayLanguage(Locale.ENGLISH), locale.getDisplayLanguage(locale))) {
+                val lower = name.lowercase(Locale.ROOT)
+                if (lower.isNotBlank() && lower != code) putIfAbsent(lower, normalized)
+            }
+        }
+    }
+}

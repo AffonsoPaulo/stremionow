@@ -49,6 +49,18 @@ class PlaybackChecksTest {
     }
 
     @Test
+    fun `a short whose runtime says so is not incomplete`() {
+        assertFalse(looksIncomplete(110.0, selection("series", episodeMinutes = 2u)))
+        assertFalse(looksIncomplete(150.0, selection("movie", movieRuntime = "3 min")))
+        assertTrue("well under even a short runtime", looksIncomplete(30.0, selection("series", episodeMinutes = 2u)))
+        // Without a runtime, three minutes is the shortest a film or an episode can be.
+        assertTrue(looksIncomplete(170.0, selection("movie")))
+        assertTrue(looksIncomplete(170.0, selection("series", episodeMinutes = 0u)))
+        // From six minutes up, half the runtime is above three minutes anyway.
+        assertTrue(looksIncomplete(170.0, selection("series", episodeMinutes = 6u)))
+    }
+
+    @Test
     fun `runtimes are read as addons write them`() {
         assertEquals(142, runtimeMinutes("142 min"))
         assertEquals(142, runtimeMinutes("2h 22min"))

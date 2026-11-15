@@ -19,7 +19,7 @@ StremioNow does not host or provide any content. It plays what the addons you in
 
 ## Installing
 
-**Windows (10 and 11, 64-bit):** download [`StremioNow-win-Setup.exe`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win-Setup.exe) from the [latest release](https://github.com/AffonsoPaulo/stremionow/releases/latest) and open it. It installs StremioNow for your user, without administrator rights, adds it to the Start menu and the desktop, and opens it. The installer is not signed yet, so Windows SmartScreen may warn about it: choose **More info › Run anyway**. If you prefer not to install anything, the release also has `StremioNow-win-Portable.zip`, which runs from any folder.
+**Windows (10 and 11, 64-bit):** download [`StremioNow-win.msi`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win.msi) from the [latest release](https://github.com/AffonsoPaulo/stremionow/releases/latest) and open it. The installer asks you to accept the license, installs StremioNow for your user, without administrator rights, adds it to the Start menu and the desktop, and opens it when it finishes (untick the box on its last page if you'd rather not). The installer is not signed yet, so Windows SmartScreen may warn about it: choose **More info › Run anyway**. If you prefer not to install anything, the release also has `StremioNow-win-Portable.zip`, which runs from any folder.
 
 The installed app keeps itself up to date: every few hours it checks the latest release, downloads a newer version in the background and installs it the next time you quit StremioNow, or at once from **Settings › About › Restart and update**. To remove it, use **Settings › Apps** in Windows; your library and settings in `%APPDATA%\StremioNow` are kept.
 
@@ -98,7 +98,7 @@ dotnet tool restore
 ./gradlew :app:packageVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
 ```
 
-The installer lands in `desktop/app/build/velopack/StremioNow-win-Setup.exe`. Publishing a release is described in [`docs/RELEASING.md`](docs/RELEASING.md).
+The installer lands in `desktop/app/build/velopack/StremioNow-win.msi`; its texts are in `desktop/app/installer/` and its pictures, drawn by `AppSplash.kt`, in `desktop/app/icons/`. Publishing a release is described in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 It keeps its data in `%APPDATA%\StremioNow` (Windows), `~/Library/Application Support/StremioNow` (macOS) or `$XDG_DATA_HOME/stremionow` (Linux), and the Stremio session key in the system's secret store (DPAPI, the login keychain, or the Secret Service through libsecret; without one, the session lasts until the app closes).
 
@@ -122,4 +122,4 @@ StremioNow is free software, licensed under the [GNU General Public License v3.0
 
 ---
 
-**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial: os apps de celular e TV já navegam, reproduzem fontes web, de debrid e torrent e sincronizam com a conta do Stremio. No Windows, baixe o [`StremioNow-win-Setup.exe`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win-Setup.exe) da [última versão](https://github.com/AffonsoPaulo/stremionow/releases/latest) e abra: ele instala sem pedir administrador, e o app se atualiza sozinho. Se o Windows SmartScreen avisar, escolha **Mais informações › Executar assim mesmo**.
+**Em português:** StremioNow é um cliente rápido e nativo para o ecossistema de addons do Stremio, para Android, Android TV, Fire TV e desktop. O app não hospeda nem fornece conteúdo. Está em desenvolvimento inicial: os apps de celular e TV já navegam, reproduzem fontes web, de debrid e torrent e sincronizam com a conta do Stremio. No Windows, baixe o [`StremioNow-win.msi`](https://github.com/AffonsoPaulo/stremionow/releases/latest/download/StremioNow-win.msi) da [última versão](https://github.com/AffonsoPaulo/stremionow/releases/latest) e abra: ele instala sem pedir administrador, e o app se atualiza sozinho. Se o Windows SmartScreen avisar, escolha **Mais informações › Executar assim mesmo**.

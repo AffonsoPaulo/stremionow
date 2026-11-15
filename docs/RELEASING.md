@@ -41,7 +41,7 @@ dotnet tool restore
 ./gradlew :app:packageVelopack :app:publishVelopack -Pstremionow.packaging.javaHome="C:/path/to/jdk-25"
 ```
 
-`publishVelopack` attaches `StremioNow-win-Setup.exe`, `StremioNow-win-Portable.zip`, `StremioNow-X.Y.Z-full.nupkg` and `releases.win.json` to the release `vX.Y.Z`, replacing earlier copies. If there is no release yet, it creates a draft at the commit checked out (push it first); publishing the draft creates the tag, and the workflow then adds the APKs. The installer keeps the name `StremioNow-win-Setup.exe` in every release, so `releases/latest/download/StremioNow-win-Setup.exe` always gives the newest one.
+`publishVelopack` attaches `StremioNow-win.msi` (the installer), `StremioNow-win-Portable.zip`, `StremioNow-X.Y.Z-full.nupkg` and `releases.win.json` to the release `vX.Y.Z`, replacing earlier copies. If there is no release yet, it creates a draft at the commit checked out (push it first); publishing the draft creates the tag, and the workflow then adds the APKs. The installer keeps the name `StremioNow-win.msi` in every release, so `releases/latest/download/StremioNow-win.msi` always gives the newest one.
 
 The installer is not code-signed yet, so Windows SmartScreen warns people who download it until it builds a reputation.
 

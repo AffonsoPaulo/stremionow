@@ -1,0 +1,3 @@
+StremioNow will be installed for your user, without administrator rights, and will keep itself up to date.
+
+O StremioNow será instalado para o seu usuário, sem pedir administrador, e vai se manter atualizado sozinho.

@@ -3,12 +3,16 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::null_as_default;
+use crate::lenient::{
+    lenient_bool, lenient_list, lenient_number, lenient_size, lenient_string, lenient_strings,
+    lenient_text, null_as_default, or_default,
+};
 
-/// Response of the `catalog` resource.
+/// Response of the `catalog` resource. Items that cannot be read (no id or type, say) are
+/// left out, so one broken item does not hide the rest of the catalog.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CatalogResponse {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub metas: Vec<MetaPreview>,
 }
 
@@ -18,17 +22,17 @@ pub struct MetaResponse {
     pub meta: MetaDetail,
 }
 
-/// Response of the `stream` resource.
+/// Response of the `stream` resource; streams that cannot be read are left out.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StreamResponse {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub streams: Vec<Stream>,
 }
 
-/// Response of the `subtitles` resource.
+/// Response of the `subtitles` resource; subtitles that cannot be read are left out.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SubtitlesResponse {
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub subtitles: Vec<Subtitle>,
 }
 
@@ -39,22 +43,22 @@ pub struct MetaPreview {
     pub id: String,
     #[serde(rename = "type")]
     pub kind: String,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_text")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub poster: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub background: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub logo: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub description: Option<String>,
     /// Year or year range as display text, for example `2019` or `2019-2023`.
     #[serde(default, deserialize_with = "lenient_string")]
     pub release_info: Option<String>,
     #[serde(default, deserialize_with = "lenient_string")]
     pub imdb_rating: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub genres: Vec<String>,
 }
 
@@ -66,16 +70,16 @@ pub struct MetaDetail {
     pub preview: MetaPreview,
     #[serde(default, deserialize_with = "lenient_string")]
     pub runtime: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub cast: Vec<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub director: Vec<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub writer: Vec<String>,
     /// Episodes of a series, or the single video of some movies.
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub videos: Vec<Video>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub trailers: Vec<Trailer>,
     /// Trailers as streams, the newer form (Cinemeta sends both): usually YouTube ids.
     #[serde(default, deserialize_with = "lenient_list")]
@@ -89,7 +93,7 @@ pub struct MetaDetail {
 /// A trailer, identified by its YouTube id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Trailer {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub source: Option<String>,
 }
 
@@ -182,34 +186,35 @@ impl From<RawVideo> for Video {
 #[serde(rename_all = "camelCase")]
 pub struct Stream {
     /// Direct HTTP(S) URL, used by debrid and HTTP sources.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub url: Option<String>,
     /// BitTorrent info hash, for torrent sources.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub info_hash: Option<String>,
-    /// Index of the file to play inside the torrent.
-    #[serde(default)]
+    /// Index of the file to play inside the torrent; `-1`, which some addons send for "the
+    /// largest file", reads as none given.
+    #[serde(default, deserialize_with = "lenient_number")]
     pub file_idx: Option<u32>,
     /// YouTube video id.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub yt_id: Option<String>,
     /// Link to open outside the app.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub external_url: Option<String>,
     /// Short label, often quality and provider, for example `Torrentio\n4k`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub name: Option<String>,
     /// Older addons put the description here.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub description: Option<String>,
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_list")]
     pub subtitles: Vec<Subtitle>,
     /// Extra trackers and DHT hints for torrents.
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_strings")]
     pub sources: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub behavior_hints: StreamBehaviorHints,
 }
 
@@ -218,67 +223,28 @@ pub struct Stream {
 #[serde(rename_all = "camelCase")]
 pub struct StreamBehaviorHints {
     /// Streams of the same group can replace each other between episodes.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub binge_group: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     pub filename: Option<String>,
-    #[serde(default)]
+    /// Size of the file in bytes; addons write it as an integer, a float such as `1.5e9`,
+    /// or text.
+    #[serde(default, deserialize_with = "lenient_size")]
     pub video_size: Option<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_bool")]
     pub not_web_ready: bool,
 }
 
-/// A subtitle file.
+/// A subtitle file. One without a URL cannot be read, and is left out of its list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Subtitle {
-    #[serde(default)]
+    /// Addons send it as text or as a number.
+    #[serde(default, deserialize_with = "lenient_string")]
     pub id: Option<String>,
     pub url: String,
     /// Language, usually as an ISO 639-2 code such as `por`.
-    #[serde(default, deserialize_with = "null_as_default")]
+    #[serde(default, deserialize_with = "lenient_text")]
     pub lang: String,
-}
-
-/// Reads a list, skipping entries that do not have the expected shape instead of failing the
-/// whole response; `null` or anything that is not a list reads as empty.
-fn lenient_list<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
-    Ok(match serde_json::Value::deserialize(deserializer)? {
-        serde_json::Value::Array(values) => values
-            .into_iter()
-            .filter_map(|value| serde_json::from_value(value).ok())
-            .collect(),
-        _ => Vec::new(),
-    })
-}
-
-/// Reads a non-negative whole number sent as a number or a numeric string; anything else
-/// (null, negative, fractional, text) becomes `None` instead of failing the whole response.
-fn lenient_number<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(match serde_json::Value::deserialize(deserializer)? {
-        serde_json::Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
-        serde_json::Value::String(s) => s.trim().parse().ok(),
-        _ => None,
-    })
-}
-
-/// Accepts a string or a number, since addons send ratings and years as either.
-fn lenient_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
-    Ok(match value {
-        Some(serde_json::Value::String(text)) if !text.trim().is_empty() => Some(text),
-        Some(serde_json::Value::Number(number)) => Some(number.to_string()),
-        _ => None,
-    })
 }
 
 #[cfg(test)]
@@ -380,6 +346,83 @@ mod tests {
         }))
         .expect("valid meta");
         assert!(bare.meta.links.is_empty() && bare.meta.trailer_streams.is_empty());
+    }
+
+    #[test]
+    fn keeps_the_streams_it_can_read() {
+        let response: StreamResponse = serde_json::from_value(serde_json::json!({
+            "streams": [
+                {"infoHash": "a", "behaviorHints": null},
+                {"infoHash": "b", "fileIdx": "1",
+                 "behaviorHints": {"notWebReady": null, "videoSize": 1.5e9, "bingeGroup": 3}},
+                {"infoHash": "c", "fileIdx": -1, "behaviorHints": {"videoSize": "123", "notWebReady": true}},
+                {"url": "https://cdn/x.mkv", "sources": ["tracker:udp://t", null, 5],
+                 "subtitles": [{"url": "https://s/1.srt", "id": 7, "lang": "por"}, {"id": "no-url"}, null]},
+                {"infoHash": "d", "behaviorHints": "fast"},
+                "not a stream",
+                null
+            ]
+        }))
+        .expect("loose streams");
+        let streams = &response.streams;
+        assert_eq!(
+            streams.len(),
+            5,
+            "only the entries that are not objects are dropped"
+        );
+        assert_eq!(streams[0].behavior_hints, StreamBehaviorHints::default());
+        assert_eq!(streams[1].file_idx, Some(1));
+        assert_eq!(streams[1].behavior_hints.video_size, Some(1_500_000_000));
+        assert!(!streams[1].behavior_hints.not_web_ready);
+        assert_eq!(streams[1].behavior_hints.binge_group.as_deref(), Some("3"));
+        assert_eq!(streams[2].file_idx, None, "-1 is no index");
+        assert_eq!(streams[2].behavior_hints.video_size, Some(123));
+        assert!(streams[2].behavior_hints.not_web_ready);
+        assert_eq!(streams[3].sources, ["tracker:udp://t", "5"]);
+        assert_eq!(
+            streams[3].subtitles.len(),
+            1,
+            "the subtitle without a URL is dropped"
+        );
+        assert_eq!(streams[3].subtitles[0].id.as_deref(), Some("7"));
+        assert_eq!(streams[4].behavior_hints, StreamBehaviorHints::default());
+    }
+
+    #[test]
+    fn keeps_the_subtitles_and_catalog_items_it_can_read() {
+        let subtitles: SubtitlesResponse = serde_json::from_value(serde_json::json!({
+            "subtitles": [{"id": 1, "url": "https://s/1.srt", "lang": null}, {"lang": "eng"}]
+        }))
+        .expect("loose subtitles");
+        assert_eq!(subtitles.subtitles.len(), 1);
+        assert_eq!(subtitles.subtitles[0].id.as_deref(), Some("1"));
+
+        let catalog: CatalogResponse = serde_json::from_value(serde_json::json!({
+            "metas": [
+                {"id": "tt1", "type": "movie", "name": 1984, "poster": 5, "description": 42,
+                 "genres": ["a", null, 3]},
+                {"id": "tt2", "name": "No type"},
+                {"type": "movie", "name": "No id"},
+                {"id": "tt3", "type": "movie"}
+            ]
+        }))
+        .expect("loose catalog");
+        let ids: Vec<_> = catalog.metas.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["tt1", "tt3"]);
+        let first = &catalog.metas[0];
+        assert_eq!(first.name, "1984");
+        assert_eq!(first.poster.as_deref(), Some("5"));
+        assert_eq!(first.description.as_deref(), Some("42"));
+        assert_eq!(first.genres, ["a", "3"]);
+
+        let meta: MetaResponse = serde_json::from_value(serde_json::json!({
+            "meta": {"id": "tt4", "type": "movie", "name": "M", "cast": ["A", null],
+                     "videos": [{"id": "tt4"}, "broken"], "trailers": [{"source": 1}, null]}
+        }))
+        .expect("loose meta");
+        assert_eq!(meta.meta.cast, ["A"]);
+        assert_eq!(meta.meta.videos.len(), 1);
+        assert_eq!(meta.meta.trailers[0].source.as_deref(), Some("1"));
     }
 
     #[test]

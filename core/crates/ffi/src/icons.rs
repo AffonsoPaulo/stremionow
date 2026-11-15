@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use stremionow_addons::{MAX_ICON_BYTES, icon_host, is_icon_image};
+use stremionow_addons::{IconLookup, MAX_ICON_BYTES, icon_host, is_icon_image};
 
 use crate::core::{StremioCore, millis, now_millis};
 use crate::records::CoreError;
@@ -12,6 +12,9 @@ use crate::records::CoreError;
 const ICON_FRESHNESS: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// How long a site without a usable icon is left alone before it is asked again.
 const MISSING_ICON_FRESHNESS: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long a site that could not be asked is left alone; the absence noted for it is dated
+/// back so that it goes stale after this long instead of [`MISSING_ICON_FRESHNESS`].
+const UNREACHABLE_RETRY: Duration = Duration::from_secs(10 * 60);
 /// Requests for an icon give up after this long; the initial shows meanwhile.
 pub(crate) const ICON_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -37,21 +40,41 @@ impl StremioCore {
                 return Ok(usable(body.clone()));
             }
         }
-        match self.icons.fetch(&host).await {
-            Some(icon) => {
-                self.store()?.put_cached(&key, &icon, now_millis())?;
-                Ok(Some(icon))
-            }
-            // An old icon beats none while the site is unreachable; with none at all, the
-            // site is left alone for a day.
-            None => match cached {
-                Some((body, _)) if !body.is_empty() => Ok(usable(body)),
-                _ => {
-                    self.store()?.put_cached(&key, &[], now_millis())?;
-                    Ok(None)
-                }
-            },
+        let lookup = self.icons.fetch(&host).await;
+        let (icon, note) = settle(lookup, cached.map(|(body, _)| body), now_millis());
+        if let Some((body, fetched_at)) = note {
+            self.store()?.put_cached(&key, &body, fetched_at)?;
         }
+        Ok(icon)
+    }
+}
+
+/// What to note in the icon cache: the bytes (empty for none) and when they count as
+/// fetched.
+type CacheNote = (Vec<u8>, i64);
+
+/// The icon to show after asking a site, given the stale cached answer if any, and what to
+/// note in the cache, if anything.
+fn settle(
+    lookup: IconLookup,
+    cached: Option<Vec<u8>>,
+    now: i64,
+) -> (Option<Vec<u8>>, Option<CacheNote>) {
+    match lookup {
+        IconLookup::Found(icon) => (Some(icon.clone()), Some((icon, now))),
+        // The site said it has none: it is left alone for a day.
+        IconLookup::Missing => (None, Some((Vec::new(), now))),
+        // Whether it has one is not known. An old icon beats none meanwhile, and stays;
+        // with none at all, the absence is dated back so that the site is asked again
+        // after a short while rather than a day, which a moment offline would otherwise
+        // cost.
+        IconLookup::Unreachable => match cached {
+            Some(body) if !body.is_empty() => (usable(body), None),
+            _ => {
+                let retry_at = now - millis(MISSING_ICON_FRESHNESS) + millis(UNREACHABLE_RETRY);
+                (None, Some((Vec::new(), retry_at)))
+            }
+        },
     }
 }
 
@@ -97,6 +120,35 @@ mod tests {
                 .expect("reads"),
             None,
             "never asked"
+        );
+    }
+
+    #[test]
+    fn notes_absence_for_a_day_only_when_the_site_said_so() {
+        let png = b"\x89PNG\r\n\x1a\n...".to_vec();
+        let now = 1_000_000_000;
+        assert_eq!(
+            settle(IconLookup::Found(png.clone()), None, now),
+            (Some(png.clone()), Some((png.clone(), now)))
+        );
+        assert_eq!(
+            settle(IconLookup::Missing, Some(png.clone()), now),
+            (None, Some((Vec::new(), now)))
+        );
+        assert_eq!(
+            settle(IconLookup::Unreachable, Some(png.clone()), now),
+            (Some(png), None),
+            "the old icon stays"
+        );
+        let (icon, note) = settle(IconLookup::Unreachable, Some(Vec::new()), now);
+        assert_eq!(icon, None);
+        let (body, fetched_at) = note.expect("noted");
+        assert!(body.is_empty());
+        let stale_at = fetched_at + millis(MISSING_ICON_FRESHNESS);
+        assert_eq!(
+            stale_at - now,
+            millis(UNREACHABLE_RETRY),
+            "asked again soon, not in a day"
         );
     }
 }

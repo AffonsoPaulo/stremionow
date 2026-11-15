@@ -55,6 +55,7 @@ import io.github.affonsopaulo.stremionow.ui.components.snStateBackground
 import io.github.affonsopaulo.stremionow.ui.components.snStateBorder
 import io.github.affonsopaulo.stremionow.ui.data.AppGraph
 import io.github.affonsopaulo.stremionow.ui.data.io
+import io.github.affonsopaulo.stremionow.ui.data.runCatchingUnlessCancelled
 import io.github.affonsopaulo.stremionow.ui.l10n.Res
 import io.github.affonsopaulo.stremionow.ui.l10n.pluralStringResource
 import io.github.affonsopaulo.stremionow.ui.l10n.stringResource
@@ -85,6 +86,10 @@ data class SourcesState(
     val sources: List<StreamSource> = emptyList(),
     val addonsAsked: Int = 0,
     val addonsAnswered: Int = 0,
+    /** Addons whose answer was an error rather than a list, counted in [addonsAnswered]. */
+    val addonsFailed: Int = 0,
+    /** The addons to ask could not even be listed. */
+    val listFailed: Boolean = false,
     /** Every addon has answered (or there were none to ask). */
     val finished: Boolean = false,
     /** Identity of the source last played for this video, to offer it first. */
@@ -94,6 +99,34 @@ data class SourcesState(
 
     /** Addons that have not answered yet. */
     val addonsPending: Int get() = (addonsAsked - addonsAnswered).coerceAtLeast(0)
+
+    /** Why the search ended with nothing, or null while it goes on or when it found sources. */
+    val emptyReason: SourcesEmpty?
+        get() =
+            when {
+                !finished || sources.isNotEmpty() -> null
+                listFailed || (addonsAsked > 0 && addonsFailed >= addonsAsked) -> SourcesEmpty.AllFailed
+                addonsAsked == 0 -> SourcesEmpty.NoAddons
+                else -> SourcesEmpty.NoSources
+            }
+
+    /**
+     * Whether these sources are worth showing again later rather than asking anew: not once
+     * the search ended empty or with addons that failed, which a new search may fix.
+     */
+    val reusable: Boolean get() = !finished || (sources.isNotEmpty() && addonsFailed == 0 && !listFailed)
+}
+
+/** Why a search for sources found none. */
+enum class SourcesEmpty {
+    /** No addon gives sources for this kind of title. */
+    NoAddons,
+
+    /** Every addon asked failed to answer, or they could not be listed. */
+    AllFailed,
+
+    /** The addons answered, with nothing. */
+    NoSources,
 }
 
 /**
@@ -120,14 +153,16 @@ class SourcesLoader(
                 // A source played meanwhile is newer than the one read.
                 if (played != null) mutableState.update { if (it.played == null) it.copy(played = played) else it }
             }
-            val addons = runCatching { io { core.streamAddons(kind, videoId) } }.getOrDefault(emptyList())
-            mutableState.update { it.copy(addonsAsked = addons.size, finished = addons.isEmpty()) }
+            val listed = runCatchingUnlessCancelled { io { core.streamAddons(kind, videoId) } }
+            val addons = listed.getOrDefault(emptyList())
+            mutableState.update {
+                it.copy(addonsAsked = addons.size, finished = addons.isEmpty(), listFailed = listed.isFailure)
+            }
             addons.forEach { addon ->
                 launch {
-                    val found =
-                        runCatching { core.streamsFrom(addon.manifestUrl, kind, videoId) }
-                            .getOrDefault(emptyList())
-                            .filter(StreamSource::isUsable)
+                    val answer = runCatchingUnlessCancelled { core.streamsFrom(addon.manifestUrl, kind, videoId) }
+                    val found = answer.getOrDefault(emptyList()).filter(StreamSource::isUsable)
+                    val failed = if (answer.isFailure) 1 else 0
                     merge.withLock {
                         val ranked =
                             if (found.isEmpty()) {
@@ -139,6 +174,7 @@ class SourcesLoader(
                             it.copy(
                                 sources = ranked,
                                 addonsAnswered = it.addonsAnswered + 1,
+                                addonsFailed = it.addonsFailed + failed,
                                 finished = it.addonsAnswered + 1 >= it.addonsAsked,
                             )
                         }
@@ -173,7 +209,8 @@ data class SourcesSubject(
  * search, filters and order; then the source played last time, when it is among them; then
  * the rest in a grid of [columns], the recommended one first in the app's order; then how
  * many addons are still answering. [firstFocus] reaches the first source; [progress] is how
- * far into this video the user got, if anywhere.
+ * far into this video the user got, if anywhere. When none was found, the page says why and
+ * offers [onRetry] to ask again.
  */
 internal fun LazyListScope.sourcesItems(
     state: SourcesState,
@@ -185,6 +222,7 @@ internal fun LazyListScope.sourcesItems(
     phone: Boolean,
     firstFocus: FocusRequester,
     onChoose: (StreamSource) -> Unit,
+    onRetry: () -> Unit,
 ) {
     item(key = "sources-header") {
         // The phone's chips are a row of their own, which scrolls without the page header's inset.
@@ -205,10 +243,19 @@ internal fun LazyListScope.sourcesItems(
 
         state.sources.isEmpty() -> {
             item(key = "sources-empty") {
+                // Each reason says what the user can do about it; a new search may always help.
+                val (title, body) =
+                    when (state.emptyReason) {
+                        SourcesEmpty.NoAddons -> Res.string.sources_no_addons_title to Res.string.sources_no_addons_body
+                        SourcesEmpty.AllFailed -> Res.string.sources_failed_title to Res.string.sources_failed_body
+                        else -> Res.string.sources_empty_title to Res.string.sources_empty_body
+                    }
                 Box(Modifier.fillMaxWidth().heightIn(min = SourcesMessageHeight)) {
                     SnMessage(
-                        title = stringResource(Res.string.sources_empty_title),
-                        body = stringResource(Res.string.sources_empty_body),
+                        title = stringResource(title),
+                        body = stringResource(body),
+                        actionText = stringResource(Res.string.action_retry),
+                        onAction = onRetry,
                     )
                 }
             }
@@ -443,7 +490,7 @@ private fun ContinueCard(
                     SourceStatusLabel(source)
                 }
                 val share = progress?.fraction()?.takeIf { it > 0f }
-                val left = progress?.let(::minutesLeft)
+                val left = progress?.let(::minutesLeft)?.toInt()
                 if (share != null) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -452,7 +499,7 @@ private fun ContinueCard(
                         ProgressBar(share, Modifier.weight(1f))
                         if (left != null) {
                             BasicText(
-                                stringResource(Res.string.time_left, "$left min"),
+                                pluralStringResource(Res.plurals.time_left_minutes, left, left),
                                 style = SnTypography.caption.copy(color = SnColors.fgMuted),
                                 maxLines = 1,
                             )

@@ -117,6 +117,8 @@
   <string name="details_season">Season %1$d</string>
   <!-- Season 0, which holds specials. -->
   <string name="details_specials">Specials</string>
+  <!-- Season selector for the episodes the addon gives no season number. -->
+  <string name="details_no_season">Episodes</string>
   <string name="details_overview">Overview</string>
   <string name="details_cast">Cast</string>
   <string name="details_directors">Direction</string>
@@ -161,6 +163,9 @@
   <string name="watched_season_unmark">Mark season %1$d as unwatched</string>
   <string name="watched_specials_mark">Mark the specials as watched</string>
   <string name="watched_specials_unmark">Mark the specials as unwatched</string>
+  <!-- For the episodes the addon gives no season number. -->
+  <string name="watched_no_season_mark">Mark the episodes without a season as watched</string>
+  <string name="watched_no_season_unmark">Mark the episodes without a season as unwatched</string>
   <string name="watched_series_mark">Mark the whole series as watched</string>
   <string name="watched_series_unmark">Mark the whole series as unwatched</string>
   <!-- Badge on an episode the user has watched. -->
@@ -357,7 +362,13 @@
   <!-- On sources that open in another app, such as a streaming service or YouTube. -->
   <string name="sources_opens_outside">Opens outside the app</string>
   <string name="sources_empty_title">No sources found</string>
-  <string name="sources_empty_body">None of your addons has a source for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <string name="sources_empty_body">None of your addons has a source for this. Another stream addon may have one.</string>
+  <!-- No addon the user has gives sources for this kind of title. -->
+  <string name="sources_no_addons_title">No addons for sources</string>
+  <string name="sources_no_addons_body">None of your addons gives sources for this. Install a stream addon, such as a debrid one, and try again.</string>
+  <!-- Every addon asked failed to answer. -->
+  <string name="sources_failed_title">Couldn\'t reach your addons</string>
+  <string name="sources_failed_body">None of your addons answered. Check your connection and try again.</string>
   <!-- Button at the start of an episode's sources that returns to the list of episodes. -->
   <string name="sources_back_to_episodes">Back to episodes</string>
   <!-- Field over a video's sources that narrows them to those whose name has the words typed. -->

@@ -85,6 +85,7 @@
   <string name="details_tab_details">Detalhes</string>
   <string name="details_season">Temporada %1$d</string>
   <string name="details_specials">Especiais</string>
+  <string name="details_no_season">Episódios</string>
   <string name="details_overview">Sinopse</string>
   <string name="details_cast">Elenco</string>
   <string name="details_directors">Direção</string>
@@ -114,6 +115,8 @@
   <string name="watched_season_unmark">Marcar a temporada %1$d como não assistida</string>
   <string name="watched_specials_mark">Marcar os especiais como assistidos</string>
   <string name="watched_specials_unmark">Marcar os especiais como não assistidos</string>
+  <string name="watched_no_season_mark">Marcar os episódios sem temporada como assistidos</string>
+  <string name="watched_no_season_unmark">Marcar os episódios sem temporada como não assistidos</string>
   <string name="watched_series_mark">Marcar a série inteira como assistida</string>
   <string name="watched_series_unmark">Marcar a série inteira como não assistida</string>
   <string name="episode_watched">Assistido</string>
@@ -249,7 +252,11 @@
   <string name="sources_best">Melhor opção</string>
   <string name="sources_opens_outside">Abre fora do app</string>
   <string name="sources_empty_title">Nenhuma fonte encontrada</string>
-  <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="sources_empty_body">Nenhum dos seus addons tem uma fonte para isto. Outro addon de fontes pode ter.</string>
+  <string name="sources_no_addons_title">Nenhum addon de fontes</string>
+  <string name="sources_no_addons_body">Nenhum dos seus addons oferece fontes para isto. Instale um addon de fontes, como um de debrid, e tente de novo.</string>
+  <string name="sources_failed_title">Não foi possível falar com seus addons</string>
+  <string name="sources_failed_body">Nenhum dos seus addons respondeu. Verifique sua conexão e tente de novo.</string>
   <string name="sources_back_to_episodes">Voltar aos episódios</string>
   <string name="sources_search">Buscar fontes</string>
   <string name="sources_search_clear">Limpar busca</string>

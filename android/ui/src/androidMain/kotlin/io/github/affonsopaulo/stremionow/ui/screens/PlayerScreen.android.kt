@@ -92,8 +92,8 @@ import io.github.affonsopaulo.stremionow.ui.theme.SnTypography
 import kotlinx.coroutines.delay
 
 /**
- * Full-screen player with HBO Max–style controls: title at the top, play and ten-second
- * skips in the middle, the timeline and the audio/subtitles, episodes, change-source and
+ * Full-screen player with HBO Max–style controls: title at the top, play and the skips back
+ * and forward (Settings' seek step) in the middle, the timeline and the audio/subtitles, episodes, change-source and
  * next-episode actions at the bottom. Controls fade out while playing and come back on any
  * tap or key press.
  */
@@ -126,6 +126,8 @@ actual fun PlayerScreen(
     val torrent by viewModel.torrent.collectAsStateWithLifecycle()
     val prepareFailed by viewModel.prepareFailed.collectAsStateWithLifecycle()
     val skips by viewModel.skips.collectAsStateWithLifecycle()
+    // How far the skip buttons and the remote's fast-forward and rewind keys move.
+    val seekStep = viewModel.seekSteps.step.toDouble()
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInput by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var panel by remember { mutableStateOf<Panel?>(null) }
@@ -145,6 +147,7 @@ actual fun PlayerScreen(
         paused = state.isPaused,
         hasNext = selection.nextEpisode != null,
         onNext = { selection.nextEpisode?.let(onOpenEpisode) },
+        seekStepSeconds = seekStep,
     )
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
         viewModel.player.pause()
@@ -194,12 +197,12 @@ actual fun PlayerScreen(
                     }
 
                     Key.MediaFastForward -> {
-                        viewModel.player.seekBy(10.0)
+                        viewModel.player.seekBy(seekStep)
                         true
                     }
 
                     Key.MediaRewind -> {
-                        viewModel.player.seekBy(-10.0)
+                        viewModel.player.seekBy(-seekStep)
                         true
                     }
 
@@ -244,6 +247,7 @@ actual fun PlayerScreen(
                 state = state,
                 scrubSeconds = scrubSeconds,
                 hasNext = next != null,
+                seekStep = viewModel.seekSteps.step,
                 onBack = onBack,
                 onTogglePause = {
                     viewModel.player.togglePause()
@@ -345,6 +349,8 @@ private fun Controls(
     state: PlaybackState,
     scrubSeconds: Double?,
     hasNext: Boolean,
+    /** Seconds the skip buttons move. */
+    seekStep: Int,
     onBack: () -> Unit,
     onTogglePause: () -> Unit,
     onSeekBy: (Double) -> Unit,
@@ -401,7 +407,11 @@ private fun Controls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(SnSpacing.space10),
         ) {
-            SnIconButton(SnIcons.Back10, stringResource(Res.string.player_back10), { onSeekBy(-10.0) })
+            SnIconButton(
+                SnIcons.Back10,
+                stringResource(Res.string.player_back_seconds, seekStep),
+                { onSeekBy(-seekStep.toDouble()) },
+            )
             val playLabel = stringResource(if (state.isPaused) Res.string.player_play else Res.string.player_pause)
             Box(
                 Modifier
@@ -418,7 +428,11 @@ private fun Controls(
                     colorFilter = ColorFilter.tint(SnColors.fg),
                 )
             }
-            SnIconButton(SnIcons.Forward10, stringResource(Res.string.player_forward10), { onSeekBy(10.0) })
+            SnIconButton(
+                SnIcons.Forward10,
+                stringResource(Res.string.player_forward_seconds, seekStep),
+                { onSeekBy(seekStep.toDouble()) },
+            )
         }
 
         Column(

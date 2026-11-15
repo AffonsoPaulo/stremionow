@@ -33,4 +33,6 @@ internal fun defaultSettings() =
         subtitleFileStyling = false,
         autoplayNext = true,
         upNextCountdownSeconds = 10u,
+        seekStepSeconds = 10u,
+        seekShortStepSeconds = 3u,
     )

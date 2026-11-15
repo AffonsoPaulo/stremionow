@@ -72,6 +72,9 @@ class PlayerViewModel<out P : VideoPlayer>(
     /** What the Up Next card does, from Settings › Playback. */
     internal val upNext = UpNextBehavior.from(settings)
 
+    /** How far the keys and the skip buttons move, from Settings › Playback. */
+    internal val seekSteps = SeekSteps.from(settings)
+
     val player: P =
         createPlayer(
             PlayerOptions(

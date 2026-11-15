@@ -50,3 +50,5 @@ internal actual fun appVersion(context: PlatformContext): String? = System.getPr
 internal actual fun displaySwitchingSupported(): Boolean = DesktopDisplays.isSupported
 
 internal actual fun automaticStreamMemory(): StreamMemory? = StreamMemory.forThisComputer()
+
+internal actual fun isDesktopApp(): Boolean = true

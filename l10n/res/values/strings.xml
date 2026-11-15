@@ -407,8 +407,9 @@
   </plurals>
   <string name="player_play">Play</string>
   <string name="player_pause">Pause</string>
-  <string name="player_back10">Back 10 seconds</string>
-  <string name="player_forward10">Forward 10 seconds</string>
+  <!-- The skip buttons. %1$d is the seek step from Settings, 3 seconds or more. -->
+  <string name="player_back_seconds">Back %1$d seconds</string>
+  <string name="player_forward_seconds">Forward %1$d seconds</string>
   <string name="player_timeline">Playback position</string>
   <string name="player_tracks">Audio and subtitles</string>
   <string name="player_audio">Audio</string>
@@ -744,6 +745,13 @@
   <string name="settings_autoplay_next_body">The next episode starts by itself near the end of this one. When off, the next episode\'s card still shows, without counting down.</string>
   <string name="settings_up_next_countdown">Next episode countdown</string>
   <string name="settings_up_next_countdown_body">How long the next episode\'s card counts down before it starts. When off, the next episode starts as soon as this one ends.</string>
+
+  <!-- Settings › Playback: how far the player skips back and forward per press. -->
+  <string name="settings_seek">Skip back and forward</string>
+  <string name="settings_seek_body">How far the skip buttons and the remote\'s fast-forward and rewind keys move.</string>
+  <string name="settings_seek_body_desktop">How far the arrow keys and the skip buttons move.</string>
+  <!-- Desktop: the shorter step, with Shift held. -->
+  <string name="settings_seek_short">With Shift and the arrow keys</string>
 
   <!-- Settings › Playback: how much of the video is kept in memory for skipping. Not the torrent cache, which is disk space. -->
   <string name="settings_memory">Memory for the video</string>

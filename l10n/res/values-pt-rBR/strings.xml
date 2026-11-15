@@ -289,8 +289,8 @@
   </plurals>
   <string name="player_play">Reproduzir</string>
   <string name="player_pause">Pausar</string>
-  <string name="player_back10">Voltar 10 segundos</string>
-  <string name="player_forward10">Avançar 10 segundos</string>
+  <string name="player_back_seconds">Voltar %1$d segundos</string>
+  <string name="player_forward_seconds">Avançar %1$d segundos</string>
   <string name="player_timeline">Posição da reprodução</string>
   <string name="player_tracks">Áudio e legendas</string>
   <string name="player_audio">Áudio</string>
@@ -551,6 +551,11 @@
   <string name="settings_autoplay_next_body">O próximo episódio começa sozinho perto do fim deste. Desligado, o cartão do próximo episódio continua aparecendo, sem contagem regressiva.</string>
   <string name="settings_up_next_countdown">Contagem para o próximo episódio</string>
   <string name="settings_up_next_countdown_body">Quanto tempo o cartão do próximo episódio conta antes de ele começar. Desligado, o próximo episódio começa assim que este termina.</string>
+
+  <string name="settings_seek">Voltar e avançar</string>
+  <string name="settings_seek_body">Quanto os botões de voltar e avançar e as teclas de avançar e retroceder do controle remoto pulam.</string>
+  <string name="settings_seek_body_desktop">Quanto as setas do teclado e os botões de voltar e avançar pulam.</string>
+  <string name="settings_seek_short">Com Shift e as setas</string>
 
   <string name="settings_memory">Memória para o vídeo</string>
   <string name="settings_memory_body">Quanto do vídeo o StremioNow guarda na memória em volta de onde você está, para voltar ou avançar sem carregar de novo. É diferente do cache de torrents, que é espaço em disco para downloads. Vale a partir do próximo vídeo.</string>

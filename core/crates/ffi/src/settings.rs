@@ -49,6 +49,12 @@ pub const UP_NEXT_COUNTDOWN_RANGE: (u32, u32) = (5, 90);
 /// Ten seconds, as before the setting: Stremio's 35 leave the card up for most of the credits,
 /// which already show it as they start.
 const DEFAULT_UP_NEXT_COUNTDOWN_SECONDS: u32 = 10;
+const SEEK_STEP_SECONDS: &str = "seek_step_seconds";
+const SEEK_SHORT_STEP_SECONDS: &str = "seek_short_step_seconds";
+
+/// Seek steps the user can pick, in seconds (Stremio offers 3 to 30 too; its defaults, 10 and
+/// 3, are ours).
+pub const SEEK_STEP_CHOICES: [u32; 6] = [3, 5, 10, 15, 20, 30];
 
 /// Custom stream memory read ahead, in MiB: the player's `StreamMemorySizes` takes the same
 /// range. Below it, a few seconds of a 4K film; above it, more memory than any level uses.
@@ -186,6 +192,12 @@ pub struct AppSettings {
     /// How long the Up Next card counts down, in seconds: 0 for no countdown, otherwise within
     /// [`UP_NEXT_COUNTDOWN_RANGE`].
     pub up_next_countdown_seconds: u32,
+    /// How far the arrow keys, the skip buttons and a remote's fast-forward and rewind keys
+    /// move, in seconds: one of [`SEEK_STEP_CHOICES`].
+    pub seek_step_seconds: u32,
+    /// The shorter step of Shift and the arrow keys (desktop), in seconds: one of
+    /// [`SEEK_STEP_CHOICES`].
+    pub seek_short_step_seconds: u32,
 }
 
 impl Default for AppSettings {
@@ -213,6 +225,8 @@ impl Default for AppSettings {
             subtitle_file_styling: false,
             autoplay_next: true,
             up_next_countdown_seconds: DEFAULT_UP_NEXT_COUNTDOWN_SECONDS,
+            seek_step_seconds: 10,
+            seek_short_step_seconds: 3,
         }
     }
 }
@@ -304,7 +318,20 @@ impl StremioCore {
                 .setting(UP_NEXT_COUNTDOWN_SECONDS)?
                 .and_then(|value| value.parse().ok())
                 .map_or(defaults.up_next_countdown_seconds, up_next_countdown),
+            seek_step_seconds: store
+                .setting(SEEK_STEP_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.seek_step_seconds, seek_step),
+            seek_short_step_seconds: store
+                .setting(SEEK_SHORT_STEP_SECONDS)?
+                .and_then(|value| value.parse().ok())
+                .map_or(defaults.seek_short_step_seconds, seek_step),
         })
+    }
+
+    /// The seek steps offered in Settings, in seconds.
+    pub fn seek_step_choices(&self) -> Vec<u32> {
+        SEEK_STEP_CHOICES.to_vec()
     }
 
     /// Saves the user's preferences. Out-of-range values are brought back into range.
@@ -384,6 +411,14 @@ impl StremioCore {
         store.set_setting(
             UP_NEXT_COUNTDOWN_SECONDS,
             &up_next_countdown(settings.up_next_countdown_seconds).to_string(),
+        )?;
+        store.set_setting(
+            SEEK_STEP_SECONDS,
+            &seek_step(settings.seek_step_seconds).to_string(),
+        )?;
+        store.set_setting(
+            SEEK_SHORT_STEP_SECONDS,
+            &seek_step(settings.seek_short_step_seconds).to_string(),
         )?;
         drop(store);
         // "Only on Wi-Fi" may have changed.
@@ -494,6 +529,14 @@ fn up_next_countdown(seconds: u32) -> u32 {
     }
 }
 
+/// The offered seek step nearest to `seconds`, the shorter one on a tie.
+fn seek_step(seconds: u32) -> u32 {
+    SEEK_STEP_CHOICES
+        .into_iter()
+        .min_by_key(|choice| choice.abs_diff(seconds))
+        .unwrap_or(SEEK_STEP_CHOICES[2])
+}
+
 /// A yes/no setting as stored.
 fn flag(on: bool) -> &'static str {
     if on { "1" } else { "0" }
@@ -538,6 +581,8 @@ mod tests {
             subtitle_file_styling: true,
             autoplay_next: false,
             up_next_countdown_seconds: 300,
+            seek_step_seconds: 0,
+            seek_short_step_seconds: 1000,
         })
         .expect("saves");
         let saved = core.settings().expect("reads");
@@ -572,6 +617,37 @@ mod tests {
         assert!(saved.subtitle_file_styling);
         assert!(!saved.autoplay_next);
         assert_eq!(saved.up_next_countdown_seconds, UP_NEXT_COUNTDOWN_RANGE.1);
+        assert_eq!(saved.seek_step_seconds, 3, "the nearest choice");
+        assert_eq!(saved.seek_short_step_seconds, 30);
+    }
+
+    #[test]
+    fn seek_steps_default_and_land_on_a_choice() {
+        let defaults = AppSettings::default();
+        assert_eq!(defaults.seek_step_seconds, 10, "Stremio's");
+        assert_eq!(defaults.seek_short_step_seconds, 3, "Stremio's");
+        assert!(SEEK_STEP_CHOICES.contains(&defaults.seek_step_seconds));
+        assert!(SEEK_STEP_CHOICES.contains(&defaults.seek_short_step_seconds));
+        assert_eq!(seek_step(4), 3, "a tie takes the shorter step");
+        assert_eq!(seek_step(12), 10);
+        assert_eq!(seek_step(13), 15);
+        assert_eq!(seek_step(25), 20);
+        for choice in SEEK_STEP_CHOICES {
+            assert_eq!(seek_step(choice), choice);
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let core = StremioCore::new(dir.path().to_string_lossy().into_owned()).expect("core");
+        assert_eq!(core.seek_step_choices(), SEEK_STEP_CHOICES.to_vec());
+        core.update_settings(AppSettings {
+            seek_step_seconds: 30,
+            seek_short_step_seconds: 5,
+            ..AppSettings::default()
+        })
+        .expect("saves");
+        let saved = core.settings().expect("reads");
+        assert_eq!(saved.seek_step_seconds, 30);
+        assert_eq!(saved.seek_short_step_seconds, 5);
     }
 
     #[test]

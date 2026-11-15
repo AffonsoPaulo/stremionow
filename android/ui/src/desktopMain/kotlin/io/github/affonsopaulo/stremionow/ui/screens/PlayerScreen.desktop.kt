@@ -153,6 +153,7 @@ actual fun PlayerScreen(
                 hasEpisodes =
                     viewModel.selection.details.episodes
                         .isNotEmpty(),
+                seek = viewModel.seekSteps,
             )
         },
     ) {

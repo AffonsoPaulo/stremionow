@@ -82,6 +82,7 @@ import io.github.affonsopaulo.stremionow.ui.platform.SnBackHandler
 import io.github.affonsopaulo.stremionow.ui.platform.automaticStreamMemory
 import io.github.affonsopaulo.stremionow.ui.platform.deviceLanguage
 import io.github.affonsopaulo.stremionow.ui.platform.displaySwitchingSupported
+import io.github.affonsopaulo.stremionow.ui.platform.isDesktopApp
 import io.github.affonsopaulo.stremionow.ui.platform.openExternalLink
 import io.github.affonsopaulo.stremionow.ui.theme.FormFactor
 import io.github.affonsopaulo.stremionow.ui.theme.LocalIsTv
@@ -103,6 +104,7 @@ class SettingsViewModel(
     private val mutableSettings = MutableStateFlow<AppSettings?>(null)
     val settings = mutableSettings.asStateFlow()
     val cacheChoices: List<UInt> = core.torrentCacheChoices()
+    val seekStepChoices: List<UInt> = core.seekStepChoices()
     private val mutableHdrTitles = MutableStateFlow(0)
 
     /** Titles the user turned HDR on for ("Only for this title"). */
@@ -384,6 +386,7 @@ private fun PlaybackPage() {
         )
     }
     NextEpisodeSettings(current, viewModel::update)
+    SeekStepSetting(current, viewModel.seekStepChoices, viewModel::update)
     SettingsToggle(
         title = stringResource(Res.string.settings_aniskip),
         body = stringResource(Res.string.settings_aniskip_body),
@@ -431,6 +434,48 @@ private fun NextEpisodeSettings(
             },
             onSelect = { seconds -> onChange { it.copy(upNextCountdownSeconds = seconds.toUInt()) } },
         )
+    }
+}
+
+/**
+ * How far the player skips back and forward per press, and on the desktop the shorter step of
+ * Shift and the arrow keys.
+ */
+@Composable
+private fun SeekStepSetting(
+    current: AppSettings,
+    choices: List<UInt>,
+    onChange: ((AppSettings) -> AppSettings) -> Unit,
+) {
+    val desktop = isDesktopApp()
+    val label: @Composable (UInt) -> String = { seconds ->
+        pluralStringResource(Res.plurals.settings_duration_seconds, seconds.toInt(), seconds.toInt())
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(SnSpacing.space2)) {
+        BasicText(stringResource(Res.string.settings_seek), style = SnTypography.bodyLg.copy(color = SnColors.fg))
+        BasicText(
+            stringResource(if (desktop) Res.string.settings_seek_body_desktop else Res.string.settings_seek_body),
+            style = SnTypography.body.copy(color = SnColors.fgMuted),
+        )
+        SnChipRow(
+            options = choices,
+            selected = current.seekStepSeconds,
+            label = label,
+            onSelect = { seconds -> onChange { it.copy(seekStepSeconds = seconds) } },
+        )
+        if (desktop) {
+            BasicText(
+                stringResource(Res.string.settings_seek_short),
+                modifier = Modifier.padding(top = SnSpacing.space2),
+                style = SnTypography.label.copy(color = SnColors.fgSecondary),
+            )
+            SnChipRow(
+                options = choices,
+                selected = current.seekShortStepSeconds,
+                label = label,
+                onSelect = { seconds -> onChange { it.copy(seekShortStepSeconds = seconds) } },
+            )
+        }
     }
 }
 

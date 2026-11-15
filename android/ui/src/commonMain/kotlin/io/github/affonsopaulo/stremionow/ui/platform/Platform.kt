@@ -47,3 +47,9 @@ internal expect fun displaySwitchingSupported(): Boolean
  * sizes until it gets levels of its own.
  */
 internal expect fun automaticStreamMemory(): StreamMemory?
+
+/**
+ * Whether this is the desktop app, with a keyboard and windows of its own: Settings offers the
+ * shorter Shift+arrow seek step and how the window behaves there.
+ */
+internal expect fun isDesktopApp(): Boolean

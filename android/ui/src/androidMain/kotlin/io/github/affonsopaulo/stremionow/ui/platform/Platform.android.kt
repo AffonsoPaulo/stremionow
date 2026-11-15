@@ -42,3 +42,5 @@ internal actual fun appVersion(context: PlatformContext): String? =
 internal actual fun displaySwitchingSupported(): Boolean = false
 
 internal actual fun automaticStreamMemory(): StreamMemory? = null
+
+internal actual fun isDesktopApp(): Boolean = false

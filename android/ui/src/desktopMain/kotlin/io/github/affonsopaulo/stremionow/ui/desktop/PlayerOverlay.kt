@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -92,6 +93,7 @@ import io.github.affonsopaulo.stremionow.ui.screens.Panel
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackError
 import io.github.affonsopaulo.stremionow.ui.screens.PlaybackPrompts
 import io.github.affonsopaulo.stremionow.ui.screens.PlayerViewModel
+import io.github.affonsopaulo.stremionow.ui.screens.SeekSteps
 import io.github.affonsopaulo.stremionow.ui.screens.SidePanel
 import io.github.affonsopaulo.stremionow.ui.screens.TracksList
 import io.github.affonsopaulo.stremionow.ui.screens.rememberLasting
@@ -134,9 +136,6 @@ private val BOTTOM_SCRIM = 300.dp
 /** The play/pause button, larger than the others. */
 private val PLAY_BUTTON = 68.dp
 
-/** Step of the ±10 s buttons and of the arrow keys. */
-private const val SEEK_STEP_SECONDS = 10.0
-
 /**
  * What the overlay shows besides the playback state: whether the controls are up, the open
  * panel and the position being scrubbed. Pointer movement and shortcuts call [poke], which
@@ -172,7 +171,8 @@ internal class OverlayState {
 
 /**
  * Space, K, Left, Right, J, L, Up, Down, M, F, N, E, S and Esc, wherever the focus is in the overlay.
- * S skips the intro, recap or credits whose prompt shows.
+ * Left and Right (and J and L) move by [seek]'s step, Shift with Left and Right by its shorter
+ * one. S skips the intro, recap or credits whose prompt shows.
  * Up and Down change the volume and M mutes it. Esc (and the
  * mouse's back button) goes one step back with [playerBack]. N plays the next episode through
  * [onNext], when there is one; E opens and closes the episodes, when the title has them.
@@ -185,6 +185,7 @@ internal fun handlePlayerShortcut(
     onBack: () -> Unit,
     onNext: (() -> Unit)?,
     hasEpisodes: Boolean = false,
+    seek: SeekSteps = SeekSteps.DEFAULT,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
     when (event.key) {
@@ -192,12 +193,20 @@ internal fun handlePlayerShortcut(
             player.togglePause()
         }
 
-        Key.DirectionLeft, Key.J -> {
-            player.seekBy(-SEEK_STEP_SECONDS)
+        Key.DirectionLeft -> {
+            player.seekBy(-seek.forArrow(event.isShiftPressed))
         }
 
-        Key.DirectionRight, Key.L -> {
-            player.seekBy(SEEK_STEP_SECONDS)
+        Key.DirectionRight -> {
+            player.seekBy(seek.forArrow(event.isShiftPressed))
+        }
+
+        Key.J -> {
+            player.seekBy(-seek.forArrow(shift = false))
+        }
+
+        Key.L -> {
+            player.seekBy(seek.forArrow(shift = false))
         }
 
         Key.F -> {
@@ -286,9 +295,10 @@ internal fun handleMediaCommand(
 
 /**
  * The player's interface, drawn over the video in a transparent window: back, title and minimize
- * at the top, play/pause and ±10 s in the center, the timeline and the tracks, episodes, change
- * source, next episode and full screen buttons at the bottom. Areas without controls stay
- * transparent, so the video shows through. Click toggles play and double-click full screen. With
+ * at the top, play/pause and the skips back and forward in the center, the timeline and the
+ * tracks, episodes, change source, next episode and full screen buttons at the bottom. Areas
+ * without controls stay transparent, so the video shows through. Click toggles play and
+ * double-click full screen. With
  * a borderless video window, dragging the video moves the window, edges resize it, and minimize
  * is a button here; a framed one has the system's title bar and borders for all three.
  */
@@ -430,6 +440,7 @@ internal fun PlayerOverlay(
                 highlights = highlights,
                 isFullScreen = pair.isFullScreen,
                 hasNext = next != null,
+                seekStep = viewModel.seekSteps.step,
                 onBack = onBack,
                 onMinimize = if (pair.framed) null else pair::minimize,
                 onToggleFullScreen = pair::toggleFullScreen,
@@ -646,8 +657,8 @@ private fun VideoArea(
 /**
  * The controls, laid out as in the design canvas: Back at the top; at the bottom the title and
  * episode, the timeline between the current time and the length, then a row with the episodes
- * and next episode on the left, −10 s, play/pause and +10 s in the centre, and change source,
- * volume, subtitles and audio, playback (speed and picture) and full screen on the right.
+ * and next episode on the left, skip back, play/pause and skip forward in the centre, and change
+ * source, volume, subtitles and audio, playback (speed and picture) and full screen on the right.
  */
 @Composable
 private fun Controls(
@@ -658,6 +669,8 @@ private fun Controls(
     highlights: List<ClosedFloatingPointRange<Double>>,
     isFullScreen: Boolean,
     hasNext: Boolean,
+    /** Seconds the skip buttons move. */
+    seekStep: Int,
     onBack: () -> Unit,
     /** Null when the window's title bar has the minimize button. */
     onMinimize: (() -> Unit)?,
@@ -803,9 +816,9 @@ private fun Controls(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(SnSpacing.space6),
                 ) {
-                    val back10Label = stringResource(Res.string.player_back10)
-                    WithTooltip(back10Label, stringResource(Res.string.player_key_left)) {
-                        SnIconButton(SnIcons.Back10, back10Label, { onSeekBy(-SEEK_STEP_SECONDS) })
+                    val backLabel = stringResource(Res.string.player_back_seconds, seekStep)
+                    WithTooltip(backLabel, stringResource(Res.string.player_key_left)) {
+                        SnIconButton(SnIcons.Back10, backLabel, { onSeekBy(-seekStep.toDouble()) })
                     }
                     val playLabel =
                         stringResource(if (playback.isPaused) Res.string.player_play else Res.string.player_pause)
@@ -826,9 +839,9 @@ private fun Controls(
                             )
                         }
                     }
-                    val forward10Label = stringResource(Res.string.player_forward10)
-                    WithTooltip(forward10Label, stringResource(Res.string.player_key_right)) {
-                        SnIconButton(SnIcons.Forward10, forward10Label, { onSeekBy(SEEK_STEP_SECONDS) })
+                    val forwardLabel = stringResource(Res.string.player_forward_seconds, seekStep)
+                    WithTooltip(forwardLabel, stringResource(Res.string.player_key_right)) {
+                        SnIconButton(SnIcons.Forward10, forwardLabel, { onSeekBy(seekStep.toDouble()) })
                     }
                 }
 

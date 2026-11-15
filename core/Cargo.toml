@@ -63,8 +63,12 @@ spake2 = "0.4.0"
 mdns-sd = "0.21.7"
 if-addrs = "0.15.0"
 # Windows: adapter types, gateways and the gateway's MAC address, to tell the home network from
-# others (ADR 0008). Already in the tree through if-addrs and tokio.
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+# others (ADR 0008), and the space files take and the space left on a disk, for the torrent
+# cache. Already in the tree through if-addrs and tokio.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Storage_FileSystem"] }
+# Unix: the space left on a disk (statvfs), checked before a torrent is added. Already in the
+# tree through tempfile.
+rustix = { version = "1.1.6", default-features = false, features = ["fs", "std"] }
 # The official watched-videos bitfield of library items (ADR 0012): zlib with the pure-Rust
 # backend and standard base64, as stremio-core's `stremio-watched-bitfield`. Both are already
 # in the tree, through librqbit and hyper-util.

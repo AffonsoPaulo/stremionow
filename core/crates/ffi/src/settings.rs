@@ -471,8 +471,9 @@ impl StremioCore {
         // One transaction: two saves close together never interleave key by key, and a failure
         // halfway keeps the earlier settings whole.
         self.store()?.set_settings(&entries)?;
-        // "Only on Wi-Fi" may have changed.
+        // "Only on Wi-Fi" and the cache size may have changed.
         self.apply_network_policy();
+        self.apply_cache_limit();
         Ok(())
     }
 

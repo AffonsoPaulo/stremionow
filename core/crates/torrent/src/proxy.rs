@@ -15,7 +15,8 @@ use crate::TorrentError;
 use crate::address::{is_private_host, is_private_ip};
 use crate::http::{self, Body};
 
-/// Registered sources kept at once; the oldest is forgotten first. A session plays a handful.
+/// Registered sources kept at once; the one used least recently is forgotten first. A session
+/// plays a handful.
 const MAX_SOURCES: usize = 64;
 
 /// Redirects followed before giving up. CDNs and debrid services chain a few.
@@ -28,11 +29,14 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// the player keeps reading a film for hours.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Response headers passed from the source to the player.
-const FORWARDED_HEADERS: [HeaderName; 5] = [
+/// Response headers passed from the source to the player. The relay asks for the bytes as
+/// stored, but a server may compress them anyway; the body is passed on untouched, so the
+/// player must learn how it is encoded.
+const FORWARDED_HEADERS: [HeaderName; 6] = [
     header::CONTENT_TYPE,
     header::CONTENT_LENGTH,
     header::CONTENT_RANGE,
+    header::CONTENT_ENCODING,
     header::ACCEPT_RANGES,
     header::LAST_MODIFIED,
 ];
@@ -48,9 +52,16 @@ pub(crate) struct Proxy {
 
 #[derive(Default)]
 struct Sources {
-    by_token: HashMap<String, Url>,
-    /// Tokens from oldest to newest, for eviction.
+    by_token: HashMap<String, Source>,
+    /// Tokens from least to most recently registered or used, for eviction.
     order: VecDeque<String>,
+}
+
+#[derive(Clone)]
+struct Source {
+    url: Url,
+    /// Whether the source may lead into the home network (see [`Proxy::register`]).
+    private_allowed: bool,
 }
 
 impl Proxy {
@@ -63,11 +74,20 @@ impl Proxy {
         })
     }
 
-    /// Registers `url` and returns the token that addresses it. Only http(s) is accepted.
-    pub(crate) fn register(&self, url: &str) -> Result<String, TorrentError> {
+    /// Registers `url` and returns the token that addresses it. Only http(s) is accepted, and
+    /// an address on this device or the home network only with `private_allowed`: addons on
+    /// the internet must not make the device reach into its own network.
+    pub(crate) fn register(
+        &self,
+        url: &str,
+        private_allowed: bool,
+    ) -> Result<String, TorrentError> {
         let url = Url::parse(url).map_err(|_| TorrentError::UnsupportedUrl)?;
         if !matches!(url.scheme(), "http" | "https") || !url.has_host() {
             return Err(TorrentError::UnsupportedUrl);
+        }
+        if !private_allowed && is_private_host(&url) {
+            return Err(TorrentError::PrivateAddress);
         }
         let token = crate::secret::random_hex()?;
         let mut sources = self.sources();
@@ -77,8 +97,25 @@ impl Proxy {
             sources.by_token.remove(&oldest);
         }
         sources.order.push_back(token.clone());
-        sources.by_token.insert(token.clone(), url);
+        let source = Source {
+            url,
+            private_allowed,
+        };
+        sources.by_token.insert(token.clone(), source);
         Ok(token)
+    }
+
+    /// The source behind `token`, which becomes the most recently used: a film playing for
+    /// hours must not be forgotten because many subtitles were registered meanwhile.
+    fn take(&self, token: &str) -> Option<Source> {
+        let mut sources = self.sources();
+        let source = sources.by_token.get(token).cloned()?;
+        if let Some(position) = sources.order.iter().position(|known| known == token)
+            && let Some(used) = sources.order.remove(position)
+        {
+            sources.order.push_back(used);
+        }
+        Some(source)
     }
 
     /// Answers a player request for the source behind `token`: 404 if there is none.
@@ -88,10 +125,16 @@ impl Proxy {
         method: &Method,
         range: Option<&HeaderValue>,
     ) -> Response<Body> {
-        let Some(url) = self.sources().by_token.get(token).cloned() else {
+        let Some(Source {
+            url,
+            private_allowed,
+        }) = self.take(token)
+        else {
             return http::not_found();
         };
-        let client = if is_private_host(&url) {
+        // Only a source allowed into the home network gets the client that may connect there;
+        // a public one resolves names to public addresses only.
+        let client = if private_allowed && is_private_host(&url) {
             &self.local
         } else {
             &self.public
@@ -239,26 +282,66 @@ mod tests {
             "",
         ] {
             assert!(
-                matches!(proxy.register(url), Err(TorrentError::UnsupportedUrl)),
+                matches!(proxy.register(url, true), Err(TorrentError::UnsupportedUrl)),
                 "{url:?}"
             );
         }
-        assert!(proxy.register("https://cdn.example.org/movie.mkv").is_ok());
-        assert!(proxy.register("http://192.168.1.2:8080/movie.mkv").is_ok());
+        assert!(
+            proxy
+                .register("https://cdn.example.org/movie.mkv", false)
+                .is_ok()
+        );
+        assert!(
+            proxy
+                .register("http://192.168.1.2:8080/movie.mkv", true)
+                .is_ok()
+        );
     }
 
     #[test]
-    fn oldest_sources_are_forgotten() {
+    fn private_sources_need_permission() {
         let proxy = Proxy::new().expect("proxy");
-        let first = proxy.register("https://example.org/0").expect("token");
-        for i in 1..=MAX_SOURCES {
+        for url in [
+            "http://192.168.1.1/admin",
+            "http://127.0.0.1:8080/x",
+            "http://[::1]/x",
+            "http://router.lan/x",
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/x",
+        ] {
+            assert!(
+                matches!(
+                    proxy.register(url, false),
+                    Err(TorrentError::PrivateAddress)
+                ),
+                "{url}"
+            );
+            assert!(proxy.register(url, true).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn least_recently_used_sources_are_forgotten() {
+        let proxy = Proxy::new().expect("proxy");
+        let first = proxy
+            .register("https://example.org/0", false)
+            .expect("token");
+        let second = proxy
+            .register("https://example.org/1", false)
+            .expect("token");
+        // Playing the first keeps it, even after many more registrations.
+        for i in 2..=MAX_SOURCES {
+            if i % 8 == 0 {
+                assert!(proxy.take(&first).is_some());
+            }
             proxy
-                .register(&format!("https://example.org/{i}"))
+                .register(&format!("https://example.org/{i}"), false)
                 .expect("token");
         }
         let sources = proxy.sources();
         assert_eq!(sources.by_token.len(), MAX_SOURCES);
-        assert!(!sources.by_token.contains_key(&first));
+        assert_eq!(sources.order.len(), MAX_SOURCES);
+        assert!(sources.by_token.contains_key(&first));
+        assert!(!sources.by_token.contains_key(&second));
     }
 }
 

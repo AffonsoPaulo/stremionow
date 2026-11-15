@@ -54,6 +54,10 @@ pub(crate) struct AddTorrent {
     pub(crate) file_idx: Option<u32>,
     #[serde(default)]
     pub(crate) trackers: Vec<String>,
+    /// Text naming the file when there is no index (see `files::FileRequest`). Servers from
+    /// before it ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) file_hint: Option<String>,
 }
 
 /// Answer to [`AddTorrent`].

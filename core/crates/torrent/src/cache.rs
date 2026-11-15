@@ -28,7 +28,8 @@ pub(crate) fn touch(dir: &Path) -> io::Result<()> {
     fs::write(dir.join(MARKER), b"")
 }
 
-/// Every entry directly under `root`. A missing `root` is an empty cache.
+/// Every entry directly under `root`. A missing `root` is an empty cache, and entries removed
+/// while they are measured are left out.
 pub(crate) fn scan(root: &Path) -> io::Result<Vec<CacheEntry>> {
     let children = match fs::read_dir(root) {
         Ok(children) => children,
@@ -38,7 +39,11 @@ pub(crate) fn scan(root: &Path) -> io::Result<Vec<CacheEntry>> {
     let mut entries = Vec::new();
     for child in children {
         let child = child?;
-        let (bytes, last_used) = usage(&child.path())?;
+        let (bytes, last_used) = match usage(&child.path()) {
+            Ok(usage) => usage,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
         entries.push(CacheEntry {
             path: child.path(),
             name: child.file_name().to_string_lossy().into_owned(),
@@ -50,36 +55,131 @@ pub(crate) fn scan(root: &Path) -> io::Result<Vec<CacheEntry>> {
 }
 
 /// Total disk usage and newest modification time under `path`, without following links.
-/// Walks with an explicit stack so that deep trees cannot overflow the thread's stack.
+/// Walks with an explicit stack so that deep trees cannot overflow the thread's stack. Files
+/// removed during the walk are skipped; `path` itself missing is an error.
 fn usage(path: &Path) -> io::Result<(u64, SystemTime)> {
     let mut bytes = 0u64;
     let mut newest = SystemTime::UNIX_EPOCH;
     let mut pending = vec![path.to_path_buf()];
-    while let Some(path) = pending.pop() {
-        let metadata = fs::symlink_metadata(&path)?;
+    while let Some(current) = pending.pop() {
+        let gone = |error: &io::Error| error.kind() == io::ErrorKind::NotFound && current != path;
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if gone(&error) => continue,
+            Err(error) => return Err(error),
+        };
         newest = newest.max(metadata.modified()?);
         if metadata.is_dir() {
-            for child in fs::read_dir(&path)? {
+            let children = match fs::read_dir(&current) {
+                Ok(children) => children,
+                Err(error) if gone(&error) => continue,
+                Err(error) => return Err(error),
+            };
+            for child in children {
                 pending.push(child?.path());
             }
         } else {
-            bytes = bytes.saturating_add(allocated_bytes(&metadata));
+            bytes = bytes.saturating_add(allocated_bytes(&current, &metadata));
         }
     }
     Ok((bytes, newest))
 }
 
-/// Space a file really takes. librqbit creates sparse files, so on Unix the logical length of a
-/// partly downloaded file overstates it.
+/// Space the file at `path` takes on disk; `None` if there is none.
+pub(crate) fn allocated_len(path: &Path) -> Option<u64> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    metadata.is_file().then(|| allocated_bytes(path, &metadata))
+}
+
+/// Space a file really takes. librqbit creates sparse files, so the logical length of a partly
+/// downloaded file overstates it: five minutes of a 15 GB film would count as 15 GB.
 #[cfg(unix)]
-fn allocated_bytes(metadata: &fs::Metadata) -> u64 {
+fn allocated_bytes(_path: &Path, metadata: &fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     metadata.blocks().saturating_mul(512)
 }
 
-#[cfg(not(unix))]
-fn allocated_bytes(metadata: &fs::Metadata) -> u64 {
+/// Space a file really takes: on Windows, the size the file system reports for sparse and
+/// compressed files (`GetCompressedFileSizeW`). Falls back to the logical length.
+#[cfg(windows)]
+fn allocated_bytes(path: &Path, metadata: &fs::Metadata) -> u64 {
+    windows::compressed_size(path).unwrap_or(metadata.len())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn allocated_bytes(_path: &Path, metadata: &fs::Metadata) -> u64 {
     metadata.len()
+}
+
+/// Free space on the disk holding `path`, available to this app.
+#[cfg(unix)]
+pub(crate) fn free_bytes(path: &Path) -> io::Result<u64> {
+    let stats = rustix::fs::statvfs(path)?;
+    Ok(stats.f_bavail.saturating_mul(stats.f_frsize))
+}
+
+/// Free space on the disk holding `path`, available to this app.
+#[cfg(windows)]
+pub(crate) fn free_bytes(path: &Path) -> io::Result<u64> {
+    windows::free_space(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn free_bytes(_path: &Path) -> io::Result<u64> {
+    Ok(u64::MAX)
+}
+
+#[cfg(windows)]
+mod windows {
+    #![allow(unsafe_code)]
+
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+
+    use windows_sys::Win32::Foundation::{GetLastError, NO_ERROR, SetLastError};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetCompressedFileSizeW, GetDiskFreeSpaceExW, INVALID_FILE_SIZE,
+    };
+
+    /// `path` as a NUL-terminated UTF-16 string.
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    pub(super) fn compressed_size(path: &Path) -> Option<u64> {
+        let name = wide(path);
+        let mut high = 0u32;
+        // INVALID_FILE_SIZE is also a valid low half; only the last error tells them apart,
+        // so it is cleared first.
+        // SAFETY: no preconditions.
+        unsafe { SetLastError(NO_ERROR) };
+        // SAFETY: `name` is NUL-terminated and outlives the call; `high` is a valid u32.
+        let low = unsafe { GetCompressedFileSizeW(name.as_ptr(), &mut high) };
+        // SAFETY: no preconditions.
+        if low == INVALID_FILE_SIZE && unsafe { GetLastError() } != NO_ERROR {
+            return None;
+        }
+        Some((u64::from(high) << 32) | u64::from(low))
+    }
+
+    pub(super) fn free_space(path: &Path) -> io::Result<u64> {
+        let name = wide(path);
+        let mut available = 0u64;
+        // SAFETY: `name` is NUL-terminated and outlives the call; the totals may be null.
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                name.as_ptr(),
+                &mut available,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(available)
+    }
 }
 
 /// Entries to delete, least recently used first, until the cache fits in `max_bytes`.
@@ -184,6 +284,60 @@ mod tests {
             remove(entry).expect("remove");
         }
         assert!(scan(root.path()).expect("scan").is_empty());
+    }
+
+    #[test]
+    fn written_files_count_what_they_take_and_disks_report_free_space() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let file = root.path().join("episode.mkv");
+        fs::write(&file, vec![1u8; 100_000]).expect("write");
+        let taken = allocated_len(&file).expect("a file");
+        assert!(taken >= 100_000, "{taken}");
+        assert_eq!(allocated_len(&root.path().join("absent")), None);
+        assert_eq!(allocated_len(root.path()), None, "a folder is no file");
+        assert!(free_bytes(root.path()).expect("free space") > 0);
+    }
+
+    /// librqbit sizes files to their full length up front and marks them sparse; on Windows the
+    /// cache must count only what was written.
+    #[cfg(windows)]
+    #[test]
+    fn sparse_files_count_only_what_was_written_on_windows() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let path = root.path().join("film.mkv");
+        fs::write(&path, b"").expect("create");
+        let marked = std::process::Command::new("fsutil")
+            .args(["sparse", "setflag"])
+            .arg(&path)
+            .status()
+            .expect("run fsutil");
+        assert!(marked.success(), "fsutil could not mark the file sparse");
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open");
+        file.set_len(4 << 30).expect("size the file");
+        drop(file);
+
+        let taken = allocated_len(&path).expect("a file");
+        assert!(taken < 1 << 20, "a sparse 4 GiB file takes {taken} bytes");
+        let entries = scan(root.path()).expect("scan");
+        assert!(entries[0].bytes < 1 << 20, "{entries:?}");
+    }
+
+    #[test]
+    fn entries_removed_while_scanning_are_left_out() {
+        let root = tempfile::tempdir().expect("temp dir");
+        let gone = root.path().join("gone");
+        assert!(matches!(
+            usage(&gone),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        ));
+        // A file inside that disappears is skipped rather than failing the scan.
+        fs::create_dir_all(root.path().join("kept")).expect("create");
+        fs::write(root.path().join("kept/a.mkv"), b"abc").expect("write");
+        let (bytes, _) = usage(&root.path().join("kept")).expect("usage");
+        assert!(bytes > 0);
     }
 
     #[test]

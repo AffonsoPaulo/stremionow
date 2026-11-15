@@ -41,7 +41,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await?;
     println!("fetching metadata for {info_hash}...");
     let trackers: Vec<String> = TRACKERS.iter().map(|&tracker| tracker.to_owned()).collect();
-    let url = server.torrent_url(&info_hash, file_idx, &trackers).await?;
+    let url = server
+        .torrent_url(&info_hash, file_idx, None, &trackers)
+        .await?;
     println!("stream URL: {url}");
 
     loop {

@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::client::{RemoteError, RemoteServer};
 use crate::TorrentStatus;
+use crate::files::FileRequest;
 use crate::http::{self, Body};
 use crate::magnet::InfoHash;
 use crate::server::{Holder, Shared};
@@ -195,7 +196,10 @@ impl RemoteTorrent {
                 StatusCode::NOT_FOUND if !readded => {
                     readded = true;
                     let file = u32::try_from(index).ok();
-                    let again = self.server.add(self.hash, file, &self.trackers).await?;
+                    let again = self
+                        .server
+                        .add(self.hash, file, None, &self.trackers)
+                        .await?;
                     if again != index {
                         return Err(RemoteError::Protocol);
                     }
@@ -222,7 +226,15 @@ impl RemoteTorrent {
         }
         log::warn!("relay: the other device stopped answering; continuing on this device");
         match shared
-            .add_for(self.hash, Holder::Local, Some(index), &self.trackers)
+            .add_for(
+                self.hash,
+                Holder::Local,
+                FileRequest {
+                    index: Some(index),
+                    hint: None,
+                },
+                &self.trackers,
+            )
             .await
         {
             Ok(local) if local == index => {

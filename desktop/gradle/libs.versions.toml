@@ -3,7 +3,7 @@ kotlin = "2.4.21"
 composeMultiplatform = "1.12.2"
 jna = "5.19.1"
 coroutines = "1.11.0"
-spotless = "8.11.0"
+spotless = "8.12.0"
 ktlint = "1.8.0"
 # Java bytecode level, as on Android (see docs/adr/0004-android-baseline.md); builds run on JDK 25.
 java = "21"
